@@ -1,19 +1,19 @@
-package com.backend.printforge;
+package com.backend.printforge.controller;
 
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-public class HomeControllerApplication{
+public class HomeController{
 
     @RequestMapping("/")    
     public String greet(){
-        return "Wazaaa!";
+        return "Testing testing... things are getting interesting!";
     }
     
     @RequestMapping("/about")
     public String about(){
-        return "I'm Him";
+        return "I'm a Hero";
     }
 
 }
