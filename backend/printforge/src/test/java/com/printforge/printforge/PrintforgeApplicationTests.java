@@ -1,4 +1,4 @@
-package com.backend.printforge;
+package com.printforge.printforge;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;

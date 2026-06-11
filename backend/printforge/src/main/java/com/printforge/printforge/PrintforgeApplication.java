@@ -1,4 +1,4 @@
-package com.backend.printforge;
+package com.printforge.printforge;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
