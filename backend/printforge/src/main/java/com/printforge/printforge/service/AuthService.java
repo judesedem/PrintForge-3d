@@ -1,13 +1,15 @@
 package com.printforge.printforge.service;
 
-import com.printforge.printforge.security.JwtService;
-import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.AuthResponse;
+import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.RegisterRequest;
 import com.printforge.printforge.entity.Role;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.repository.UserRepository;
+import com.printforge.printforge.security.JwtService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
@@ -18,6 +20,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final AuthenticationManager authenticationManager;
 
     public AuthResponse register(RegisterRequest request) {
 
@@ -32,30 +35,37 @@ public class AuthService {
                 .role(Role.USER)
                 .build();
 
-         User Saveduser=userRepository.save(user);
+        User savedUser = userRepository.save(user);
+
+        String token = jwtService.generateToken(savedUser.getEmail());
 
         return AuthResponse.builder()
                 .message("Registration successful")
-                .email(user.getEmail())
-                .role(Saveduser.getRole().name())
+                .email(savedUser.getEmail())
+                .role(savedUser.getRole().name())
+                .token(token)
                 .build();
     }
+
     public AuthResponse login(LoginRequest request) {
 
-    User user = userRepository.findByEmail(request.getEmail())
-            .orElseThrow(() -> new RuntimeException("Invalid email or password"));
+        authenticationManager.authenticate(
+                new UsernamePasswordAuthenticationToken(
+                        request.getEmail(),
+                        request.getPassword()
+                )
+        );
 
-    if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
-        throw new RuntimeException("Invalid email or password");
+        User user = userRepository.findByEmail(request.getEmail())
+                .orElseThrow(() -> new RuntimeException("Invalid email or password"));
+
+        String token = jwtService.generateToken(user.getEmail());
+
+        return AuthResponse.builder()
+                .message("Login successful")
+                .email(user.getEmail())
+                .role(user.getRole().name())
+                .token(token)
+                .build();
     }
-     String token = jwtService.generateToken(user.getEmail());
-     
-    return AuthResponse.builder()
-            .message("Login successful")
-            .email(user.getEmail())
-            .role(user.getRole().name())
-            .token(token)
-            .build();
-}
-
 }
