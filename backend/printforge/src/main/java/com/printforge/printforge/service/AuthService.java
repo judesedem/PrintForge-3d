@@ -1,5 +1,6 @@
 package com.printforge.printforge.service;
 
+import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.RegisterRequest;
 import com.printforge.printforge.entity.Role;
@@ -29,12 +30,27 @@ public class AuthService {
                 .role(Role.USER)
                 .build();
 
-        userRepository.save(user);
+         User Saveduser=userRepository.save(user);
 
         return AuthResponse.builder()
                 .message("Registration successful")
                 .email(user.getEmail())
-                .role(user.getRole().name())
+                .role(Saveduser.getRole().name())
                 .build();
     }
+    public AuthResponse login(LoginRequest request) {
+
+    User user = userRepository.findByEmail(request.getEmail())
+            .orElseThrow(() -> new RuntimeException("Invalid email or password"));
+
+    if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
+        throw new RuntimeException("Invalid email or password");
+    }
+
+    return AuthResponse.builder()
+            .message("Login successful")
+            .email(user.getEmail())
+            .role(user.getRole().name())
+            .build();
+}
 }
