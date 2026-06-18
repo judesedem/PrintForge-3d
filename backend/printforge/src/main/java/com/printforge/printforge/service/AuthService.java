@@ -1,5 +1,8 @@
 package com.printforge.printforge.service;
 
+import com.printforge.printforge.exception.EmailAlreadyExistsException;
+import com.printforge.printforge.exception.InvalidCredentialsException;
+import org.springframework.security.authentication.BadCredentialsException;
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.RegisterRequest;
@@ -25,7 +28,7 @@ public class AuthService {
     public AuthResponse register(RegisterRequest request) {
 
         if (userRepository.existsByEmail(request.getEmail())) {
-            throw new RuntimeException("Email already registered");
+            throw new EmailAlreadyExistsException("Email already registered");
         }
 
         User user = User.builder()
@@ -49,12 +52,16 @@ public class AuthService {
 
     public AuthResponse login(LoginRequest request) {
 
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(
-                        request.getEmail(),
-                        request.getPassword()
-                )
-        );
+        try {
+    authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(
+                    request.getEmail(),
+                    request.getPassword()
+            )
+    );
+} catch (BadCredentialsException e) {
+    throw new InvalidCredentialsException("Invalid email or password");
+}
 
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new RuntimeException("Invalid email or password"));
