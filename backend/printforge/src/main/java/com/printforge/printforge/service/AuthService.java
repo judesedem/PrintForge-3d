@@ -1,5 +1,6 @@
 package com.printforge.printforge.service;
 
+import com.printforge.printforge.security.JwtService;
 import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.RegisterRequest;
@@ -16,6 +17,7 @@ public class AuthService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
 
     public AuthResponse register(RegisterRequest request) {
 
@@ -46,11 +48,14 @@ public class AuthService {
     if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
         throw new RuntimeException("Invalid email or password");
     }
-
+     String token = jwtService.generateToken(user.getEmail());
+     
     return AuthResponse.builder()
             .message("Login successful")
             .email(user.getEmail())
             .role(user.getRole().name())
+            .token(token)
             .build();
 }
+
 }
