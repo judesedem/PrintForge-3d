@@ -17,12 +17,16 @@ public class FileService {
         this.fileRepository = fileRepository;
     }
 
-    // Method to save file details to the database
-    public ModelFile saveFileMetadata(String fileName, String fileUrl, String fileType) {
+    // NEW: Added String uploaderEmail to the parameters
+    public ModelFile saveFileMetadata(String fileName, String fileUrl, String fileType, String uploaderEmail) {
         ModelFile newFile = new ModelFile();
         newFile.setFileName(fileName);
         newFile.setFileUrl(fileUrl);
         newFile.setFileType(fileType);
+
+        // NEW: Link the user's email to the file record!
+        newFile.setUploadedBy(uploaderEmail);
+
         return fileRepository.save(newFile);
     }
 
