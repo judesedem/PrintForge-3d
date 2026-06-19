@@ -11,6 +11,7 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
+
 public class ModelFile {
 
     @Id
@@ -28,6 +29,19 @@ public class ModelFile {
 
     @Column(name = "uploaded_at", updatable = false)
     private LocalDateTime uploadedAt;
+
+    // NEW: Added to track which user uploaded the 3D model (links to JWT Auth)
+    @Column(name = "uploaded_by")
+    private String uploadedBy;
+
+    // NOTE TO TEAM: If we aren't using Lombok @Data, here are the manual getters/setters
+    public String getUploadedBy() {
+        return uploadedBy;
+    }
+
+    public void setUploadedBy(String uploadedBy) {
+        this.uploadedBy = uploadedBy;
+    }
 
     @PrePersist
     protected void onCreate() {
