@@ -4,6 +4,7 @@ import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.service.FileService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.security.core.Authentication;
 
 import java.util.List;
 
@@ -23,9 +24,14 @@ public class FileController {
     public ResponseEntity<ModelFile> uploadFile(
             @RequestParam String fileName,
             @RequestParam String fileUrl,
-            @RequestParam String fileType) {
+            @RequestParam String fileType,
+            Authentication authentication) { // NEW: Catches the logged-in user from the JWT
 
-        ModelFile savedFile = fileService.saveFileMetadata(fileName, fileUrl, fileType);
+        // NEW: Extract the email from Jude's security token
+        String uploaderEmail = authentication.getName();
+
+        // NEW: Pass the email down to the service layer along with the file details
+        ModelFile savedFile = fileService.saveFileMetadata(fileName, fileUrl, fileType, uploaderEmail);
         return ResponseEntity.ok(savedFile);
     }
 
