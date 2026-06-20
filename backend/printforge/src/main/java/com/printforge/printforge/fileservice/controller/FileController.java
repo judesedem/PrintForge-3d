@@ -2,9 +2,13 @@ package com.printforge.printforge.fileservice.controller;
 
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.service.FileService;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.security.core.Authentication;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
 
@@ -14,36 +18,47 @@ public class FileController {
 
     private final FileService fileService;
 
-    // Injecting the service we just built
     public FileController(FileService fileService) {
         this.fileService = fileService;
     }
 
-    // Maps to POST /api/files/upload
+    // POST /api/files/upload — multipart/form-data with a "file" part.
+    // Previously this took fileName/fileUrl/fileType as plain @RequestParam
+    // strings and never touched any actual file bytes, so nothing was ever
+    // "uploaded" — it just recorded whatever URL the client claimed. Now it
+    // takes the real file and writes its bytes to disk.
     @PostMapping("/upload")
     public ResponseEntity<ModelFile> uploadFile(
-            @RequestParam String fileName,
-            @RequestParam String fileUrl,
-            @RequestParam String fileType,
-            Authentication authentication) { // NEW: Catches the logged-in user from the JWT
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication) {
 
-        // NEW: Extract the email from Jude's security token
         String uploaderEmail = authentication.getName();
-
-        // NEW: Pass the email down to the service layer along with the file details
-        ModelFile savedFile = fileService.saveFileMetadata(fileName, fileUrl, fileType, uploaderEmail);
+        ModelFile savedFile = fileService.saveFileMetadata(file, uploaderEmail);
         return ResponseEntity.ok(savedFile);
     }
 
-    // Maps to GET /api/files/{id}
+    // GET /api/files/{id} — metadata only (unchanged contract).
     @GetMapping("/{id}")
     public ResponseEntity<ModelFile> getFileById(@PathVariable Long id) {
-        return fileService.getFileById(id)
-                .map(ResponseEntity::ok) // Returns 200 OK if the file is found
-                .orElse(ResponseEntity.notFound().build()); // Returns 404 if it doesn't exist
+        return ResponseEntity.ok(fileService.getFileById(id));
     }
 
-    // Maps to GET /api/files
+    // GET /api/files/{id}/download — streams the actual file bytes back.
+    // This didn't exist before; metadata alone is useless without a way
+    // to actually retrieve what was uploaded.
+    @GetMapping("/{id}/download")
+    public ResponseEntity<Resource> downloadFile(@PathVariable Long id) {
+        ModelFile metadata = fileService.getFileById(id);
+        Resource resource = fileService.loadFileContent(id);
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(metadata.getFileType()))
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + metadata.getFileName() + "\"")
+                .body(resource);
+    }
+
+    // GET /api/files — list all (handy for admin/debugging, not in the original API contract doc).
     @GetMapping
     public ResponseEntity<List<ModelFile>> getAllFiles() {
         return ResponseEntity.ok(fileService.getAllFiles());
