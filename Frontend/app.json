@@ -1,0 +1,36 @@
+{
+  "expo": {
+    "name": "PrintForge 3D",
+    "slug": "printforge3d",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0A0F1E"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.group42.printforge3d"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0F1E"
+      },
+      "package": "com.group42.printforge3d"
+    },
+    "plugins": [
+      "expo-font"
+    ],
+    "scheme": "printforge3d",
+    "extra": {
+      "eas": {
+        "projectId": "9a9f83fc-0544-4d1c-8b3b-79d208209ef6"
+      }
+    },
+    "owner": "judesedem"
+  }
+}

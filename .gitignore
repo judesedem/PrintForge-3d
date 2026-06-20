@@ -1,0 +1,14 @@
+# Frontend
+Frontend/node_modules/
+Frontend/.expo/
+Frontend/dist/
+
+# Backend
+**/target/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
