@@ -21,7 +21,8 @@ import DraggableFlatList, {
 } from 'react-native-draggable-flatlist';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
-import { Colors, Typography, Spacing, Radius, Shadow } from '../constants/theme';
+import { Typography, Spacing, Radius, Shadow } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { StatusBadge } from '../components/UI';
 import { apiGetQueue, apiReorderQueue, apiRemoveFromQueue, QueueEntry } from '../services/api';
 import { PrintJob } from '../types';
@@ -38,6 +39,8 @@ interface QueueItemProps extends RenderItemParams<QueueEntry> {
 }
 
 function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
   const index = getIndex();
   const pos = index !== undefined ? index + 1 : item.position;
 
@@ -45,13 +48,13 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
     <ScaleDecorator>
       <View
         style={[
-          styles.queueCard,
-          isActive && styles.queueCardDragging,
+          s.queueCard,
+          isActive && s.queueCardDragging,
         ]}
       >
         {/* Position badge */}
-        <View style={styles.positionBadge}>
-          <Text style={styles.positionText}>#{pos}</Text>
+        <View style={s.positionBadge}>
+          <Text style={s.positionText}>#{pos}</Text>
         </View>
 
         {/* Job info */}
@@ -69,12 +72,12 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
           )}
         </View>
 
-        <View style={styles.cardActions}>
+        <View style={s.cardActions}>
           <StatusBadge status={item.job.status} />
 
           {/* Remove button */}
           <TouchableOpacity
-            style={styles.removeBtn}
+            style={s.removeBtn}
             onPress={() => {
               Alert.alert(
                 'Remove from Queue',
@@ -95,7 +98,7 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
 
           {/* Drag handle */}
           <TouchableOpacity
-            style={styles.dragHandle}
+            style={s.dragHandle}
             onLongPress={drag}
             delayLongPress={150}
           >
@@ -110,6 +113,9 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
 // ─── Main Screen ────────────────────────────────────────────────────────────
 
 export default function QueueManagement({ onBack, onJobPress }: QueueManagementProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -188,13 +194,13 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+      <View style={s.container}>
+        <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
         <SafeAreaView style={{ flex: 1 }}>
 
           {/* Header */}
-          <View style={styles.header}>
-            <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+          <View style={s.header}>
+            <TouchableOpacity onPress={onBack} style={s.backBtn}>
               <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
             </TouchableOpacity>
             <View style={{ flex: 1 }}>
@@ -206,7 +212,7 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
               </Text>
             </View>
             {saving && (
-              <View style={styles.savingPill}>
+              <View style={s.savingPill}>
                 <ActivityIndicator size="small" color={Colors.accent} />
                 <Text style={[Typography.caption, { color: Colors.accent, marginLeft: 6 }]}>
                   Saving…
@@ -216,7 +222,7 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
           </View>
 
           {/* Legend */}
-          <View style={styles.legend}>
+          <View style={s.legend}>
             <Text style={[Typography.caption, { color: Colors.textMuted }]}>
               ⠿ Drag handle  ·  ✕ Remove  ·  Tap card for details
             </Text>
@@ -224,24 +230,24 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
 
           {/* Content */}
           {loading ? (
-            <View style={styles.center}>
+            <View style={s.center}>
               <ActivityIndicator size="large" color={Colors.accent} />
               <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 12 }]}>
                 Loading queue…
               </Text>
             </View>
           ) : error ? (
-            <View style={styles.center}>
+            <View style={s.center}>
               <Text style={{ fontSize: 40 }}>⚠️</Text>
               <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12 }]}>
                 {error}
               </Text>
-              <TouchableOpacity style={styles.retryBtn} onPress={loadQueue}>
+              <TouchableOpacity style={s.retryBtn} onPress={loadQueue}>
                 <Text style={[Typography.labelLarge, { color: Colors.accent }]}>Retry</Text>
               </TouchableOpacity>
             </View>
           ) : queue.length === 0 ? (
-            <View style={styles.center}>
+            <View style={s.center}>
               <Text style={{ fontSize: 48 }}>✅</Text>
               <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 12 }]}>
                 Queue is empty
@@ -266,7 +272,12 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
 
 // ─── Styles ─────────────────────────────────────────────────────────────────
 
-const styles = StyleSheet.create({
+type ThemeColors = {
+  background: string; surface: string; surfaceElevated: string; border: string;
+  accent: string; accentGlow: string; error: string;
+};
+
+const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: Colors.background,

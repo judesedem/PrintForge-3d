@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
-  TouchableOpacity, StatusBar, FlatList,
+  TouchableOpacity, StatusBar,
 } from 'react-native';
-import { Colors, Typography, Spacing, Radius } from '../constants/theme';
-import { StatCard, SectionHeader, Card, StatusBadge, Divider } from '../components/UI';
+import { Typography, Spacing, Radius } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
+import { StatCard, SectionHeader, Card, StatusBadge } from '../components/UI';
 import { JobCard } from '../components/JobCard';
 import { MOCK_JOBS, MOCK_PRINTERS } from '../constants/mockData';
-import { PrintJob, Printer } from '../types';
+import { PrintJob } from '../types';
 
 interface AdminDashboardProps {
   onJobPress: (job: PrintJob) => void;
@@ -17,13 +18,6 @@ interface AdminDashboardProps {
   onOpenPrinterManagement?: () => void;
 }
 
-const PRINTER_STATUS_CONFIG = {
-  idle:        { color: Colors.success,        icon: '🟢', label: 'Idle' },
-  printing:    { color: Colors.accent,         icon: '🔵', label: 'Printing' },
-  maintenance: { color: Colors.warning,        icon: '🟡', label: 'Maintenance' },
-  offline:     { color: Colors.textMuted,      icon: '⚫', label: 'Offline' },
-};
-
 export default function AdminDashboard({
   onJobPress,
   onViewAllJobs,
@@ -31,6 +25,18 @@ export default function AdminDashboard({
   onOpenQueueManagement,
   onOpenPrinterManagement,
 }: AdminDashboardProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
+  // Built per-render now (was a module-level constant before) since it
+  // reads from the current theme's palette, not a fixed import.
+  const PRINTER_STATUS_CONFIG = {
+    idle:        { color: Colors.success,   icon: '🟢', label: 'Idle' },
+    printing:    { color: Colors.accent,    icon: '🔵', label: 'Printing' },
+    maintenance: { color: Colors.warning,   icon: '🟡', label: 'Maintenance' },
+    offline:     { color: Colors.textMuted, icon: '⚫', label: 'Offline' },
+  };
+
   const [activeTab, setActiveTab] = useState<'overview' | 'pending' | 'printers'>('overview');
 
   const pendingJobs = MOCK_JOBS.filter(j => j.status === 'submitted');
@@ -45,12 +51,12 @@ export default function AdminDashboard({
   ];
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <View style={s.container}>
+      <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
       <SafeAreaView style={{ flex: 1 }}>
 
         {/* Header */}
-        <View style={styles.header}>
+        <View style={s.header}>
           <View>
             <Text style={[Typography.displayMedium, { color: Colors.textPrimary }]}>
               {isAdmin ? '⚙️ Admin Dashboard' : '🔧 Staff Panel'}
@@ -62,11 +68,11 @@ export default function AdminDashboard({
         </View>
 
         {/* Tabs */}
-        <View style={styles.tabRow}>
+        <View style={s.tabRow}>
           {tabs.map(t => (
             <TouchableOpacity
               key={t.id}
-              style={[styles.tab, activeTab === t.id && styles.tabActive]}
+              style={[s.tab, activeTab === t.id && s.tabActive]}
               onPress={() => setActiveTab(t.id as any)}
             >
               <Text style={[Typography.labelMedium, { color: activeTab === t.id ? Colors.accent : Colors.textSecondary }]}>
@@ -76,18 +82,18 @@ export default function AdminDashboard({
           ))}
         </View>
 
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
           {/* OVERVIEW TAB */}
           {activeTab === 'overview' && (
             <View>
               {/* Stats grid */}
-              <View style={styles.statsGrid}>
-                <View style={styles.statsRow}>
+              <View style={s.statsGrid}>
+                <View style={s.statsRow}>
                   <StatCard label="Pending Review" value={pendingJobs.length} color={Colors.warning} icon="📋" />
                   <StatCard label="Now Printing" value={printingJobs.length} color={Colors.accent} icon="🖨" />
                 </View>
-                <View style={styles.statsRow}>
+                <View style={s.statsRow}>
                   <StatCard label="In Queue" value={queuedJobs.length} color={Colors.info} icon="⏳" />
                   <StatCard label="Completed Today" value={todayCompleted} color={Colors.success} icon="✅" />
                 </View>
@@ -95,10 +101,10 @@ export default function AdminDashboard({
 
               {/* Quick actions */}
               {(onOpenQueueManagement || onOpenPrinterManagement) && (
-                <View style={styles.quickActionsRow}>
+                <View style={s.quickActionsRow}>
                   {onOpenQueueManagement && (
                     <TouchableOpacity
-                      style={styles.quickActionBtn}
+                      style={s.quickActionBtn}
                       onPress={onOpenQueueManagement}
                       activeOpacity={0.85}
                     >
@@ -110,7 +116,7 @@ export default function AdminDashboard({
                   )}
                   {onOpenPrinterManagement && (
                     <TouchableOpacity
-                      style={styles.quickActionBtn}
+                      style={s.quickActionBtn}
                       onPress={onOpenPrinterManagement}
                       activeOpacity={0.85}
                     >
@@ -148,8 +154,8 @@ export default function AdminDashboard({
                 <View style={{ marginTop: Spacing.lg }}>
                   <SectionHeader title="Print Queue" />
                   {queuedJobs.map(job => (
-                    <Card key={job.job_id} onPress={() => onJobPress(job)} style={styles.queueCard}>
-                      <View style={styles.queuePos}>
+                    <Card key={job.job_id} onPress={() => onJobPress(job)} style={s.queueCard}>
+                      <View style={s.queuePos}>
                         <Text style={[Typography.displaySmall, { color: Colors.accent }]}>#{job.queue_position}</Text>
                       </View>
                       <View style={{ flex: 1 }}>
@@ -174,7 +180,7 @@ export default function AdminDashboard({
           {activeTab === 'pending' && (
             <View>
               {pendingJobs.length === 0 ? (
-                <View style={styles.emptyState}>
+                <View style={s.emptyState}>
                   <Text style={{ fontSize: 56 }}>🎉</Text>
                   <Text style={[Typography.displaySmall, { color: Colors.textPrimary, marginTop: 12 }]}>All clear!</Text>
                   <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 6, textAlign: 'center' }]}>
@@ -183,7 +189,7 @@ export default function AdminDashboard({
                 </View>
               ) : (
                 pendingJobs.map(job => (
-                  <Card key={job.job_id} onPress={() => onJobPress(job)} style={styles.pendingCard}>
+                  <Card key={job.job_id} onPress={() => onJobPress(job)} style={s.pendingCard}>
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                         <Text style={[Typography.labelLarge, { color: Colors.textPrimary, flex: 1, marginRight: 8 }]} numberOfLines={1}>
@@ -197,14 +203,14 @@ export default function AdminDashboard({
                       <Text style={[Typography.caption, { color: Colors.textMuted, marginTop: 2 }]}>
                         {job.material} · {job.color} · Qty {job.quantity}
                       </Text>
-                      <View style={styles.reviewButtons}>
-                        <TouchableOpacity style={styles.approveBtn}>
+                      <View style={s.reviewButtons}>
+                        <TouchableOpacity style={s.approveBtn}>
                           <Text style={[Typography.labelMedium, { color: Colors.success }]}>✓ Approve</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.rejectBtn}>
+                        <TouchableOpacity style={s.rejectBtn}>
                           <Text style={[Typography.labelMedium, { color: Colors.error }]}>✕ Reject</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={styles.viewBtn} onPress={() => onJobPress(job)}>
+                        <TouchableOpacity style={s.viewBtn} onPress={() => onJobPress(job)}>
                           <Text style={[Typography.labelMedium, { color: Colors.accent }]}>Details →</Text>
                         </TouchableOpacity>
                       </View>
@@ -221,11 +227,11 @@ export default function AdminDashboard({
               {MOCK_PRINTERS.map(printer => {
                 const cfg = PRINTER_STATUS_CONFIG[printer.printer_status];
                 return (
-                  <Card key={printer.printer_id} elevated style={styles.printerCard}>
+                  <Card key={printer.printer_id} elevated style={s.printerCard}>
                     <View style={{ flex: 1 }}>
-                      <View style={styles.printerHeader}>
+                      <View style={s.printerHeader}>
                         <Text style={[Typography.labelLarge, { color: Colors.textPrimary }]}>{printer.printer_name}</Text>
-                        <View style={[styles.printerStatus, { backgroundColor: cfg.color + '22', borderColor: cfg.color + '55' }]}>
+                        <View style={[s.printerStatus, { backgroundColor: cfg.color + '22', borderColor: cfg.color + '55' }]}>
                           <Text style={{ fontSize: 10, marginRight: 4 }}>{cfg.icon}</Text>
                           <Text style={[Typography.caption, { color: cfg.color }]}>{cfg.label}</Text>
                         </View>
@@ -234,18 +240,18 @@ export default function AdminDashboard({
                         📍 {printer.lab_location}
                       </Text>
                       {printer.current_job && (
-                        <View style={styles.currentJob}>
+                        <View style={s.currentJob}>
                           <Text style={[Typography.caption, { color: Colors.accent }]}>
                             🖨 {printer.current_job}
                           </Text>
                         </View>
                       )}
                       {isAdmin && (
-                        <View style={styles.printerActions}>
-                          <TouchableOpacity style={styles.smallBtn}>
+                        <View style={s.printerActions}>
+                          <TouchableOpacity style={s.smallBtn}>
                             <Text style={[Typography.caption, { color: Colors.textSecondary }]}>Set Maintenance</Text>
                           </TouchableOpacity>
-                          <TouchableOpacity style={styles.smallBtn}>
+                          <TouchableOpacity style={s.smallBtn}>
                             <Text style={[Typography.caption, { color: Colors.textSecondary }]}>
                               {printer.printer_status === 'offline' ? 'Set Online' : 'Set Offline'}
                             </Text>
@@ -265,7 +271,13 @@ export default function AdminDashboard({
   );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = {
+  background: string; surface: string; surfaceElevated: string; border: string;
+  accent: string; accentGlow: string; success: string; successBg: string;
+  warning: string; error: string; errorBg: string;
+};
+
+const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.md, paddingBottom: Spacing.sm },
   tabRow: {

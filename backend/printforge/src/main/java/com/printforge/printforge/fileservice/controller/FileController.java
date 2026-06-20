@@ -46,6 +46,7 @@ public class FileController {
     // GET /api/files/{id}/download — streams the actual file bytes back.
     // This didn't exist before; metadata alone is useless without a way
     // to actually retrieve what was uploaded.
+    @SuppressWarnings("null")
     @GetMapping("/{id}/download")
     public ResponseEntity<Resource> downloadFile(@PathVariable Long id) {
         ModelFile metadata = fileService.getFileById(id);

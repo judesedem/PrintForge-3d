@@ -8,7 +8,8 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, StatusBar,
 } from 'react-native';
-import { Colors, Typography, Spacing, Radius, Shadow } from '../constants/theme';
+import { Typography, Spacing, Radius, Shadow } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { Button, Card, Divider, InfoRow } from '../components/UI';
 
 interface EstimateResultProps {
@@ -34,16 +35,19 @@ export default function EstimateResult({
   onDone,
   onViewJob,
 }: EstimateResultProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <View style={s.container}>
+      <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
       <SafeAreaView style={{ flex: 1 }}>
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
           {/* Success glow header */}
-          <View style={styles.glowWrap}>
-            <View style={styles.glowRing}>
-              <View style={styles.glowCore}>
+          <View style={s.glowWrap}>
+            <View style={s.glowRing}>
+              <View style={s.glowCore}>
                 <Text style={{ fontSize: 40 }}>✓</Text>
               </View>
             </View>
@@ -61,8 +65,8 @@ export default function EstimateResult({
           </View>
 
           {/* Estimate cards */}
-          <View style={styles.estimateRow}>
-            <View style={[styles.estimateCard, styles.estimateCardAccent]}>
+          <View style={s.estimateRow}>
+            <View style={[s.estimateCard, s.estimateCardAccent]}>
               <Text style={{ fontSize: 30 }}>💰</Text>
               <Text style={[Typography.displayLarge, { color: Colors.accent, marginTop: Spacing.sm }]}>
                 GH₵ {estimate.cost.toFixed(2)}
@@ -72,7 +76,7 @@ export default function EstimateResult({
               </Text>
             </View>
 
-            <View style={styles.estimateCard}>
+            <View style={s.estimateCard}>
               <Text style={{ fontSize: 30 }}>⏱</Text>
               <Text style={[Typography.displayLarge, { color: Colors.textPrimary, marginTop: Spacing.sm }]}>
                 {formatTime(estimate.time)}
@@ -84,7 +88,7 @@ export default function EstimateResult({
           </View>
 
           {/* Summary card */}
-          <Card elevated style={styles.summaryCard}>
+          <Card elevated style={s.summaryCard}>
             <View style={{ flex: 1 }}>
               <Text style={[Typography.labelLarge, { color: Colors.textPrimary, marginBottom: Spacing.sm }]}>
                 What happens next
@@ -107,7 +111,7 @@ export default function EstimateResult({
           </Text>
 
           {/* Actions */}
-          <View style={styles.actions}>
+          <View style={s.actions}>
             {onViewJob && (
               <Button label="View Job Details" onPress={onViewJob} variant="secondary" style={{ marginBottom: Spacing.sm }} />
             )}
@@ -120,7 +124,12 @@ export default function EstimateResult({
   );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = {
+  background: string; surface: string; border: string; accent: string;
+  accentGlow: string; success: string; successBg: string; warning: string;
+};
+
+const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   scroll: { paddingHorizontal: Spacing.lg, paddingTop: Spacing.xl, paddingBottom: Spacing.xxl },
   glowWrap: { alignItems: 'center', marginBottom: Spacing.xl },
