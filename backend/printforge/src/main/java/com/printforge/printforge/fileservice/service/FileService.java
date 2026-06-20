@@ -1,42 +1,58 @@
 package com.printforge.printforge.fileservice.service;
 
+import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
+import com.printforge.printforge.fileservice.storage.FileStorageService;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.List;
-import java.util.Optional;
 
 @Service
 public class FileService {
 
     private final ModelFileRepository fileRepository;
+    private final FileStorageService fileStorageService;
 
-    // Constructor injection (Spring Boot handles this automatically)
-    public FileService(ModelFileRepository fileRepository) {
+    public FileService(ModelFileRepository fileRepository, FileStorageService fileStorageService) {
         this.fileRepository = fileRepository;
+        this.fileStorageService = fileStorageService;
     }
 
-    // NEW: Added String uploaderEmail to the parameters
-    public ModelFile saveFileMetadata(String fileName, String fileUrl, String fileType, String uploaderEmail) {
-        ModelFile newFile = new ModelFile();
-        newFile.setFileName(fileName);
-        newFile.setFileUrl(fileUrl);
-        newFile.setFileType(fileType);
+    /**
+     * Writes the uploaded file's bytes to disk via FileStorageService, then
+     * persists the metadata row. fileUrl is filled in on a second save once
+     * the row has a generated id, since the download URL embeds that id.
+     */
+    public ModelFile saveFileMetadata(MultipartFile file, String uploaderEmail) {
+        String storedFilename = fileStorageService.store(file);
 
-        // NEW: Link the user's email to the file record!
+        ModelFile newFile = new ModelFile();
+        newFile.setFileName(file.getOriginalFilename());
+        newFile.setFileType(file.getContentType() != null ? file.getContentType() : "application/octet-stream");
+        newFile.setStoredFilename(storedFilename);
+        newFile.setFileSizeBytes(file.getSize());
         newFile.setUploadedBy(uploaderEmail);
 
-        return fileRepository.save(newFile);
+        ModelFile saved = fileRepository.save(newFile);
+        saved.setFileUrl("/api/files/" + saved.getFileId() + "/download");
+        return fileRepository.save(saved);
     }
 
-    // Method to find a specific file by its ID
-    public Optional<ModelFile> getFileById(Long id) {
-        return fileRepository.findById(id);
+    public ModelFile getFileById(Long id) {
+        return fileRepository.findById(id)
+                .orElseThrow(() -> new ModelFileNotFoundException(id));
     }
 
-    // Method to list all uploaded files
     public List<ModelFile> getAllFiles() {
         return fileRepository.findAll();
+    }
+
+    /** Loads the actual file bytes off disk for a given metadata record, for the download endpoint. */
+    public Resource loadFileContent(Long id) {
+        ModelFile metadata = getFileById(id);
+        return fileStorageService.load(metadata.getStoredFilename());
     }
 }
