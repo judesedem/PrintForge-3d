@@ -16,7 +16,8 @@ import {
   TextInput,
   Platform,
 } from 'react-native';
-import { Colors, Typography, Spacing, Radius, Shadow } from '../constants/theme';
+import { Typography, Spacing, Radius } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { Button, Card, Divider } from '../components/UI';
 import {
   apiGetPrinters,
@@ -25,18 +26,6 @@ import {
   apiDeletePrinter,
 } from '../services/api';
 import { Printer } from '../types';
-
-// ─── Status config ──────────────────────────────────────────────────────────
-
-const STATUS_CONFIG: Record<
-  Printer['printer_status'],
-  { icon: string; color: string; label: string }
-> = {
-  idle:        { icon: '🟢', color: Colors.success,   label: 'Idle' },
-  printing:    { icon: '🔵', color: Colors.accent,    label: 'Printing' },
-  maintenance: { icon: '🟡', color: Colors.warning,   label: 'Maintenance' },
-  offline:     { icon: '⚫', color: Colors.textMuted, label: 'Offline' },
-};
 
 const ALL_STATUSES: Printer['printer_status'][] = ['idle', 'printing', 'maintenance', 'offline'];
 
@@ -49,13 +38,25 @@ interface PrinterCardProps {
 }
 
 function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
+  // Built per-render (was module-level before) since it reads the current
+  // theme's palette rather than a fixed import.
+  const STATUS_CONFIG: Record<Printer['printer_status'], { icon: string; color: string; label: string }> = {
+    idle:        { icon: '🟢', color: Colors.success,   label: 'Idle' },
+    printing:    { icon: '🔵', color: Colors.accent,    label: 'Printing' },
+    maintenance: { icon: '🟡', color: Colors.warning,   label: 'Maintenance' },
+    offline:     { icon: '⚫', color: Colors.textMuted, label: 'Offline' },
+  };
+
   const cfg = STATUS_CONFIG[printer.printer_status];
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <Card style={styles.printerCard} accentLeft={cfg.color}>
+    <Card style={s.printerCard} accentLeft={cfg.color}>
       <TouchableOpacity
-        style={styles.printerHeader}
+        style={s.printerHeader}
         onPress={() => setExpanded(p => !p)}
         activeOpacity={0.8}
       >
@@ -72,7 +73,7 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
             </Text>
           )}
         </View>
-        <View style={styles.statusPill(cfg.color)}>
+        <View style={[s.statusPillBase, { backgroundColor: cfg.color + '18', borderColor: cfg.color + '40' }]}>
           <Text style={{ fontSize: 12 }}>{cfg.icon}</Text>
           <Text style={[Typography.labelSmall, { color: cfg.color, marginLeft: 4 }]}>
             {cfg.label}
@@ -86,19 +87,19 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
       {expanded && (
         <>
           <Divider />
-          <View style={styles.expandedSection}>
+          <View style={s.expandedSection}>
             <Text style={[Typography.labelSmall, { color: Colors.textMuted, marginBottom: Spacing.sm }]}>
               CHANGE STATUS
             </Text>
-            <View style={styles.statusRow}>
-              {ALL_STATUSES.map(s => {
-                const c = STATUS_CONFIG[s];
-                const active = printer.printer_status === s;
+            <View style={s.statusRow}>
+              {ALL_STATUSES.map(st => {
+                const c = STATUS_CONFIG[st];
+                const active = printer.printer_status === st;
                 return (
                   <TouchableOpacity
-                    key={s}
-                    style={[styles.statusBtn, active && { borderColor: c.color, backgroundColor: c.color + '18' }]}
-                    onPress={() => !active && onStatusChange(printer.printer_id, s)}
+                    key={st}
+                    style={[s.statusBtn, active && { borderColor: c.color, backgroundColor: c.color + '18' }]}
+                    onPress={() => !active && onStatusChange(printer.printer_id, st)}
                     activeOpacity={0.7}
                   >
                     <Text style={{ fontSize: 14 }}>{c.icon}</Text>
@@ -111,7 +112,7 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
             </View>
 
             <TouchableOpacity
-              style={styles.deleteBtn}
+              style={s.deleteBtn}
               onPress={() => onDelete(printer.printer_id, printer.printer_name)}
             >
               <Text style={[Typography.labelMedium, { color: Colors.error }]}>
@@ -134,6 +135,9 @@ interface AddPrinterModalProps {
 }
 
 function AddPrinterModal({ visible, onClose, onAdd }: AddPrinterModalProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [loading, setLoading] = useState(false);
@@ -163,32 +167,32 @@ function AddPrinterModal({ visible, onClose, onAdd }: AddPrinterModalProps) {
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalSheet}>
-          <View style={styles.modalHandle} />
+      <View style={s.modalOverlay}>
+        <View style={s.modalSheet}>
+          <View style={s.modalHandle} />
           <Text style={[Typography.displaySmall, { color: Colors.textPrimary, marginBottom: Spacing.lg }]}>
             Add New Printer
           </Text>
 
-          <Text style={styles.inputLabel}>Printer Name</Text>
+          <Text style={s.inputLabel}>Printer Name</Text>
           <TextInput
-            style={styles.textInput}
+            style={s.textInput}
             value={name}
             onChangeText={setName}
             placeholder="e.g. Bambu Lab P1S"
             placeholderTextColor={Colors.textMuted}
           />
 
-          <Text style={[styles.inputLabel, { marginTop: Spacing.md }]}>Lab Location</Text>
+          <Text style={[s.inputLabel, { marginTop: Spacing.md }]}>Lab Location</Text>
           <TextInput
-            style={styles.textInput}
+            style={s.textInput}
             value={location}
             onChangeText={setLocation}
             placeholder="e.g. Bay E — Engineering Lab"
             placeholderTextColor={Colors.textMuted}
           />
 
-          <View style={styles.modalActions}>
+          <View style={s.modalActions}>
             <Button label="Cancel" variant="ghost" onPress={() => { reset(); onClose(); }} style={{ flex: 1 }} />
             <Button label="Add Printer" onPress={handleAdd} loading={loading} style={{ flex: 1 }} />
           </View>
@@ -205,6 +209,17 @@ interface PrinterManagementProps {
 }
 
 export default function PrinterManagement({ onBack }: PrinterManagementProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
+  // Same per-render config as PrinterCard, needed here for the summary row.
+  const STATUS_CONFIG: Record<Printer['printer_status'], { icon: string; color: string; label: string }> = {
+    idle:        { icon: '🟢', color: Colors.success,   label: 'Idle' },
+    printing:    { icon: '🔵', color: Colors.accent,    label: 'Printing' },
+    maintenance: { icon: '🟡', color: Colors.warning,   label: 'Maintenance' },
+    offline:     { icon: '⚫', color: Colors.textMuted, label: 'Offline' },
+  };
+
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -282,13 +297,13 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
   );
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <View style={s.container}>
+      <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
       <SafeAreaView style={{ flex: 1 }}>
 
         {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onBack} style={styles.backBtn}>
+        <View style={s.header}>
+          <TouchableOpacity onPress={onBack} style={s.backBtn}>
             <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
           </TouchableOpacity>
           <View style={{ flex: 1 }}>
@@ -299,20 +314,20 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
               {printers.length} printer{printers.length !== 1 ? 's' : ''} registered
             </Text>
           </View>
-          <TouchableOpacity style={styles.addBtn} onPress={() => setShowAdd(true)}>
+          <TouchableOpacity style={s.addBtn} onPress={() => setShowAdd(true)}>
             <Text style={[Typography.labelLarge, { color: Colors.background }]}>+ Add</Text>
           </TouchableOpacity>
         </View>
 
         {/* Status summary row */}
-        <View style={styles.summaryRow}>
-          {ALL_STATUSES.map(s => {
-            const cfg = STATUS_CONFIG[s];
+        <View style={s.summaryRow}>
+          {ALL_STATUSES.map(st => {
+            const cfg = STATUS_CONFIG[st];
             return (
-              <View key={s} style={styles.summaryChip}>
+              <View key={st} style={s.summaryChip}>
                 <Text style={{ fontSize: 14 }}>{cfg.icon}</Text>
                 <Text style={[Typography.caption, { color: cfg.color, marginLeft: 4 }]}>
-                  {counts[s] ?? 0} {cfg.label}
+                  {counts[st] ?? 0} {cfg.label}
                 </Text>
               </View>
             );
@@ -321,14 +336,14 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
 
         {/* Content */}
         {loading ? (
-          <View style={styles.center}>
+          <View style={s.center}>
             <ActivityIndicator size="large" color={Colors.accent} />
           </View>
         ) : error ? (
-          <View style={styles.center}>
+          <View style={s.center}>
             <Text style={{ fontSize: 40 }}>⚠️</Text>
             <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12 }]}>{error}</Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={loadPrinters}>
+            <TouchableOpacity style={s.retryBtn} onPress={loadPrinters}>
               <Text style={[Typography.labelLarge, { color: Colors.accent }]}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -346,7 +361,7 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
               />
             ))}
             {printers.length === 0 && (
-              <View style={styles.center}>
+              <View style={s.center}>
                 <Text style={{ fontSize: 48 }}>🖨️</Text>
                 <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 12 }]}>
                   No printers registered yet.
@@ -364,18 +379,12 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
 
 // ─── Styles ──────────────────────────────────────────────────────────────────
 
-const statusPillFactory = (color: string) => ({
-  flexDirection: 'row' as const,
-  alignItems: 'center' as const,
-  backgroundColor: color + '18',
-  borderRadius: Radius.full,
-  borderWidth: 1,
-  borderColor: color + '40',
-  paddingHorizontal: Spacing.sm,
-  paddingVertical: 4,
-});
+type ThemeColors = {
+  background: string; surface: string; surfaceElevated: string; border: string;
+  accent: string; error: string;
+};
 
-const styles = StyleSheet.create({
+const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row',
@@ -427,7 +436,17 @@ const styles = StyleSheet.create({
   // Printer card
   printerCard: { marginVertical: Spacing.xs },
   printerHeader: { flexDirection: 'row', alignItems: 'center' },
-  statusPill: statusPillFactory,
+  // Was a style-factory function taking `color` before (statusPillFactory);
+  // now a static base style, with the color-dependent bits applied inline
+  // via the array-style syntax at each call site (see PrinterCard above).
+  statusPillBase: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderRadius: Radius.full,
+    borderWidth: 1,
+    paddingHorizontal: Spacing.sm,
+    paddingVertical: 4,
+  },
   expandedSection: { paddingTop: Spacing.md },
   statusRow: { flexDirection: 'row', gap: Spacing.sm, flexWrap: 'wrap' },
   statusBtn: {
