@@ -1,5 +1,6 @@
 package com.printforge.printforge.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -11,6 +12,7 @@ import lombok.Setter;
 public class RegisterRequest {
 
     @NotBlank(message = "Full name is required")
+    @JsonProperty("full_name")
     private String fullName;
 
     @NotBlank(message = "Email is required")
@@ -20,4 +22,6 @@ public class RegisterRequest {
     @NotBlank(message = "Password is required")
     @Size(min = 6, message = "Password must be at least 6 characters")
     private String password;
+
+    private String role;
 }

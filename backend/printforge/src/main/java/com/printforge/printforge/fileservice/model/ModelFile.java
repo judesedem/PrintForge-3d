@@ -21,27 +21,27 @@ public class ModelFile {
     @Column(nullable = false)
     private String fileName;
 
-    @Column(nullable = false)
+    // Set after the entity is first saved (it embeds the generated fileId),
+    // so it can't be NOT NULL at insert time the way it was before.
+    @Column(name = "file_url")
     private String fileUrl;
 
     @Column(nullable = false)
     private String fileType;
 
+    // The actual on-disk filename used by FileStorageService — distinct from
+    // fileName (the original name the user uploaded) to avoid collisions.
+    @Column(name = "stored_filename", nullable = false)
+    private String storedFilename;
+
+    @Column(name = "file_size_bytes", nullable = false)
+    private Long fileSizeBytes;
+
     @Column(name = "uploaded_at", updatable = false)
     private LocalDateTime uploadedAt;
 
-    // NEW: Added to track which user uploaded the 3D model (links to JWT Auth)
     @Column(name = "uploaded_by")
     private String uploadedBy;
-
-    // NOTE TO TEAM: If we aren't using Lombok @Data, here are the manual getters/setters
-    public String getUploadedBy() {
-        return uploadedBy;
-    }
-
-    public void setUploadedBy(String uploadedBy) {
-        this.uploadedBy = uploadedBy;
-    }
 
     @PrePersist
     protected void onCreate() {
