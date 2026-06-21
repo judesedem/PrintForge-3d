@@ -4,6 +4,10 @@ import com.printforge.printforge.dto.ErrorResponse;
 import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
+import com.printforge.printforge.notificationservice.exception.NotificationNotFoundException;
+import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
+import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
+import com.printforge.printforge.estimateservice.exception.EstimateNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -48,6 +52,11 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.FORBIDDEN, "Access denied");
     }
 
+    @ExceptionHandler(InvalidRoleException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidRole(InvalidRoleException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
     @ExceptionHandler(InvalidFileException.class)
     public ResponseEntity<ErrorResponse> handleInvalidFile(InvalidFileException ex) {
         return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
@@ -56,6 +65,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ModelFileNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleModelFileNotFound(ModelFileNotFoundException ex) {
         return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(NotificationNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotificationNotFound(NotificationNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(PrintJobNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handlePrintJobNotFound(PrintJobNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(EstimateNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleEstimateNotFound(EstimateNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidJobStatusException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidJobStatus(InvalidJobStatusException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(FileStorageException.class)
