@@ -23,12 +23,12 @@ public class JwtAuthEntryPoint implements AuthenticationEntryPoint {
     ) throws IOException {
 
         ErrorResponse error = ErrorResponse.builder()
-                .status(HttpStatus.FORBIDDEN.value())
-                .message("Access denied")
+                .status(HttpStatus.UNAUTHORIZED.value())
+                .message("Authentication required")
                 .timestamp(LocalDateTime.now())
                 .build();
 
-        response.setStatus(HttpStatus.FORBIDDEN.value());
+        response.setStatus(HttpStatus.UNAUTHORIZED.value());
         response.setContentType("application/json");
 
         ObjectMapper mapper = new ObjectMapper()
