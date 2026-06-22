@@ -15,6 +15,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import DraggableFlatList, {
   ScaleDecorator,
   RenderItemParams,
@@ -66,9 +67,12 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
             {item.job.user_name} · {item.job.material} · {item.job.color}
           </Text>
           {item.job.estimated_time && (
-            <Text style={[Typography.caption, { color: Colors.textMuted, marginTop: 2 }]}>
-              ⏱ {Math.floor(item.job.estimated_time / 60)}h {item.job.estimated_time % 60}m
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+              <Ionicons name="time-outline" size={11} color={Colors.textMuted} />
+              <Text style={[Typography.caption, { color: Colors.textMuted, marginLeft: 4 }]}>
+                {Math.floor(item.job.estimated_time / 60)}h {item.job.estimated_time % 60}m
+              </Text>
+            </View>
           )}
         </View>
 
@@ -93,7 +97,7 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
               );
             }}
           >
-            <Text style={{ color: Colors.error, fontSize: 16 }}>✕</Text>
+            <Ionicons name="close" size={16} color={Colors.error} />
           </TouchableOpacity>
 
           {/* Drag handle */}
@@ -102,7 +106,7 @@ function QueueItem({ item, drag, isActive, getIndex, onRemove }: QueueItemProps)
             onLongPress={drag}
             delayLongPress={150}
           >
-            <Text style={{ color: Colors.textMuted, fontSize: 18 }}>⠿</Text>
+            <Ionicons name="reorder-three" size={20} color={Colors.textMuted} />
           </TouchableOpacity>
         </View>
       </View>
@@ -201,15 +205,18 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
           {/* Header */}
           <View style={s.header}>
             <TouchableOpacity onPress={onBack} style={s.backBtn}>
-              <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
+              <Ionicons name="arrow-back" size={22} color={Colors.accent} />
             </TouchableOpacity>
-            <View style={{ flex: 1 }}>
-              <Text style={[Typography.displaySmall, { color: Colors.textPrimary }]}>
-                🖨️ Print Queue
-              </Text>
-              <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
-                {queue.length} job{queue.length !== 1 ? 's' : ''} · long-press to reorder
-              </Text>
+            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+              <Ionicons name="print" size={18} color={Colors.textPrimary} style={{ marginRight: 6 }} />
+              <View>
+                <Text style={[Typography.displaySmall, { color: Colors.textPrimary }]}>
+                  Print Queue
+                </Text>
+                <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
+                  {queue.length} job{queue.length !== 1 ? 's' : ''} · long-press to reorder
+                </Text>
+              </View>
             </View>
             {saving && (
               <View style={s.savingPill}>
@@ -222,10 +229,13 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
           </View>
 
           {/* Legend */}
-          <View style={s.legend}>
-            <Text style={[Typography.caption, { color: Colors.textMuted }]}>
-              ⠿ Drag handle  ·  ✕ Remove  ·  Tap card for details
-            </Text>
+          <View style={[s.legend, { flexDirection: 'row', alignItems: 'center', gap: 4 }]}>
+            <Ionicons name="reorder-three" size={12} color={Colors.textMuted} />
+            <Text style={[Typography.caption, { color: Colors.textMuted }]}>Drag handle</Text>
+            <Text style={[Typography.caption, { color: Colors.textMuted }]}>·</Text>
+            <Ionicons name="close" size={12} color={Colors.textMuted} />
+            <Text style={[Typography.caption, { color: Colors.textMuted }]}>Remove</Text>
+            <Text style={[Typography.caption, { color: Colors.textMuted }]}>·  Tap card for details</Text>
           </View>
 
           {/* Content */}
@@ -238,7 +248,7 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
             </View>
           ) : error ? (
             <View style={s.center}>
-              <Text style={{ fontSize: 40 }}>⚠️</Text>
+              <Ionicons name="alert-circle" size={44} color={Colors.error} />
               <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12 }]}>
                 {error}
               </Text>
@@ -248,7 +258,7 @@ export default function QueueManagement({ onBack, onJobPress }: QueueManagementP
             </View>
           ) : queue.length === 0 ? (
             <View style={s.center}>
-              <Text style={{ fontSize: 48 }}>✅</Text>
+              <Ionicons name="checkmark-circle-outline" size={48} color={Colors.success} />
               <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 12 }]}>
                 Queue is empty
               </Text>

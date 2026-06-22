@@ -9,6 +9,9 @@ import com.printforge.printforge.queueservice.exception.InvalidJobStatusExceptio
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
 import com.printforge.printforge.estimateservice.exception.EstimateNotFoundException;
 import com.printforge.printforge.estimateservice.exception.InvalidEstimateInputException;
+import com.printforge.printforge.printerservice.exception.DuplicatePrinterException;
+import com.printforge.printforge.printerservice.exception.InvalidPrinterStatusException;
+import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -96,6 +99,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(FileStorageException.class)
     public ResponseEntity<ErrorResponse> handleFileStorage(FileStorageException ex) {
         return buildError(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage());
+    }
+
+    @ExceptionHandler(PrinterNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handlePrinterNotFound(PrinterNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidPrinterStatusException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidPrinterStatus(InvalidPrinterStatusException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(DuplicatePrinterException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicatePrinter(DuplicatePrinterException ex) {
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

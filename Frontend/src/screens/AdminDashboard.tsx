@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, StatusBar,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { StatCard, SectionHeader, Card, StatusBadge } from '../components/UI';
@@ -30,11 +31,11 @@ export default function AdminDashboard({
 
   // Built per-render now (was a module-level constant before) since it
   // reads from the current theme's palette, not a fixed import.
-  const PRINTER_STATUS_CONFIG = {
-    idle:        { color: Colors.success,   icon: '🟢', label: 'Idle' },
-    printing:    { color: Colors.accent,    icon: '🔵', label: 'Printing' },
-    maintenance: { color: Colors.warning,   icon: '🟡', label: 'Maintenance' },
-    offline:     { color: Colors.textMuted, icon: '⚫', label: 'Offline' },
+  const PRINTER_STATUS_CONFIG: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap; label: string }> = {
+    idle:        { color: Colors.success,   icon: 'ellipse',          label: 'Idle' },
+    printing:    { color: Colors.accent,    icon: 'ellipse',          label: 'Printing' },
+    maintenance: { color: Colors.warning,   icon: 'ellipse',          label: 'Maintenance' },
+    offline:     { color: Colors.textMuted, icon: 'ellipse',          label: 'Offline' },
   };
 
   const [activeTab, setActiveTab] = useState<'overview' | 'pending' | 'printers'>('overview');
@@ -57,13 +58,21 @@ export default function AdminDashboard({
 
         {/* Header */}
         <View style={s.header}>
-          <View>
-            <Text style={[Typography.displayMedium, { color: Colors.textPrimary }]}>
-              {isAdmin ? '⚙️ Admin Dashboard' : '🔧 Staff Panel'}
-            </Text>
-            <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 2 }]}>
-              Engineering Lab · KNUST
-            </Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons
+              name={isAdmin ? 'settings' : 'construct'}
+              size={20}
+              color={Colors.textPrimary}
+              style={{ marginRight: 8 }}
+            />
+            <View>
+              <Text style={[Typography.displayMedium, { color: Colors.textPrimary }]}>
+                {isAdmin ? 'Admin Dashboard' : 'Staff Panel'}
+              </Text>
+              <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 2 }]}>
+                Engineering Lab · KNUST
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -90,12 +99,12 @@ export default function AdminDashboard({
               {/* Stats grid */}
               <View style={s.statsGrid}>
                 <View style={s.statsRow}>
-                  <StatCard label="Pending Review" value={pendingJobs.length} color={Colors.warning} icon="📋" />
-                  <StatCard label="Now Printing" value={printingJobs.length} color={Colors.accent} icon="🖨" />
+                  <StatCard label="Pending Review" value={pendingJobs.length} color={Colors.warning} icon={<Ionicons name="time-outline" size={22} color={Colors.warning} />} />
+                  <StatCard label="Now Printing" value={printingJobs.length} color={Colors.accent} icon={<Ionicons name="print-outline" size={22} color={Colors.accent} />} />
                 </View>
                 <View style={s.statsRow}>
-                  <StatCard label="In Queue" value={queuedJobs.length} color={Colors.info} icon="⏳" />
-                  <StatCard label="Completed Today" value={todayCompleted} color={Colors.success} icon="✅" />
+                  <StatCard label="In Queue" value={queuedJobs.length} color={Colors.info} icon={<Ionicons name="hourglass-outline" size={22} color={Colors.info} />} />
+                  <StatCard label="Completed Today" value={todayCompleted} color={Colors.success} icon={<Ionicons name="checkmark-circle-outline" size={22} color={Colors.success} />} />
                 </View>
               </View>
 
@@ -108,7 +117,7 @@ export default function AdminDashboard({
                       onPress={onOpenQueueManagement}
                       activeOpacity={0.85}
                     >
-                      <Text style={{ fontSize: 22 }}>🖨️</Text>
+                      <Ionicons name="print-outline" size={20} color={Colors.accent} />
                       <Text style={[Typography.labelMedium, { color: Colors.textPrimary, marginTop: 6 }]}>
                         Manage Queue
                       </Text>
@@ -120,7 +129,7 @@ export default function AdminDashboard({
                       onPress={onOpenPrinterManagement}
                       activeOpacity={0.85}
                     >
-                      <Text style={{ fontSize: 22 }}>⚙️</Text>
+                      <Ionicons name="settings-outline" size={20} color={Colors.secondary} />
                       <Text style={[Typography.labelMedium, { color: Colors.textPrimary, marginTop: 6 }]}>
                         Manage Printers
                       </Text>
@@ -164,9 +173,12 @@ export default function AdminDashboard({
                           {job.user_name} · {job.material} · {job.color}
                         </Text>
                         {job.estimated_time && (
-                          <Text style={[Typography.caption, { color: Colors.textMuted, marginTop: 2 }]}>
-                            ⏱ {job.estimated_time}m estimated
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+                            <Ionicons name="time-outline" size={11} color={Colors.textMuted} />
+                            <Text style={[Typography.caption, { color: Colors.textMuted, marginLeft: 4 }]}>
+                              {job.estimated_time}m estimated
+                            </Text>
+                          </View>
                         )}
                       </View>
                     </Card>
@@ -181,7 +193,7 @@ export default function AdminDashboard({
             <View>
               {pendingJobs.length === 0 ? (
                 <View style={s.emptyState}>
-                  <Text style={{ fontSize: 56 }}>🎉</Text>
+                  <Ionicons name="checkmark-done-circle-outline" size={56} color={Colors.success} />
                   <Text style={[Typography.displaySmall, { color: Colors.textPrimary, marginTop: 12 }]}>All clear!</Text>
                   <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 6, textAlign: 'center' }]}>
                     No jobs pending review right now.
@@ -205,13 +217,16 @@ export default function AdminDashboard({
                       </Text>
                       <View style={s.reviewButtons}>
                         <TouchableOpacity style={s.approveBtn}>
-                          <Text style={[Typography.labelMedium, { color: Colors.success }]}>✓ Approve</Text>
+                          <Ionicons name="checkmark" size={14} color={Colors.success} />
+                          <Text style={[Typography.labelMedium, { color: Colors.success, marginLeft: 4 }]}>Approve</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={s.rejectBtn}>
-                          <Text style={[Typography.labelMedium, { color: Colors.error }]}>✕ Reject</Text>
+                          <Ionicons name="close" size={14} color={Colors.error} />
+                          <Text style={[Typography.labelMedium, { color: Colors.error, marginLeft: 4 }]}>Reject</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={s.viewBtn} onPress={() => onJobPress(job)}>
-                          <Text style={[Typography.labelMedium, { color: Colors.accent }]}>Details →</Text>
+                          <Text style={[Typography.labelMedium, { color: Colors.accent }]}>Details</Text>
+                          <Ionicons name="chevron-forward" size={14} color={Colors.accent} style={{ marginLeft: 2 }} />
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -232,18 +247,24 @@ export default function AdminDashboard({
                       <View style={s.printerHeader}>
                         <Text style={[Typography.labelLarge, { color: Colors.textPrimary }]}>{printer.printer_name}</Text>
                         <View style={[s.printerStatus, { backgroundColor: cfg.color + '22', borderColor: cfg.color + '55' }]}>
-                          <Text style={{ fontSize: 10, marginRight: 4 }}>{cfg.icon}</Text>
+                          <Ionicons name={cfg.icon} size={8} color={cfg.color} style={{ marginRight: 4 }} />
                           <Text style={[Typography.caption, { color: cfg.color }]}>{cfg.label}</Text>
                         </View>
                       </View>
-                      <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 4 }]}>
-                        📍 {printer.lab_location}
-                      </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+                        <Ionicons name="location-outline" size={12} color={Colors.textSecondary} />
+                        <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginLeft: 4 }]}>
+                          {printer.lab_location}
+                        </Text>
+                      </View>
                       {printer.current_job && (
                         <View style={s.currentJob}>
-                          <Text style={[Typography.caption, { color: Colors.accent }]}>
-                            🖨 {printer.current_job}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                            <Ionicons name="print-outline" size={12} color={Colors.accent} />
+                            <Text style={[Typography.caption, { color: Colors.accent, marginLeft: 4 }]}>
+                              {printer.current_job}
+                            </Text>
+                          </View>
                         </View>
                       )}
                       {isAdmin && (
@@ -287,7 +308,7 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
   },
   tab: { paddingVertical: Spacing.md, paddingHorizontal: 4, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   tabActive: { borderBottomColor: Colors.accent },
-  scroll: { padding: Spacing.lg, paddingBottom: Spacing.xxl },
+  scroll: { padding: Spacing.lg, paddingBottom: 110 },
   statsGrid: { gap: Spacing.sm },
   statsRow: { flexDirection: 'row', gap: Spacing.sm },
   quickActionsRow: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.lg },
@@ -305,15 +326,18 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
   reviewButtons: { flexDirection: 'row', gap: Spacing.sm, marginTop: Spacing.md },
   approveBtn: {
     flex: 1, backgroundColor: Colors.successBg, borderRadius: Radius.md,
-    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: Colors.success + '44',
+    padding: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row',
+    borderWidth: 1, borderColor: Colors.success + '44',
   },
   rejectBtn: {
     flex: 1, backgroundColor: Colors.errorBg, borderRadius: Radius.md,
-    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: Colors.error + '44',
+    padding: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row',
+    borderWidth: 1, borderColor: Colors.error + '44',
   },
   viewBtn: {
     flex: 1, backgroundColor: Colors.accentGlow, borderRadius: Radius.md,
-    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: Colors.accent + '44',
+    padding: 10, alignItems: 'center', justifyContent: 'center', flexDirection: 'row',
+    borderWidth: 1, borderColor: Colors.accent + '44',
   },
   printerCard: { marginBottom: Spacing.md, flexDirection: 'column' },
   printerHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

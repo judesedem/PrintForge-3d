@@ -9,6 +9,7 @@ import {
   TouchableOpacity, StatusBar, TextInput, Alert,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { Button, Input, Divider } from '../components/UI';
@@ -24,10 +25,10 @@ interface SubmitJobScreenProps {
 const STEPS = ['File', 'Material', 'Options', 'Review'];
 
 const INFILL_OPTIONS = ['10%', '20%', '30%', '50%', '75%', '100%'];
-const QUALITY_OPTIONS = [
-  { label: 'Draft',    desc: '0.3mm · Fast',     icon: '⚡' },
-  { label: 'Standard', desc: '0.2mm · Balanced', icon: '⚖️' },
-  { label: 'Fine',     desc: '0.1mm · Slow',     icon: '💎' },
+const QUALITY_OPTIONS: { label: string; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { label: 'Draft',    desc: '0.3mm · Fast',     icon: 'flash-outline' },
+  { label: 'Standard', desc: '0.2mm · Balanced', icon: 'scale-outline' },
+  { label: 'Fine',     desc: '0.1mm · Slow',     icon: 'diamond-outline' },
 ];
 
 // Allowed file extensions for the document picker
@@ -147,7 +148,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
         {/* Header */}
         <View style={s.header}>
           <TouchableOpacity onPress={onBack} style={{ padding: 4 }}>
-            <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
+            <Ionicons name="arrow-back" size={22} color={Colors.accent} />
           </TouchableOpacity>
           <Text style={[Typography.labelLarge, { color: Colors.textPrimary, marginLeft: 8 }]}>
             New Print Request
@@ -160,9 +161,13 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
             <React.Fragment key={step_}>
               <View style={s.stepItem}>
                 <View style={[s.stepDot, i <= step && s.stepDotActive, i < step && s.stepDotDone]}>
-                  <Text style={[Typography.labelSmall, { color: i <= step ? Colors.background : Colors.textMuted, fontSize: 11 }]}>
-                    {i < step ? '✓' : String(i + 1)}
-                  </Text>
+                  {i < step ? (
+                    <Ionicons name="checkmark" size={12} color={Colors.background} />
+                  ) : (
+                    <Text style={[Typography.labelSmall, { color: i <= step ? Colors.background : Colors.textMuted, fontSize: 11 }]}>
+                      {String(i + 1)}
+                    </Text>
+                  )}
                 </View>
                 <Text style={[Typography.caption, { color: i === step ? Colors.accent : Colors.textMuted, marginTop: 4 }]}>
                   {step_}
@@ -190,9 +195,12 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                 onPress={handlePickFile}
                 activeOpacity={0.8}
               >
-                <Text style={{ fontSize: 48, marginBottom: Spacing.md }}>
-                  {pickedFile ? '✅' : '📁'}
-                </Text>
+                <Ionicons
+                  name={pickedFile ? 'checkmark-circle' : 'folder-open-outline'}
+                  size={44}
+                  color={pickedFile ? Colors.success : Colors.textMuted}
+                  style={{ marginBottom: Spacing.md }}
+                />
                 {pickedFile ? (
                   <>
                     <Text style={[Typography.labelLarge, { color: Colors.success }]} numberOfLines={1}>
@@ -214,7 +222,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
 
               {pickedFile && (
                 <View style={s.fileInfoCard}>
-                  <Text style={{ fontSize: 22 }}>📐</Text>
+                  <Ionicons name="cube-outline" size={20} color={Colors.accent} />
                   <View style={{ flex: 1, marginLeft: Spacing.md }}>
                     <Text style={[Typography.labelMedium, { color: Colors.textPrimary }]} numberOfLines={1}>
                       {pickedFile.name}
@@ -227,7 +235,10 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               )}
 
               <View style={s.tipBox}>
-                <Text style={[Typography.labelSmall, { color: Colors.accent, marginBottom: 4 }]}>💡 TIP</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                  <Ionicons name="bulb-outline" size={13} color={Colors.accent} />
+                  <Text style={[Typography.labelSmall, { color: Colors.accent, marginLeft: 4 }]}>TIP</Text>
+                </View>
                 <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
                   Make sure your model is watertight (manifold) and all normals face outward. Lab staff will check the file before approval.
                 </Text>
@@ -278,7 +289,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                     </Text>
                   </View>
                   {selectedMaterial?.material_id === mat.material_id && (
-                    <Text style={{ fontSize: 20, marginLeft: 8 }}>✓</Text>
+                    <Ionicons name="checkmark-circle" size={22} color={Colors.accent} style={{ marginLeft: 8 }} />
                   )}
                 </TouchableOpacity>
               ))}
@@ -344,7 +355,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                     onPress={() => setQuality(q.label)}
                     activeOpacity={0.8}
                   >
-                    <Text style={{ fontSize: 22 }}>{q.icon}</Text>
+                    <Ionicons name={q.icon} size={20} color={quality === q.label ? Colors.accent : Colors.textSecondary} />
                     <Text style={[Typography.labelMedium, { color: quality === q.label ? Colors.accent : Colors.textPrimary, marginTop: 4 }]}>
                       {q.label}
                     </Text>
@@ -378,27 +389,30 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               </Text>
 
               <View style={s.reviewCard}>
-                <ReviewRow icon="📐" label="File" value={pickedFile?.name ?? ''} />
+                <ReviewRow icon="cube-outline" label="File" value={pickedFile?.name ?? ''} />
                 <Divider style={{ marginVertical: 8 }} />
-                <ReviewRow icon="🧱" label="Material" value={selectedMaterial?.material_name || ''} />
+                <ReviewRow icon="layers-outline" label="Material" value={selectedMaterial?.material_name || ''} />
                 <Divider style={{ marginVertical: 8 }} />
-                <ReviewRow icon="🎨" label="Color" value={selectedColor} />
+                <ReviewRow icon="color-palette-outline" label="Color" value={selectedColor} />
                 <Divider style={{ marginVertical: 8 }} />
-                <ReviewRow icon="🔢" label="Quantity" value={quantity} />
+                <ReviewRow icon="copy-outline" label="Quantity" value={quantity} />
                 <Divider style={{ marginVertical: 8 }} />
-                <ReviewRow icon="⚙️" label="Infill" value={infill} />
+                <ReviewRow icon="options-outline" label="Infill" value={infill} />
                 <Divider style={{ marginVertical: 8 }} />
-                <ReviewRow icon="💎" label="Quality" value={quality} />
+                <ReviewRow icon="diamond-outline" label="Quality" value={quality} />
                 {notes ? (
                   <>
                     <Divider style={{ marginVertical: 8 }} />
-                    <ReviewRow icon="📝" label="Notes" value={notes} />
+                    <ReviewRow icon="document-text-outline" label="Notes" value={notes} />
                   </>
                 ) : null}
               </View>
 
               <View style={s.tipBox}>
-                <Text style={[Typography.labelSmall, { color: Colors.warning, marginBottom: 4 }]}>ℹ️ WHAT HAPPENS NEXT</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                  <Ionicons name="information-circle-outline" size={13} color={Colors.warning} />
+                  <Text style={[Typography.labelSmall, { color: Colors.warning, marginLeft: 4 }]}>WHAT HAPPENS NEXT</Text>
+                </View>
                 <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
                   Lab staff will review your file and estimate the cost and print time. You'll be notified once approved.
                 </Text>
@@ -423,7 +437,8 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               <Button label="Back" onPress={() => setStep(s_ => s_ - 1)} variant="ghost" style={{ flex: 1 }} />
             ) : <View style={{ flex: 1 }} />}
             <Button
-              label={step === 2 ? 'Review →' : 'Continue →'}
+              label={step === 2 ? 'Review' : 'Continue'}
+              icon={<Ionicons name="arrow-forward" size={16} color={Colors.background} />}
               onPress={() => setStep(s_ => s_ + 1)}
               disabled={!canNext()}
               style={{ flex: 1 }}
@@ -436,11 +451,11 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
   );
 }
 
-function ReviewRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+function ReviewRow({ icon, label, value }: { icon: keyof typeof Ionicons.glyphMap; label: string; value: string }) {
   const { Colors } = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
-      <Text style={{ fontSize: 18, marginTop: 1 }}>{icon}</Text>
+      <Ionicons name={icon} size={16} color={Colors.textSecondary} style={{ marginTop: 2 }} />
       <Text style={[Typography.bodySmall, { color: Colors.textSecondary, width: 80 }]}>{label}</Text>
       <Text style={[Typography.labelMedium, { color: Colors.textPrimary, flex: 1 }]} numberOfLines={2}>{value}</Text>
     </View>

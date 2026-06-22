@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, KeyboardAvoidingView, Platform, StatusBar, BackHandler,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { Button, Input } from '../components/UI';
@@ -14,10 +15,10 @@ interface RegisterScreenProps {
   onBack: () => void;
 }
 
-const ROLES: { label: string; value: UserRole; desc: string; icon: string }[] = [
-  { label: 'Student', value: 'student', desc: 'Submit and track print requests', icon: '🎓' },
-  { label: 'Lab Staff', value: 'lab_staff', desc: 'Review and manage print jobs', icon: '🔧' },
-  { label: 'Admin', value: 'admin', desc: 'Oversee labs and all services', icon: '⚙️' },
+const ROLES: { label: string; value: UserRole; desc: string; icon: keyof typeof Ionicons.glyphMap }[] = [
+  { label: 'Student', value: 'student', desc: 'Submit and track print requests', icon: 'school-outline' },
+  { label: 'Lab Staff', value: 'lab_staff', desc: 'Review and manage print jobs', icon: 'construct-outline' },
+  { label: 'Admin', value: 'admin', desc: 'Oversee labs and all services', icon: 'settings-outline' },
 ];
 
 export default function RegisterScreen({ onRegister, onLogin, onBack }: RegisterScreenProps) {
@@ -59,7 +60,7 @@ export default function RegisterScreen({ onRegister, onLogin, onBack }: Register
           <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
 
             <TouchableOpacity onPress={onBack} style={s.backBtn}>
-              <Text style={{ color: Colors.accent, fontSize: 20 }}>←</Text>
+              <Ionicons name="arrow-back" size={18} color={Colors.accent} />
               <Text style={[Typography.labelMedium, { color: Colors.accent, marginLeft: 6 }]}>Back</Text>
             </TouchableOpacity>
 
@@ -98,7 +99,12 @@ export default function RegisterScreen({ onRegister, onLogin, onBack }: Register
                   onPress={() => setRole(r.value)}
                   activeOpacity={0.8}
                 >
-                  <Text style={{ fontSize: 24, marginBottom: 6 }}>{r.icon}</Text>
+                  <Ionicons
+                    name={r.icon}
+                    size={22}
+                    color={role === r.value ? Colors.accent : Colors.textSecondary}
+                    style={{ marginBottom: 6 }}
+                  />
                   <Text style={[Typography.labelMedium, { color: role === r.value ? Colors.accent : Colors.textPrimary }]}>
                     {r.label}
                   </Text>

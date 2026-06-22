@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { PrintJob } from '../types';
 import { Typography, Spacing } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
@@ -53,9 +54,9 @@ export function JobCard({ job, onPress, compact }: JobCardProps) {
 
         {/* Meta row */}
         <View style={s.metaRow}>
-          <MetaPill icon="🧱" label={job.material} />
-          <MetaPill icon="🎨" label={job.color} />
-          <MetaPill icon="×" label={`Qty ${job.quantity}`} />
+          <MetaPill icon="cube-outline" label={job.material} />
+          <MetaPill icon="color-palette-outline" label={job.color} />
+          <MetaPill icon="close-outline" label={`Qty ${job.quantity}`} />
         </View>
 
         {!compact && (
@@ -72,18 +73,24 @@ export function JobCard({ job, onPress, compact }: JobCardProps) {
                   <Text style={{ color: Colors.textMuted, marginHorizontal: 8 }}>·</Text>
                 )}
                 {job.estimated_time && (
-                  <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
-                    ⏱ {formatTime(job.estimated_time)}
-                  </Text>
+                  <View style={s.inlineIconRow}>
+                    <Ionicons name="time-outline" size={12} color={Colors.textSecondary} />
+                    <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginLeft: 4 }]}>
+                      {formatTime(job.estimated_time)}
+                    </Text>
+                  </View>
                 )}
               </View>
             )}
 
             {/* Printer / queue */}
             {job.printer_name && (
-              <Text style={[Typography.caption, { color: Colors.textMuted, marginTop: 4 }]}>
-                🖨 {job.printer_name}
-              </Text>
+              <View style={[s.inlineIconRow, { marginTop: 4 }]}>
+                <Ionicons name="print-outline" size={12} color={Colors.textMuted} />
+                <Text style={[Typography.caption, { color: Colors.textMuted, marginLeft: 4 }]}>
+                  {job.printer_name}
+                </Text>
+              </View>
             )}
             {job.queue_position && job.status === 'queued' && (
               <Text style={[Typography.caption, { color: Colors.warning, marginTop: 4 }]}>
@@ -102,12 +109,13 @@ export function JobCard({ job, onPress, compact }: JobCardProps) {
   );
 }
 
-function MetaPill({ icon, label }: { icon: string; label: string }) {
+function MetaPill({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
   const { Colors } = useTheme();
   const s = styles(Colors);
   return (
     <View style={s.pill}>
-      <Text style={s.pillText}>{icon} {label}</Text>
+      <Ionicons name={icon} size={12} color={Colors.textSecondary} />
+      <Text style={[s.pillText, { marginLeft: 4 }]}>{label}</Text>
     </View>
   );
 }
@@ -130,6 +138,8 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
     marginBottom: 6,
   },
   pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: Colors.surfaceElevated,
     borderRadius: 6,
     paddingHorizontal: 8,
@@ -138,6 +148,10 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
   pillText: {
     ...Typography.caption,
     color: Colors.textSecondary,
+  },
+  inlineIconRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   estimateRow: {
     flexDirection: 'row',

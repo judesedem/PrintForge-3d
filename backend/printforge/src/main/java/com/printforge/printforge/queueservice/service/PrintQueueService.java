@@ -10,6 +10,8 @@ import com.printforge.printforge.queueservice.exception.InvalidJobStatusExceptio
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
+import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
+import com.printforge.printforge.printerservice.repository.PrinterRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
@@ -28,13 +30,16 @@ public class PrintQueueService {
     private final PrintJobRepository printJobRepository;
     private final ModelFileRepository modelFileRepository;
     private final EstimateRepository estimateRepository;
+    private final PrinterRepository printerRepository;
 
     public PrintQueueService(PrintJobRepository printJobRepository,
                               ModelFileRepository modelFileRepository,
-                              EstimateRepository estimateRepository) {
+                              EstimateRepository estimateRepository,
+                              PrinterRepository printerRepository) {
         this.printJobRepository = printJobRepository;
         this.modelFileRepository = modelFileRepository;
         this.estimateRepository = estimateRepository;
+        this.printerRepository = printerRepository;
     }
 
     /**
@@ -44,17 +49,14 @@ public class PrintQueueService {
      * (existsById) — it never checked who they belonged to. A student who
      * knew or guessed another student's fileId/estimateId could create a
      * job using someone else's uploaded file or cost estimate. Now it
-     * fetches the real records and checks ownership against the caller
-     * (callerEmail for the file, since ModelFile tracks ownership by email;
-     * callerId for the estimate, since Estimate tracks ownership by userId
-     * — the two services just happened to be built with different owner
-     * fields). No staff override here: this is "create my own job with my
-     * own resources," not an on-behalf-of operation.
+     * fetches the real records and checks ownership against the caller.
+     * No staff override here: this is "create my own job with my own
+     * resources," not an on-behalf-of operation.
      */
-    public PrintJob createPrintJob(Long fileId, Long estimateId, Long callerId, String callerEmail) {
+    public PrintJob createPrintJob(Long fileId, Long estimateId, Long callerId) {
         ModelFile file = modelFileRepository.findById(fileId)
                 .orElseThrow(() -> new ModelFileNotFoundException(fileId));
-        if (!callerEmail.equals(file.getUploadedBy())) {
+        if (!callerId.equals(file.getUserId())) {
             throw new AccessDeniedException("You can only create a print job using a file you uploaded yourself");
         }
 
@@ -116,7 +118,16 @@ public class PrintQueueService {
         }
         job.setStatus(normalizedStatus);
 
-        if (printerId != null) job.setAssignedPrinter(printerId);
+        // Previously printerId was free text with no validation at all —
+        // staff could assign a job to a printer name that didn't exist
+        // anywhere, with no error. Now it has to match a real registered
+        // printer (see Printer/PrinterRepository).
+        if (printerId != null && !printerId.isBlank()) {
+            if (!printerRepository.existsByPrinterName(printerId)) {
+                throw new PrinterNotFoundException(printerId);
+            }
+            job.setAssignedPrinter(printerId);
+        }
         if (operatorNotes != null) job.setOperatorNotes(operatorNotes);
         if (trackingNumber != null) job.setShippingTrackingNumber(trackingNumber);
 

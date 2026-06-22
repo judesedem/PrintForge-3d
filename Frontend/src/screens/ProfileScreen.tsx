@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, StatusBar,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme, ThemeMode } from '../hooks/useTheme';
 import { User } from '../types';
@@ -65,11 +66,11 @@ export default function ProfileScreen({ user, onLogout, onSwitchRole }: ProfileS
           <View style={s.section}>
             <Text style={[Typography.labelSmall, { color: Colors.textMuted, marginBottom: Spacing.sm }]}>ACCOUNT</Text>
             <Card elevated style={{ flexDirection: 'column', gap: 0, padding: 0 }}>
-              <SettingsRow icon="👤" label="Edit Profile" />
+              <SettingsRow icon="person-outline" label="Edit Profile" />
               <Divider style={{ marginVertical: 0 }} />
-              <SettingsRow icon="🔔" label="Notification Preferences" />
+              <SettingsRow icon="notifications-outline" label="Notification Preferences" />
               <Divider style={{ marginVertical: 0 }} />
-              <SettingsRow icon="🔒" label="Change Password" />
+              <SettingsRow icon="lock-closed-outline" label="Change Password" />
             </Card>
           </View>
 
@@ -95,28 +96,28 @@ export default function ProfileScreen({ user, onLogout, onSwitchRole }: ProfileS
           <View style={s.section}>
             <Text style={[Typography.labelSmall, { color: Colors.textMuted, marginBottom: Spacing.sm }]}>DEMO — SWITCH ROLE</Text>
             <Card elevated style={{ flexDirection: 'column', gap: 0, padding: 0 }}>
-              <SettingsRow icon="🎓" label="Switch to Student" onPress={() => onSwitchRole('student')} />
+              <SettingsRow icon="school-outline" label="Switch to Student" onPress={() => onSwitchRole('student')} />
               <Divider style={{ marginVertical: 0 }} />
-              <SettingsRow icon="🔧" label="Switch to Lab Staff" onPress={() => onSwitchRole('lab_staff')} />
+              <SettingsRow icon="construct-outline" label="Switch to Lab Staff" onPress={() => onSwitchRole('lab_staff')} />
               <Divider style={{ marginVertical: 0 }} />
-              <SettingsRow icon="⚙️" label="Switch to Admin" onPress={() => onSwitchRole('admin')} />
+              <SettingsRow icon="settings-outline" label="Switch to Admin" onPress={() => onSwitchRole('admin')} />
             </Card>
           </View>
 
           <View style={s.section}>
             <Text style={[Typography.labelSmall, { color: Colors.textMuted, marginBottom: Spacing.sm }]}>SUPPORT</Text>
             <Card elevated style={{ flexDirection: 'column', gap: 0, padding: 0 }}>
-              <SettingsRow icon="❓" label="Help & FAQ" />
+              <SettingsRow icon="help-circle-outline" label="Help & FAQ" />
               <Divider style={{ marginVertical: 0 }} />
-              <SettingsRow icon="📧" label="Contact Lab Staff" />
+              <SettingsRow icon="mail-outline" label="Contact Lab Staff" />
               <Divider style={{ marginVertical: 0 }} />
-              <SettingsRow icon="ℹ️" label="About PrintForge 3D" onPress={() => setAboutVisible(true)} />
+              <SettingsRow icon="information-circle-outline" label="About PrintForge 3D" onPress={() => setAboutVisible(true)} />
             </Card>
           </View>
 
           {/* Sign out */}
           <TouchableOpacity style={s.signOutBtn} onPress={onLogout} activeOpacity={0.8}>
-            <Text style={{ fontSize: 18 }}>🚪</Text>
+            <Ionicons name="log-out-outline" size={18} color={Colors.error} />
             <Text style={[Typography.labelLarge, { color: Colors.error, marginLeft: 10 }]}>Sign Out</Text>
           </TouchableOpacity>
 
@@ -142,14 +143,14 @@ function StatItem({ label, value }: { label: string; value: number }) {
   );
 }
 
-function SettingsRow({ icon, label, onPress }: { icon: string; label: string; onPress?: () => void }) {
+function SettingsRow({ icon, label, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; onPress?: () => void }) {
   const { Colors } = useTheme();
   const s = styles(Colors);
   return (
     <TouchableOpacity style={s.settingsRow} onPress={onPress} activeOpacity={0.7}>
-      <Text style={{ fontSize: 20 }}>{icon}</Text>
+      <Ionicons name={icon} size={20} color={Colors.textSecondary} />
       <Text style={[Typography.bodyMedium, { color: Colors.textPrimary, flex: 1, marginLeft: Spacing.md }]}>{label}</Text>
-      <Text style={{ color: Colors.textMuted, fontSize: 18 }}>›</Text>
+      <Ionicons name="chevron-forward" size={18} color={Colors.textMuted} />
     </TouchableOpacity>
   );
 }
@@ -195,7 +196,7 @@ type ThemeColors = {
 
 const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
-  scroll: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxl },
+  scroll: { paddingHorizontal: Spacing.lg, paddingBottom: 110 },
   avatarSection: { alignItems: 'center', paddingTop: Spacing.xl, paddingBottom: Spacing.lg },
   avatar: {
     width: 88, height: 88, borderRadius: 44,

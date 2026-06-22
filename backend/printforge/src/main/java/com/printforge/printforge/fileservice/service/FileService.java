@@ -26,7 +26,7 @@ public class FileService {
      * persists the metadata row. fileUrl is filled in on a second save once
      * the row has a generated id, since the download URL embeds that id.
      */
-    public ModelFile saveFileMetadata(MultipartFile file, String uploaderEmail) {
+    public ModelFile saveFileMetadata(MultipartFile file, Long uploaderId) {
         String storedFilename = fileStorageService.store(file);
 
         ModelFile newFile = new ModelFile();
@@ -34,7 +34,7 @@ public class FileService {
         newFile.setFileType(file.getContentType() != null ? file.getContentType() : "application/octet-stream");
         newFile.setStoredFilename(storedFilename);
         newFile.setFileSizeBytes(file.getSize());
-        newFile.setUploadedBy(uploaderEmail);
+        newFile.setUserId(uploaderId);
 
         ModelFile saved = fileRepository.save(newFile);
         saved.setFileUrl("/api/files/" + saved.getFileId() + "/download");
@@ -51,8 +51,8 @@ public class FileService {
     }
 
     /** Self-scoped view for non-staff callers: only files they uploaded. */
-    public List<ModelFile> getFilesForUser(String uploaderEmail) {
-        return fileRepository.findByUploadedBy(uploaderEmail);
+    public List<ModelFile> getFilesForUser(Long userId) {
+        return fileRepository.findByUserId(userId);
     }
 
     /** Loads the actual file bytes off disk for a given metadata record, for the download endpoint. */

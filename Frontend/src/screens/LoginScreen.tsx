@@ -11,6 +11,7 @@ import {
   StatusBar,
   BackHandler,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { Button, Input } from '../components/UI';
@@ -60,7 +61,7 @@ export default function LoginScreen({ onLogin, onRegister, onBack }: LoginScreen
 
             {/* Back */}
             <TouchableOpacity onPress={onBack} style={s.backBtn}>
-              <Text style={{ color: Colors.accent, fontSize: 20 }}>←</Text>
+              <Ionicons name="arrow-back" size={18} color={Colors.accent} />
               <Text style={[Typography.labelMedium, { color: Colors.accent, marginLeft: 6 }]}>Back</Text>
             </TouchableOpacity>
 
@@ -77,9 +78,12 @@ export default function LoginScreen({ onLogin, onRegister, onBack }: LoginScreen
 
             {/* Demo hint */}
             <View style={s.demoHint}>
-              <Text style={[Typography.caption, { color: Colors.textMuted }]}>
-                💡 Demo: use any email with @ · add "staff" or "admin" for different roles
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
+                <Ionicons name="bulb-outline" size={14} color={Colors.textMuted} style={{ marginTop: 1, marginRight: 6 }} />
+                <Text style={[Typography.caption, { color: Colors.textMuted, flex: 1 }]}>
+                  Demo: use any email with @ · add "staff" or "admin" for different roles
+                </Text>
+              </View>
             </View>
 
             {/* Form */}

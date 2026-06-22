@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, StatusBar, ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { SectionHeader, StatCard, Card } from '../components/UI';
@@ -74,7 +75,7 @@ export default function HomeScreen({ user, onNewJob, onJobPress, onViewAll, onNo
     return (
       <View style={[s.container, s.center]}>
         <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
-        <Text style={{ fontSize: 40 }}>⚠️</Text>
+        <Ionicons name="alert-circle" size={44} color={Colors.error} />
         <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12, textAlign: 'center' }]}>
           {error}
         </Text>
@@ -96,11 +97,11 @@ export default function HomeScreen({ user, onNewJob, onJobPress, onViewAll, onNo
             <View>
               <Text style={[Typography.bodySmall, { color: Colors.textMuted }]}>{greeting()},</Text>
               <Text style={[Typography.displaySmall, { color: Colors.textPrimary }]}>
-                {user.full_name.split(' ')[0]} 👋
+                {user.full_name.split(' ')[0]}
               </Text>
             </View>
             <TouchableOpacity style={s.notifBtn} onPress={onNotifications}>
-              <Text style={{ fontSize: 22 }}>🔔</Text>
+              <Ionicons name="notifications-outline" size={22} color={Colors.textPrimary} />
               {unreadCount > 0 && (
                 <View style={s.badge}>
                   <Text style={s.badgeText}>{unreadCount}</Text>
@@ -126,22 +127,22 @@ export default function HomeScreen({ user, onNewJob, onJobPress, onViewAll, onNo
                   {printingJob.printer_name} · Tap to view details
                 </Text>
               </View>
-              <Text style={{ fontSize: 28 }}>🖨</Text>
+              <Ionicons name="print" size={26} color={Colors.accent} />
             </TouchableOpacity>
           )}
 
           {/* Quick stats */}
           <View style={s.statsRow}>
-            <StatCard label="Active Jobs" value={activeJobs.length} color={Colors.accent} icon="📋" />
-            <StatCard label="Completed" value={completedCount} color={Colors.success} icon="✅" />
-            <StatCard label="Unread" value={unreadCount} color={Colors.warning} icon="🔔" />
+            <StatCard label="Active Jobs" value={activeJobs.length} color={Colors.accent} icon={<Ionicons name="layers-outline" size={22} color={Colors.accent} />} />
+            <StatCard label="Completed" value={completedCount} color={Colors.success} icon={<Ionicons name="checkmark-circle-outline" size={22} color={Colors.success} />} />
+            <StatCard label="Unread" value={unreadCount} color={Colors.warning} icon={<Ionicons name="notifications-outline" size={22} color={Colors.warning} />} />
           </View>
 
           {/* New job CTA */}
           <TouchableOpacity style={s.newJobBtn} onPress={onNewJob} activeOpacity={0.85}>
             <View style={s.newJobInner}>
               <View style={s.newJobIcon}>
-                <Text style={{ fontSize: 28 }}>➕</Text>
+                <Ionicons name="add" size={26} color={Colors.accent} />
               </View>
               <View style={{ flex: 1 }}>
                 <Text style={[Typography.labelLarge, { color: Colors.textPrimary }]}>Submit a Print Request</Text>
@@ -149,7 +150,7 @@ export default function HomeScreen({ user, onNewJob, onJobPress, onViewAll, onNo
                   Upload your STL file and choose materials
                 </Text>
               </View>
-              <Text style={{ color: Colors.accent, fontSize: 18 }}>→</Text>
+              <Ionicons name="chevron-forward" size={18} color={Colors.accent} />
             </View>
           </TouchableOpacity>
 
@@ -171,10 +172,10 @@ export default function HomeScreen({ user, onNewJob, onJobPress, onViewAll, onNo
           <View style={{ marginTop: Spacing.lg }}>
             <SectionHeader title="Quick Access" />
             <View style={s.quickLinks}>
-              <QuickLink icon="📦" label="Materials" />
-              <QuickLink icon="🖨" label="Printers" />
-              <QuickLink icon="📊" label="History" />
-              <QuickLink icon="💬" label="Support" />
+              <QuickLink icon="cube-outline" label="Materials" />
+              <QuickLink icon="print-outline" label="Printers" />
+              <QuickLink icon="bar-chart-outline" label="History" />
+              <QuickLink icon="chatbubble-ellipses-outline" label="Support" />
             </View>
           </View>
 
@@ -184,12 +185,12 @@ export default function HomeScreen({ user, onNewJob, onJobPress, onViewAll, onNo
   );
 }
 
-function QuickLink({ icon, label }: { icon: string; label: string }) {
+function QuickLink({ icon, label }: { icon: keyof typeof Ionicons.glyphMap; label: string }) {
   const { Colors } = useTheme();
   const s = styles(Colors);
   return (
     <TouchableOpacity style={s.quickLink} activeOpacity={0.75}>
-      <Text style={{ fontSize: 26 }}>{icon}</Text>
+      <Ionicons name={icon} size={24} color={Colors.accent} />
       <Text style={[Typography.caption, { color: Colors.textSecondary, marginTop: 6, textAlign: 'center' }]}>{label}</Text>
     </TouchableOpacity>
   );
@@ -207,7 +208,7 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
     marginTop: Spacing.lg, borderWidth: 1, borderColor: Colors.accent,
     borderRadius: Radius.md, paddingHorizontal: Spacing.lg, paddingVertical: Spacing.sm,
   },
-  scroll: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxl, paddingTop: Spacing.md },
+  scroll: { paddingHorizontal: Spacing.lg, paddingBottom: 110, paddingTop: Spacing.md },
   topBar: {
     flexDirection: 'row', justifyContent: 'space-between',
     alignItems: 'flex-start', marginBottom: Spacing.lg,

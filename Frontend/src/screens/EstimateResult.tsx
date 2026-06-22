@@ -8,6 +8,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, StatusBar,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius, Shadow } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { Button, Card, Divider, InfoRow } from '../components/UI';
@@ -48,7 +49,7 @@ export default function EstimateResult({
           <View style={s.glowWrap}>
             <View style={s.glowRing}>
               <View style={s.glowCore}>
-                <Text style={{ fontSize: 40 }}>✓</Text>
+                <Ionicons name="checkmark" size={36} color={Colors.success} />
               </View>
             </View>
             <Text style={[Typography.displayMedium, { color: Colors.textPrimary, marginTop: Spacing.lg, textAlign: 'center' }]}>
@@ -67,7 +68,7 @@ export default function EstimateResult({
           {/* Estimate cards */}
           <View style={s.estimateRow}>
             <View style={[s.estimateCard, s.estimateCardAccent]}>
-              <Text style={{ fontSize: 30 }}>💰</Text>
+              <Ionicons name="cash-outline" size={28} color={Colors.accent} />
               <Text style={[Typography.displayLarge, { color: Colors.accent, marginTop: Spacing.sm }]}>
                 GH₵ {estimate.cost.toFixed(2)}
               </Text>
@@ -77,7 +78,7 @@ export default function EstimateResult({
             </View>
 
             <View style={s.estimateCard}>
-              <Text style={{ fontSize: 30 }}>⏱</Text>
+              <Ionicons name="time-outline" size={28} color={Colors.textPrimary} />
               <Text style={[Typography.displayLarge, { color: Colors.textPrimary, marginTop: Spacing.sm }]}>
                 {formatTime(estimate.time)}
               </Text>

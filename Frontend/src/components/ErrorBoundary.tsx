@@ -6,6 +6,7 @@
 
 import React, { Component, ErrorInfo, ReactNode } from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { Button } from './UI';
@@ -68,7 +69,7 @@ function ErrorFallback({ error, reset }: { error: Error; reset: () => void }) {
     <View style={s.container}>
       <SafeAreaView style={{ flex: 1 }}>
         <ScrollView contentContainerStyle={s.scroll}>
-          <Text style={{ fontSize: 56 }}>⚠️</Text>
+          <Ionicons name="warning-outline" size={52} color={Colors.error} />
           <Text style={[Typography.displaySmall, { color: Colors.textPrimary, marginTop: Spacing.lg, textAlign: 'center' }]}>
             {title}
           </Text>

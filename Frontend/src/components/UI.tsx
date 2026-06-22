@@ -189,12 +189,12 @@ export function InfoRow({ label, value, valueColor }: { label: string; value: st
 
 // ─── EmptyState ────────────────────────────────────────────────────────────
 
-export function EmptyState({ icon, title, subtitle }: { icon: string; title: string; subtitle: string }) {
+export function EmptyState({ icon, title, subtitle }: { icon: React.ReactNode; title: string; subtitle: string }) {
   const { Colors } = useTheme();
   const s = styles(Colors);
   return (
     <View style={s.empty}>
-      <Text style={s.emptyIcon}>{icon}</Text>
+      <View style={s.emptyIcon}>{icon}</View>
       <Text style={[Typography.displaySmall, { color: Colors.textPrimary, marginTop: 12, textAlign: 'center' }]}>{title}</Text>
       <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 8, textAlign: 'center' }]}>{subtitle}</Text>
     </View>
@@ -203,12 +203,12 @@ export function EmptyState({ icon, title, subtitle }: { icon: string; title: str
 
 // ─── StatCard ──────────────────────────────────────────────────────────────
 
-export function StatCard({ label, value, color, icon }: { label: string; value: string | number; color?: string; icon?: string }) {
+export function StatCard({ label, value, color, icon }: { label: string; value: string | number; color?: string; icon?: React.ReactNode }) {
   const { Colors } = useTheme();
   const s = styles(Colors);
   return (
     <View style={[s.statCard, { borderColor: color ? color + '33' : Colors.border }]}>
-      {icon && <Text style={{ fontSize: 24, marginBottom: 8 }}>{icon}</Text>}
+      {icon && <View style={{ marginBottom: 8 }}>{icon}</View>}
       <Text style={[Typography.displayMedium, { color: color || Colors.accent }]}>{value}</Text>
       <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 4 }]}>{label}</Text>
     </View>
@@ -339,7 +339,8 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
     paddingHorizontal: Spacing.xl,
   },
   emptyIcon: {
-    fontSize: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // StatCard

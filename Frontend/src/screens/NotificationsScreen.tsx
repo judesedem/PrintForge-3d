@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
   TouchableOpacity, StatusBar, ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { apiGetNotifications, apiMarkNotificationRead, apiMarkAllNotificationsRead } from '../services/api';
@@ -28,11 +29,11 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
 
   // Built per-render now (was a module-level constant before) since it
   // reads from the current theme's palette, not a fixed import.
-  const TYPE_CONFIG = {
-    info:    { icon: 'ℹ️', color: Colors.info,    bg: Colors.infoBg },
-    success: { icon: '✅', color: Colors.success, bg: Colors.successBg },
-    warning: { icon: '⚠️', color: Colors.warning, bg: Colors.warningBg },
-    error:   { icon: '❌', color: Colors.error,   bg: Colors.errorBg },
+  const TYPE_CONFIG: Record<string, { icon: keyof typeof Ionicons.glyphMap; color: string; bg: string }> = {
+    info:    { icon: 'information-circle', color: Colors.info,    bg: Colors.infoBg },
+    success: { icon: 'checkmark-circle',   color: Colors.success, bg: Colors.successBg },
+    warning: { icon: 'warning',            color: Colors.warning, bg: Colors.warningBg },
+    error:   { icon: 'close-circle',       color: Colors.error,   bg: Colors.errorBg },
   };
 
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -95,7 +96,7 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
       >
         {!item.is_read && <View style={s.unreadDot} />}
         <View style={[s.iconBox, { backgroundColor: cfg.bg }]}>
-          <Text style={{ fontSize: 22 }}>{cfg.icon}</Text>
+          <Ionicons name={cfg.icon} size={20} color={cfg.color} />
         </View>
         <View style={{ flex: 1, marginLeft: Spacing.md }}>
           <Text style={[Typography.bodyMedium, { color: Colors.textPrimary, lineHeight: 20 }]}>
@@ -116,7 +117,7 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
 
         <View style={s.header}>
           <TouchableOpacity onPress={onBack} style={{ padding: 4 }}>
-            <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
+            <Ionicons name="arrow-back" size={22} color={Colors.accent} />
           </TouchableOpacity>
           <Text style={[Typography.displaySmall, { color: Colors.textPrimary, flex: 1, marginLeft: 8 }]}>
             Notifications
@@ -145,7 +146,7 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
           </View>
         ) : error ? (
           <View style={s.center}>
-            <Text style={{ fontSize: 40 }}>⚠️</Text>
+            <Ionicons name="alert-circle" size={44} color={Colors.error} />
             <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12, textAlign: 'center' }]}>
               {error}
             </Text>
@@ -162,7 +163,11 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
             refreshing={refreshing}
             onRefresh={() => loadNotifications(true)}
             ListEmptyComponent={
-              <EmptyState icon="🔔" title="All clear" subtitle="No notifications yet. We'll let you know when your job status changes." />
+              <EmptyState
+                icon={<Ionicons name="notifications-outline" size={56} color={Colors.textMuted} />}
+                title="All clear"
+                subtitle="No notifications yet. We'll let you know when your job status changes."
+              />
             }
             renderItem={renderItem}
           />

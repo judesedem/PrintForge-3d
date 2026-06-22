@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
   TouchableOpacity, StatusBar, ActivityIndicator,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { JobCard } from '../components/JobCard';
@@ -113,7 +114,7 @@ export default function JobsScreen({ onJobPress, onNewJob, userId, showAll = fal
           </View>
         ) : error ? (
           <View style={s.center}>
-            <Text style={{ fontSize: 40 }}>⚠️</Text>
+            <Ionicons name="alert-circle" size={44} color={Colors.error} />
             <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12, textAlign: 'center' }]}>
               {error}
             </Text>
@@ -131,7 +132,7 @@ export default function JobsScreen({ onJobPress, onNewJob, userId, showAll = fal
             onRefresh={() => loadJobs(true)}
             ListEmptyComponent={
               <EmptyState
-                icon="📋"
+                icon={<Ionicons name="layers-outline" size={56} color={Colors.textMuted} />}
                 title="No jobs here"
                 subtitle={filter === 'all' ? "Submit your first print request to get started." : `No ${filter} jobs at the moment.`}
               />
@@ -168,7 +169,7 @@ const styles = (Colors: ThemeColors) => StyleSheet.create({
     borderWidth: 1, borderColor: Colors.border,
   },
   chipActive: { backgroundColor: Colors.accent, borderColor: Colors.accent },
-  list: { paddingHorizontal: Spacing.lg, paddingBottom: Spacing.xxl },
+  list: { paddingHorizontal: Spacing.lg, paddingBottom: 110 },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: Spacing.xl },
   retryBtn: {
     marginTop: Spacing.lg, borderWidth: 1, borderColor: Colors.accent,

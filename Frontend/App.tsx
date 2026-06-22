@@ -9,9 +9,10 @@
 
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView, ActivityIndicator } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { AuthProvider, useAuth } from './src/hooks/useAuth';
 import { ThemeProvider, useTheme } from './src/hooks/useTheme';
-import { Typography, Spacing } from './src/constants/theme';
+import { Typography, Spacing, Radius } from './src/constants/theme';
 import { usePushNotifications } from './src/hooks/usePushNotifications';
 import { PrintJob } from './src/types';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
@@ -235,11 +236,13 @@ function AppContent() {
   };
 
   const tabs = [
-    { id: 'home',      icon: '🏠', label: 'Home' },
-    { id: 'jobs',      icon: '📋', label: isStaffOrAdmin ? 'All Jobs' : 'My Jobs' },
-    ...(isStaffOrAdmin ? [{ id: 'dashboard', icon: '⚙️', label: 'Dashboard' }] : []),
-    { id: 'profile',   icon: '👤', label: 'Profile' },
-  ];
+    { id: 'home',      label: 'Home',     iconActive: 'home',                 iconInactive: 'home-outline' },
+    { id: 'jobs',      label: isStaffOrAdmin ? 'All Jobs' : 'My Jobs',
+                                            iconActive: 'layers',               iconInactive: 'layers-outline' },
+    ...(isStaffOrAdmin ? [{ id: 'dashboard', label: 'Dashboard',
+                                            iconActive: 'speedometer',          iconInactive: 'speedometer-outline' }] : []),
+    { id: 'profile',   label: 'Profile',  iconActive: 'person-circle',         iconInactive: 'person-circle-outline' },
+  ] as const;
 
   return (
     <View style={styles(Colors).root}>
@@ -252,32 +255,36 @@ function AppContent() {
           onPress={() => setModal('submitJob')}
           activeOpacity={0.85}
         >
-          <Text style={{ fontSize: 26, color: Colors.background }}>+</Text>
+          <Ionicons name="add" size={28} color={Colors.background} />
         </TouchableOpacity>
       )}
 
-      {/* Bottom tab bar */}
-      <SafeAreaView style={styles(Colors).tabBar}>
-        {tabs.map(tab => {
-          const active = activeTab === tab.id;
-          return (
-            <TouchableOpacity
-              key={tab.id}
-              style={styles(Colors).tabItem}
-              onPress={() => setActiveTab(tab.id as MainTab)}
-              activeOpacity={0.7}
-            >
-              <Text style={{ fontSize: active ? 26 : 22, opacity: active ? 1 : 0.5 }}>{tab.icon}</Text>
-              <Text style={[
-                Typography.caption,
-                { color: active ? Colors.accent : Colors.textMuted, marginTop: 3 },
-              ]}>
-                {tab.label}
-              </Text>
-              {active && <View style={styles(Colors).tabIndicator} />}
-            </TouchableOpacity>
-          );
-        })}
+      {/* Floating navigation dock */}
+      <SafeAreaView style={styles(Colors).dockSafeArea} pointerEvents="box-none">
+        <View style={styles(Colors).dock}>
+          {tabs.map(tab => {
+            const active = activeTab === tab.id;
+            return (
+              <TouchableOpacity
+                key={tab.id}
+                style={[styles(Colors).dockItem, active && styles(Colors).dockItemActive]}
+                onPress={() => setActiveTab(tab.id as MainTab)}
+                activeOpacity={0.75}
+              >
+                <Ionicons
+                  name={(active ? tab.iconActive : tab.iconInactive) as any}
+                  size={22}
+                  color={active ? Colors.accent : Colors.textMuted}
+                />
+                {active && (
+                  <Text style={[Typography.labelSmall, styles(Colors).dockLabel]} numberOfLines={1}>
+                    {tab.label}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
       </SafeAreaView>
     </View>
   );
@@ -299,33 +306,59 @@ export default function App() {
 // StyleSheet.create call, so colors update the instant the user switches
 // theme — StyleSheet.create still does its normal optimization internally,
 // we're just re-invoking it with fresh values each render.
-const styles = (Colors: { background: string; surface: string; border: string; accent: string }) =>
+const styles = (Colors: {
+  background: string; surface: string; border: string; accent: string;
+  navBackground: string; navBorder: string; textMuted: string;
+}) =>
   StyleSheet.create({
     root: { flex: 1, backgroundColor: Colors.background },
-    tabBar: {
-      flexDirection: 'row',
-      backgroundColor: Colors.surface,
-      borderTopWidth: 1,
-      borderTopColor: Colors.border,
-      paddingBottom: 4,
-    },
-    tabItem: {
-      flex: 1,
-      alignItems: 'center',
-      paddingVertical: Spacing.sm + 2,
-      position: 'relative',
-    },
-    tabIndicator: {
+
+    // Floating dock — sits in its own SafeAreaView so it respects the home
+    // indicator / gesture bar, but the dock itself is a compact pill that
+    // floats above the content with margin on all sides (not edge-to-edge).
+    dockSafeArea: {
       position: 'absolute',
-      top: 0,
-      width: 24,
-      height: 2,
-      backgroundColor: Colors.accent,
-      borderRadius: 1,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      alignItems: 'center',
     },
+    dock: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: Colors.navBackground,
+      borderRadius: Radius.full,
+      borderWidth: 1,
+      borderColor: Colors.navBorder,
+      paddingHorizontal: 8,
+      paddingVertical: 8,
+      marginBottom: 12,
+      gap: 4,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.18,
+      shadowRadius: 20,
+      elevation: 14,
+    },
+    dockItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 14,
+      borderRadius: Radius.full,
+    },
+    dockItemActive: {
+      backgroundColor: Colors.accent + '1A',
+    },
+    dockLabel: {
+      color: Colors.accent,
+      marginLeft: 6,
+    },
+
     fab: {
       position: 'absolute',
-      bottom: 80,
+      bottom: 96,
       right: 24,
       width: 56,
       height: 56,

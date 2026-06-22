@@ -11,10 +11,16 @@ export const DarkColors = {
   border: '#2A3656',             // Subtle borders
   borderLight: '#1E2E4A',        // Very subtle borders
 
-  // Accent
-  accent: '#00D2FF',             // Electric cyan — brand signature
+  // Accent — electric cyan, brand signature (precision / "in progress")
+  accent: '#00D2FF',
   accentDim: '#0099BB',          // Muted cyan for secondary elements
   accentGlow: 'rgba(0, 210, 255, 0.15)', // Glow effect background
+
+  // Secondary accent — violet, used for admin/staff surfaces and to
+  // separate "system" actions from the primary cyan "job" actions
+  secondary: '#8B7CFF',
+  secondaryDim: '#6657CC',
+  secondaryGlow: 'rgba(139, 124, 255, 0.15)',
 
   // Text
   textPrimary: '#F0F4FF',        // Near-white, primary text
@@ -38,6 +44,11 @@ export const DarkColors = {
   gradientMid: '#0D1530',
   gradientAccent: '#001A33',
 
+  // Floating nav bar — slightly lifted off the surface tone so it reads
+  // as a distinct floating layer rather than just another card
+  navBackground: '#161D33',
+  navBorder: '#2E3B61',
+
   // Status bar / system UI
   statusBarStyle: 'light-content' as const,
 };
@@ -54,6 +65,12 @@ export const LightColors = {
   accent: '#0099CC',
   accentDim: '#007799',
   accentGlow: 'rgba(0, 153, 204, 0.10)',
+
+  // Secondary accent — violet, mirrors dark mode's role (admin/staff,
+  // "system" actions vs. primary cyan "job" actions)
+  secondary: '#6A56E0',
+  secondaryDim: '#5440B8',
+  secondaryGlow: 'rgba(106, 86, 224, 0.10)',
 
   // Text
   textPrimary: '#0F1626',        // Near-black, primary text
@@ -76,6 +93,10 @@ export const LightColors = {
   gradientStart: '#F5F7FB',
   gradientMid: '#EAEEF7',
   gradientAccent: '#E3F2FA',
+
+  // Floating nav bar — pure white lifted with shadow against the off-white background
+  navBackground: '#FFFFFF',
+  navBorder: '#E5E9F2',
 
   // Status bar / system UI
   statusBarStyle: 'dark-content' as const,

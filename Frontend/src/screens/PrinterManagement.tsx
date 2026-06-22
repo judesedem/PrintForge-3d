@@ -16,6 +16,7 @@ import {
   TextInput,
   Platform,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { Button, Card, Divider } from '../components/UI';
@@ -43,11 +44,11 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
 
   // Built per-render (was module-level before) since it reads the current
   // theme's palette rather than a fixed import.
-  const STATUS_CONFIG: Record<Printer['printer_status'], { icon: string; color: string; label: string }> = {
-    idle:        { icon: '🟢', color: Colors.success,   label: 'Idle' },
-    printing:    { icon: '🔵', color: Colors.accent,    label: 'Printing' },
-    maintenance: { icon: '🟡', color: Colors.warning,   label: 'Maintenance' },
-    offline:     { icon: '⚫', color: Colors.textMuted, label: 'Offline' },
+  const STATUS_CONFIG: Record<Printer['printer_status'], { icon: keyof typeof Ionicons.glyphMap; color: string; label: string }> = {
+    idle:        { icon: 'ellipse', color: Colors.success,   label: 'Idle' },
+    printing:    { icon: 'ellipse', color: Colors.accent,    label: 'Printing' },
+    maintenance: { icon: 'ellipse', color: Colors.warning,   label: 'Maintenance' },
+    offline:     { icon: 'ellipse', color: Colors.textMuted, label: 'Offline' },
   };
 
   const cfg = STATUS_CONFIG[printer.printer_status];
@@ -64,24 +65,33 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
           <Text style={[Typography.labelLarge, { color: Colors.textPrimary }]}>
             {printer.printer_name}
           </Text>
-          <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 2 }]}>
-            📍 {printer.lab_location}
-          </Text>
-          {printer.current_job && (
-            <Text style={[Typography.caption, { color: Colors.accent, marginTop: 2 }]}>
-              ▶ {printer.current_job}
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+            <Ionicons name="location-outline" size={12} color={Colors.textSecondary} />
+            <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginLeft: 4 }]}>
+              {printer.lab_location}
             </Text>
+          </View>
+          {printer.current_job && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2 }}>
+              <Ionicons name="play" size={10} color={Colors.accent} />
+              <Text style={[Typography.caption, { color: Colors.accent, marginLeft: 4 }]}>
+                {printer.current_job}
+              </Text>
+            </View>
           )}
         </View>
         <View style={[s.statusPillBase, { backgroundColor: cfg.color + '18', borderColor: cfg.color + '40' }]}>
-          <Text style={{ fontSize: 12 }}>{cfg.icon}</Text>
+          <Ionicons name={cfg.icon} size={8} color={cfg.color} />
           <Text style={[Typography.labelSmall, { color: cfg.color, marginLeft: 4 }]}>
             {cfg.label}
           </Text>
         </View>
-        <Text style={{ color: Colors.textMuted, marginLeft: Spacing.sm, fontSize: 16 }}>
-          {expanded ? '▲' : '▼'}
-        </Text>
+        <Ionicons
+          name={expanded ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color={Colors.textMuted}
+          style={{ marginLeft: Spacing.sm }}
+        />
       </TouchableOpacity>
 
       {expanded && (
@@ -102,7 +112,7 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
                     onPress={() => !active && onStatusChange(printer.printer_id, st)}
                     activeOpacity={0.7}
                   >
-                    <Text style={{ fontSize: 14 }}>{c.icon}</Text>
+                    <Ionicons name={c.icon} size={12} color={active ? c.color : Colors.textMuted} />
                     <Text style={[Typography.caption, { color: active ? c.color : Colors.textMuted, marginTop: 2 }]}>
                       {c.label}
                     </Text>
@@ -115,9 +125,12 @@ function PrinterCard({ printer, onStatusChange, onDelete }: PrinterCardProps) {
               style={s.deleteBtn}
               onPress={() => onDelete(printer.printer_id, printer.printer_name)}
             >
-              <Text style={[Typography.labelMedium, { color: Colors.error }]}>
-                🗑 Remove Printer
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="trash-outline" size={16} color={Colors.error} />
+                <Text style={[Typography.labelMedium, { color: Colors.error, marginLeft: 6 }]}>
+                  Remove Printer
+                </Text>
+              </View>
             </TouchableOpacity>
           </View>
         </>
@@ -213,11 +226,11 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
   const s = styles(Colors);
 
   // Same per-render config as PrinterCard, needed here for the summary row.
-  const STATUS_CONFIG: Record<Printer['printer_status'], { icon: string; color: string; label: string }> = {
-    idle:        { icon: '🟢', color: Colors.success,   label: 'Idle' },
-    printing:    { icon: '🔵', color: Colors.accent,    label: 'Printing' },
-    maintenance: { icon: '🟡', color: Colors.warning,   label: 'Maintenance' },
-    offline:     { icon: '⚫', color: Colors.textMuted, label: 'Offline' },
+  const STATUS_CONFIG: Record<Printer['printer_status'], { icon: keyof typeof Ionicons.glyphMap; color: string; label: string }> = {
+    idle:        { icon: 'ellipse', color: Colors.success,   label: 'Idle' },
+    printing:    { icon: 'ellipse', color: Colors.accent,    label: 'Printing' },
+    maintenance: { icon: 'ellipse', color: Colors.warning,   label: 'Maintenance' },
+    offline:     { icon: 'ellipse', color: Colors.textMuted, label: 'Offline' },
   };
 
   const [printers, setPrinters] = useState<Printer[]>([]);
@@ -304,15 +317,18 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
         {/* Header */}
         <View style={s.header}>
           <TouchableOpacity onPress={onBack} style={s.backBtn}>
-            <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
+            <Ionicons name="arrow-back" size={22} color={Colors.accent} />
           </TouchableOpacity>
-          <View style={{ flex: 1 }}>
-            <Text style={[Typography.displaySmall, { color: Colors.textPrimary }]}>
-              🖨️ Printers
-            </Text>
-            <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
-              {printers.length} printer{printers.length !== 1 ? 's' : ''} registered
-            </Text>
+          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
+            <Ionicons name="print" size={18} color={Colors.textPrimary} style={{ marginRight: 6 }} />
+            <View>
+              <Text style={[Typography.displaySmall, { color: Colors.textPrimary }]}>
+                Printers
+              </Text>
+              <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
+                {printers.length} printer{printers.length !== 1 ? 's' : ''} registered
+              </Text>
+            </View>
           </View>
           <TouchableOpacity style={s.addBtn} onPress={() => setShowAdd(true)}>
             <Text style={[Typography.labelLarge, { color: Colors.background }]}>+ Add</Text>
@@ -325,7 +341,7 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
             const cfg = STATUS_CONFIG[st];
             return (
               <View key={st} style={s.summaryChip}>
-                <Text style={{ fontSize: 14 }}>{cfg.icon}</Text>
+                <Ionicons name={cfg.icon} size={10} color={cfg.color} />
                 <Text style={[Typography.caption, { color: cfg.color, marginLeft: 4 }]}>
                   {counts[st] ?? 0} {cfg.label}
                 </Text>
@@ -341,7 +357,7 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
           </View>
         ) : error ? (
           <View style={s.center}>
-            <Text style={{ fontSize: 40 }}>⚠️</Text>
+            <Ionicons name="alert-circle" size={44} color={Colors.error} />
             <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12 }]}>{error}</Text>
             <TouchableOpacity style={s.retryBtn} onPress={loadPrinters}>
               <Text style={[Typography.labelLarge, { color: Colors.accent }]}>Retry</Text>
@@ -362,7 +378,7 @@ export default function PrinterManagement({ onBack }: PrinterManagementProps) {
             ))}
             {printers.length === 0 && (
               <View style={s.center}>
-                <Text style={{ fontSize: 48 }}>🖨️</Text>
+                <Ionicons name="print-outline" size={48} color={Colors.textMuted} />
                 <Text style={[Typography.bodyMedium, { color: Colors.textSecondary, marginTop: 12 }]}>
                   No printers registered yet.
                 </Text>

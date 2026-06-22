@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, StatusBar, TextInput, ActivityIndicator, Alert,
 } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import { Typography, Spacing, Radius } from '../constants/theme';
 import { useTheme } from '../hooks/useTheme';
 import { StatusBadge, Card, InfoRow, Divider, Button } from '../components/UI';
@@ -137,7 +138,7 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
         {/* Header */}
         <View style={s.header}>
           <TouchableOpacity onPress={onBack} style={s.backBtn}>
-            <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
+            <Ionicons name="arrow-back" size={22} color={Colors.accent} />
           </TouchableOpacity>
           <Text style={[Typography.labelLarge, { color: Colors.textPrimary, flex: 1, marginLeft: 8 }]} numberOfLines={1}>
             Job Details
@@ -151,7 +152,7 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
           <Card elevated style={s.fileCard}>
             <View style={{ flex: 1 }}>
               <View style={s.fileIcon}>
-                <Text style={{ fontSize: 36 }}>📐</Text>
+                <Ionicons name="cube-outline" size={32} color={Colors.accent} />
               </View>
               <Text style={[Typography.displaySmall, { color: Colors.textPrimary, marginTop: 12 }]}>
                 {job.file_name}
@@ -180,7 +181,7 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
                           done && s.timelineDotDone,
                           active && s.timelineDotActive,
                         ]}>
-                          {done && <Text style={{ color: Colors.background, fontSize: 10 }}>✓</Text>}
+                          {done && <Ionicons name="checkmark" size={14} color={Colors.background} />}
                         </View>
                         <Text style={[
                           Typography.caption,
@@ -202,7 +203,7 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
           {/* Rejected notice */}
           {job.status === 'rejected' && (
             <View style={s.rejectedBox}>
-              <Text style={{ fontSize: 32, marginBottom: 8 }}>❌</Text>
+              <Ionicons name="close-circle" size={32} color={Colors.error} style={{ marginBottom: 8 }} />
               <Text style={[Typography.labelLarge, { color: Colors.error }]}>Job Rejected</Text>
               {job.notes && (
                 <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 8, textAlign: 'center' }]}>
@@ -245,7 +246,7 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
               <View style={s.estimateRow}>
                 {job.estimated_cost && (
                   <View style={s.estimateCard}>
-                    <Text style={{ fontSize: 28 }}>💰</Text>
+                    <Ionicons name="cash-outline" size={26} color={Colors.accent} />
                     <Text style={[Typography.displayMedium, { color: Colors.accent, marginTop: 6 }]}>
                       GH₵ {job.estimated_cost.toFixed(2)}
                     </Text>
@@ -254,7 +255,7 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
                 )}
                 {job.estimated_time && (
                   <View style={s.estimateCard}>
-                    <Text style={{ fontSize: 28 }}>⏱</Text>
+                    <Ionicons name="time-outline" size={26} color={Colors.warning} />
                     <Text style={[Typography.displayMedium, { color: Colors.warning, marginTop: 6 }]}>
                       {formatTime(job.estimated_time)}
                     </Text>
@@ -285,12 +286,14 @@ export default function JobDetailScreen({ job, onBack, isStaff, onApproved, onRe
               {!showApprovePanel ? (
                 <View style={s.actionRow}>
                   <Button
-                    label="✓ Approve"
+                    label="Approve"
+                    icon={<Ionicons name="checkmark" size={16} color={Colors.background} />}
                     onPress={() => { setActionError(null); setShowApprovePanel(true); }}
                     style={{ flex: 1 }}
                   />
                   <Button
-                    label="✕ Reject"
+                    label="Reject"
+                    icon={<Ionicons name="close" size={16} color={Colors.error} />}
                     onPress={handleReject}
                     variant="danger"
                     style={{ flex: 1 }}
