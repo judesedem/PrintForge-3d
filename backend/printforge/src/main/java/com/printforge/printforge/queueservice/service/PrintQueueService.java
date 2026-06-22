@@ -1,13 +1,16 @@
 package com.printforge.printforge.queueservice.service;
 
 import com.printforge.printforge.estimateservice.exception.EstimateNotFoundException;
+import com.printforge.printforge.estimateservice.model.Estimate;
 import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
+import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
 import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -34,21 +37,37 @@ public class PrintQueueService {
         this.estimateRepository = estimateRepository;
     }
 
-    // 1. ADD TO QUEUE (Triggered after a customer checks out)
-    public PrintJob createPrintJob(Long fileId, Long estimateId, Long userId) {
-        // Previously fileId/estimateId were trusted blindly — a job could be
-        // created referencing ids that don't exist anywhere, with no error.
-        if (!modelFileRepository.existsById(fileId)) {
-            throw new ModelFileNotFoundException(fileId);
+    /**
+     * Triggered after a customer checks out.
+     *
+     * Previously this only checked that fileId/estimateId existed
+     * (existsById) — it never checked who they belonged to. A student who
+     * knew or guessed another student's fileId/estimateId could create a
+     * job using someone else's uploaded file or cost estimate. Now it
+     * fetches the real records and checks ownership against the caller
+     * (callerEmail for the file, since ModelFile tracks ownership by email;
+     * callerId for the estimate, since Estimate tracks ownership by userId
+     * — the two services just happened to be built with different owner
+     * fields). No staff override here: this is "create my own job with my
+     * own resources," not an on-behalf-of operation.
+     */
+    public PrintJob createPrintJob(Long fileId, Long estimateId, Long callerId, String callerEmail) {
+        ModelFile file = modelFileRepository.findById(fileId)
+                .orElseThrow(() -> new ModelFileNotFoundException(fileId));
+        if (!callerEmail.equals(file.getUploadedBy())) {
+            throw new AccessDeniedException("You can only create a print job using a file you uploaded yourself");
         }
-        if (!estimateRepository.existsById(estimateId)) {
-            throw new EstimateNotFoundException(estimateId);
+
+        Estimate estimate = estimateRepository.findById(estimateId)
+                .orElseThrow(() -> new EstimateNotFoundException(estimateId));
+        if (!callerId.equals(estimate.getUserId())) {
+            throw new AccessDeniedException("You can only create a print job using your own estimate");
         }
 
         PrintJob newJob = new PrintJob();
         newJob.setFileId(fileId);
         newJob.setEstimateId(estimateId);
-        newJob.setUserId(userId);
+        newJob.setUserId(callerId);
         // Note: status is automatically set to "PENDING" and submittedAt is set by @PrePersist in the Model
         return printJobRepository.save(newJob);
     }
