@@ -8,6 +8,7 @@ import com.printforge.printforge.notificationservice.exception.NotificationNotFo
 import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
 import com.printforge.printforge.estimateservice.exception.EstimateNotFoundException;
+import com.printforge.printforge.estimateservice.exception.InvalidEstimateInputException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -80,6 +81,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(EstimateNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleEstimateNotFound(EstimateNotFoundException ex) {
         return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidEstimateInputException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidEstimateInput(InvalidEstimateInputException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(InvalidJobStatusException.class)

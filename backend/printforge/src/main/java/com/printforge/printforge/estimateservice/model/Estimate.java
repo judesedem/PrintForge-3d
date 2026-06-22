@@ -1,6 +1,7 @@
 package com.printforge.printforge.estimateservice.model;
 
 import jakarta.persistence.*;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "estimates")
@@ -9,6 +10,15 @@ public class Estimate {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    // Links this estimate to the actual uploaded file it was calculated
+    // from, and the user who requested it. Nullable for now — same lesson
+    // learned as ModelFile.fileUrl: ddl-auto=update won't retroactively
+    // backfill a NOT NULL column on a table that may already have rows
+    // from earlier testing. Drop+recreate the estimates table (see the
+    // handoff doc) if you want these enforced NOT NULL going forward.
+    private Long fileId;
+    private Long userId;
 
     private Double fileSizeKb;
     private String quality;
@@ -22,9 +32,22 @@ public class Estimate {
     private Double estimatedGrams;
     private Double durationMinutes;
 
+    private LocalDateTime createdAt;
+
+    @PrePersist
+    protected void onCreate() {
+        this.createdAt = LocalDateTime.now();
+    }
+
     // --- Getters and Setters ---
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
+
+    public Long getFileId() { return fileId; }
+    public void setFileId(Long fileId) { this.fileId = fileId; }
+
+    public Long getUserId() { return userId; }
+    public void setUserId(Long userId) { this.userId = userId; }
 
     public Double getFileSizeKb() { return fileSizeKb; }
     public void setFileSizeKb(Double fileSizeKb) { this.fileSizeKb = fileSizeKb; }
@@ -50,4 +73,7 @@ public class Estimate {
 
     public Double getDurationMinutes() { return durationMinutes; }
     public void setDurationMinutes(Double durationMinutes) { this.durationMinutes = durationMinutes; }
+
+    public LocalDateTime getCreatedAt() { return createdAt; }
+    public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }
 }

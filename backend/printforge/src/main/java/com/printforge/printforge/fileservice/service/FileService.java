@@ -50,6 +50,11 @@ public class FileService {
         return fileRepository.findAll();
     }
 
+    /** Self-scoped view for non-staff callers: only files they uploaded. */
+    public List<ModelFile> getFilesForUser(String uploaderEmail) {
+        return fileRepository.findByUploadedBy(uploaderEmail);
+    }
+
     /** Loads the actual file bytes off disk for a given metadata record, for the download endpoint. */
     public Resource loadFileContent(Long id) {
         ModelFile metadata = getFileById(id);

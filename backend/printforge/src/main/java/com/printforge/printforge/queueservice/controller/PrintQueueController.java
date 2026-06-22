@@ -37,8 +37,8 @@ public class PrintQueueController {
             @RequestParam Long estimateId,
             Authentication authentication) {
 
-        Long callerId = currentUser(authentication).getUserId();
-        PrintJob newJob = printQueueService.createPrintJob(fileId, estimateId, callerId);
+        User caller = currentUser(authentication);
+        PrintJob newJob = printQueueService.createPrintJob(fileId, estimateId, caller.getUserId(), caller.getEmail());
         return ResponseEntity.ok(newJob);
     }
 
