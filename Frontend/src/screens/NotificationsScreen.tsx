@@ -3,7 +3,8 @@ import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
   TouchableOpacity, StatusBar, ActivityIndicator,
 } from 'react-native';
-import { Colors, Typography, Spacing, Radius } from '../constants/theme';
+import { Typography, Spacing, Radius } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { apiGetNotifications, apiMarkNotificationRead, apiMarkAllNotificationsRead } from '../services/api';
 import { Notification } from '../types';
 import { EmptyState } from '../components/UI';
@@ -12,13 +13,6 @@ interface NotificationsScreenProps {
   onBack: () => void;
   onNotifPress?: (notif: Notification) => void;
 }
-
-const TYPE_CONFIG = {
-  info:    { icon: 'ℹ️', color: Colors.info,    bg: Colors.infoBg },
-  success: { icon: '✅', color: Colors.success, bg: Colors.successBg },
-  warning: { icon: '⚠️', color: Colors.warning, bg: Colors.warningBg },
-  error:   { icon: '❌', color: Colors.error,   bg: Colors.errorBg },
-};
 
 function formatRelative(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -29,6 +23,18 @@ function formatRelative(iso: string) {
 }
 
 export default function NotificationsScreen({ onBack, onNotifPress }: NotificationsScreenProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
+  // Built per-render now (was a module-level constant before) since it
+  // reads from the current theme's palette, not a fixed import.
+  const TYPE_CONFIG = {
+    info:    { icon: 'ℹ️', color: Colors.info,    bg: Colors.infoBg },
+    success: { icon: '✅', color: Colors.success, bg: Colors.successBg },
+    warning: { icon: '⚠️', color: Colors.warning, bg: Colors.warningBg },
+    error:   { icon: '❌', color: Colors.error,   bg: Colors.errorBg },
+  };
+
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -83,12 +89,12 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
     const cfg = TYPE_CONFIG[item.type];
     return (
       <TouchableOpacity
-        style={[styles.notifCard, !item.is_read && styles.notifCardUnread]}
+        style={[s.notifCard, !item.is_read && s.notifCardUnread]}
         onPress={() => handleNotifPress(item)}
         activeOpacity={0.8}
       >
-        {!item.is_read && <View style={styles.unreadDot} />}
-        <View style={[styles.iconBox, { backgroundColor: cfg.bg }]}>
+        {!item.is_read && <View style={s.unreadDot} />}
+        <View style={[s.iconBox, { backgroundColor: cfg.bg }]}>
           <Text style={{ fontSize: 22 }}>{cfg.icon}</Text>
         </View>
         <View style={{ flex: 1, marginLeft: Spacing.md }}>
@@ -104,11 +110,11 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
   };
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <View style={s.container}>
+      <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
       <SafeAreaView style={{ flex: 1 }}>
 
-        <View style={styles.header}>
+        <View style={s.header}>
           <TouchableOpacity onPress={onBack} style={{ padding: 4 }}>
             <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
           </TouchableOpacity>
@@ -123,7 +129,7 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
         </View>
 
         {unreadCount > 0 && (
-          <View style={styles.unreadBanner}>
+          <View style={s.unreadBanner}>
             <Text style={[Typography.caption, { color: Colors.accent }]}>
               {unreadCount} unread notification{unreadCount > 1 ? 's' : ''}
             </Text>
@@ -131,19 +137,19 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
         )}
 
         {loading ? (
-          <View style={styles.center}>
+          <View style={s.center}>
             <ActivityIndicator size="large" color={Colors.accent} />
             <Text style={[Typography.bodySmall, { color: Colors.textSecondary, marginTop: 12 }]}>
               Loading notifications…
             </Text>
           </View>
         ) : error ? (
-          <View style={styles.center}>
+          <View style={s.center}>
             <Text style={{ fontSize: 40 }}>⚠️</Text>
             <Text style={[Typography.bodyMedium, { color: Colors.error, marginTop: 12, textAlign: 'center' }]}>
               {error}
             </Text>
-            <TouchableOpacity style={styles.retryBtn} onPress={() => loadNotifications()}>
+            <TouchableOpacity style={s.retryBtn} onPress={() => loadNotifications()}>
               <Text style={[Typography.labelLarge, { color: Colors.accent }]}>Retry</Text>
             </TouchableOpacity>
           </View>
@@ -151,7 +157,7 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
           <FlatList
             data={notifications}
             keyExtractor={n => n.notification_id}
-            contentContainerStyle={styles.list}
+            contentContainerStyle={s.list}
             showsVerticalScrollIndicator={false}
             refreshing={refreshing}
             onRefresh={() => loadNotifications(true)}
@@ -167,7 +173,11 @@ export default function NotificationsScreen({ onBack, onNotifPress }: Notificati
   );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = {
+  background: string; surface: string; surfaceElevated: string; border: string; accent: string; accentGlow: string;
+};
+
+const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row', alignItems: 'center',

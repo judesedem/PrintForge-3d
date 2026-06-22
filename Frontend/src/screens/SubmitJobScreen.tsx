@@ -9,7 +9,8 @@ import {
   TouchableOpacity, StatusBar, TextInput, Alert,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { Colors, Typography, Spacing, Radius } from '../constants/theme';
+import { Typography, Spacing, Radius } from '../constants/theme';
+import { useTheme } from '../hooks/useTheme';
 import { Button, Input, Divider } from '../components/UI';
 import { MOCK_MATERIALS } from '../constants/mockData';
 import { Material } from '../types';
@@ -39,6 +40,9 @@ const ALLOWED_TYPES = [
 ];
 
 export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenProps) {
+  const { Colors } = useTheme();
+  const s = styles(Colors);
+
   const [step, setStep] = useState(0);
 
   // File state
@@ -136,12 +140,12 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
     : null;
 
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={Colors.background} />
+    <View style={s.container}>
+      <StatusBar barStyle={Colors.statusBarStyle} backgroundColor={Colors.background} />
       <SafeAreaView style={{ flex: 1 }}>
 
         {/* Header */}
-        <View style={styles.header}>
+        <View style={s.header}>
           <TouchableOpacity onPress={onBack} style={{ padding: 4 }}>
             <Text style={{ color: Colors.accent, fontSize: 22 }}>←</Text>
           </TouchableOpacity>
@@ -151,27 +155,27 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
         </View>
 
         {/* Step indicators */}
-        <View style={styles.stepRow}>
-          {STEPS.map((s, i) => (
-            <React.Fragment key={s}>
-              <View style={styles.stepItem}>
-                <View style={[styles.stepDot, i <= step && styles.stepDotActive, i < step && styles.stepDotDone]}>
+        <View style={s.stepRow}>
+          {STEPS.map((step_, i) => (
+            <React.Fragment key={step_}>
+              <View style={s.stepItem}>
+                <View style={[s.stepDot, i <= step && s.stepDotActive, i < step && s.stepDotDone]}>
                   <Text style={[Typography.labelSmall, { color: i <= step ? Colors.background : Colors.textMuted, fontSize: 11 }]}>
                     {i < step ? '✓' : String(i + 1)}
                   </Text>
                 </View>
                 <Text style={[Typography.caption, { color: i === step ? Colors.accent : Colors.textMuted, marginTop: 4 }]}>
-                  {s}
+                  {step_}
                 </Text>
               </View>
               {i < STEPS.length - 1 && (
-                <View style={[styles.stepLine, i < step && styles.stepLineDone]} />
+                <View style={[s.stepLine, i < step && s.stepLineDone]} />
               )}
             </React.Fragment>
           ))}
         </View>
 
-        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
           {/* ── STEP 0: File upload ─────────────────────────────────────────── */}
           {step === 0 && (
@@ -182,7 +186,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               </Text>
 
               <TouchableOpacity
-                style={[styles.dropzone, !!pickedFile && styles.dropzoneDone]}
+                style={[s.dropzone, !!pickedFile && s.dropzoneDone]}
                 onPress={handlePickFile}
                 activeOpacity={0.8}
               >
@@ -209,7 +213,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               </TouchableOpacity>
 
               {pickedFile && (
-                <View style={styles.fileInfoCard}>
+                <View style={s.fileInfoCard}>
                   <Text style={{ fontSize: 22 }}>📐</Text>
                   <View style={{ flex: 1, marginLeft: Spacing.md }}>
                     <Text style={[Typography.labelMedium, { color: Colors.textPrimary }]} numberOfLines={1}>
@@ -222,7 +226,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                 </View>
               )}
 
-              <View style={styles.tipBox}>
+              <View style={s.tipBox}>
                 <Text style={[Typography.labelSmall, { color: Colors.accent, marginBottom: 4 }]}>💡 TIP</Text>
                 <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
                   Make sure your model is watertight (manifold) and all normals face outward. Lab staff will check the file before approval.
@@ -242,7 +246,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               {materials.map(mat => (
                 <TouchableOpacity
                   key={mat.material_id}
-                  style={[styles.materialCard, selectedMaterial?.material_id === mat.material_id && styles.materialCardActive,
+                  style={[s.materialCard, selectedMaterial?.material_id === mat.material_id && s.materialCardActive,
                     mat.availability_status === 'out_of_stock' && { opacity: 0.4 }]}
                   onPress={() => {
                     if (mat.availability_status === 'out_of_stock') return;
@@ -253,9 +257,9 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                   disabled={mat.availability_status === 'out_of_stock'}
                 >
                   <View style={{ flex: 1 }}>
-                    <View style={styles.materialHeader}>
+                    <View style={s.materialHeader}>
                       <Text style={[Typography.labelLarge, { color: Colors.textPrimary }]}>{mat.material_name}</Text>
-                      <View style={[styles.availBadge, {
+                      <View style={[s.availBadge, {
                         backgroundColor: mat.availability_status === 'available' ? Colors.successBg :
                           mat.availability_status === 'low' ? Colors.warningBg : Colors.errorBg
                       }]}>
@@ -284,11 +288,11 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                   <Text style={[Typography.labelMedium, { color: Colors.textSecondary, marginBottom: Spacing.sm }]}>
                     Color
                   </Text>
-                  <View style={styles.colorRow}>
+                  <View style={s.colorRow}>
                     {selectedMaterial.colors.map(c => (
                       <TouchableOpacity
                         key={c}
-                        style={[styles.colorChip, selectedColor === c && styles.colorChipActive]}
+                        style={[s.colorChip, selectedColor === c && s.colorChipActive]}
                         onPress={() => setSelectedColor(c)}
                       >
                         <Text style={[Typography.caption, { color: selectedColor === c ? Colors.accent : Colors.textSecondary }]}>{c}</Text>
@@ -317,11 +321,11 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               />
 
               <Text style={[Typography.labelMedium, { color: Colors.textSecondary, marginBottom: Spacing.sm }]}>Infill Density</Text>
-              <View style={styles.optionRow}>
+              <View style={s.optionRow}>
                 {INFILL_OPTIONS.map(opt => (
                   <TouchableOpacity
                     key={opt}
-                    style={[styles.optionChip, infill === opt && styles.optionChipActive]}
+                    style={[s.optionChip, infill === opt && s.optionChipActive]}
                     onPress={() => setInfill(opt)}
                   >
                     <Text style={[Typography.labelMedium, { color: infill === opt ? Colors.accent : Colors.textSecondary }]}>{opt}</Text>
@@ -332,11 +336,11 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
               <Text style={[Typography.labelMedium, { color: Colors.textSecondary, marginTop: Spacing.md, marginBottom: Spacing.sm }]}>
                 Print Quality
               </Text>
-              <View style={styles.qualityRow}>
+              <View style={s.qualityRow}>
                 {QUALITY_OPTIONS.map(q => (
                   <TouchableOpacity
                     key={q.label}
-                    style={[styles.qualityCard, quality === q.label && styles.qualityCardActive]}
+                    style={[s.qualityCard, quality === q.label && s.qualityCardActive]}
                     onPress={() => setQuality(q.label)}
                     activeOpacity={0.8}
                   >
@@ -353,7 +357,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                 Notes (optional)
               </Text>
               <TextInput
-                style={styles.textarea}
+                style={s.textarea}
                 value={notes}
                 onChangeText={setNotes}
                 placeholder="e.g. special instructions, orientation preference..."
@@ -373,7 +377,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                 Confirm your request details before submitting
               </Text>
 
-              <View style={styles.reviewCard}>
+              <View style={s.reviewCard}>
                 <ReviewRow icon="📐" label="File" value={pickedFile?.name ?? ''} />
                 <Divider style={{ marginVertical: 8 }} />
                 <ReviewRow icon="🧱" label="Material" value={selectedMaterial?.material_name || ''} />
@@ -393,7 +397,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
                 ) : null}
               </View>
 
-              <View style={styles.tipBox}>
+              <View style={s.tipBox}>
                 <Text style={[Typography.labelSmall, { color: Colors.warning, marginBottom: 4 }]}>ℹ️ WHAT HAPPENS NEXT</Text>
                 <Text style={[Typography.bodySmall, { color: Colors.textSecondary }]}>
                   Lab staff will review your file and estimate the cost and print time. You'll be notified once approved.
@@ -414,13 +418,13 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
 
         {/* Navigation */}
         {step < 3 && (
-          <View style={styles.navBar}>
+          <View style={s.navBar}>
             {step > 0 ? (
-              <Button label="Back" onPress={() => setStep(s => s - 1)} variant="ghost" style={{ flex: 1 }} />
+              <Button label="Back" onPress={() => setStep(s_ => s_ - 1)} variant="ghost" style={{ flex: 1 }} />
             ) : <View style={{ flex: 1 }} />}
             <Button
               label={step === 2 ? 'Review →' : 'Continue →'}
-              onPress={() => setStep(s => s + 1)}
+              onPress={() => setStep(s_ => s_ + 1)}
               disabled={!canNext()}
               style={{ flex: 1 }}
             />
@@ -433,6 +437,7 @@ export default function SubmitJobScreen({ onBack, onSubmit }: SubmitJobScreenPro
 }
 
 function ReviewRow({ icon, label, value }: { icon: string; label: string; value: string }) {
+  const { Colors } = useTheme();
   return (
     <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 12 }}>
       <Text style={{ fontSize: 18, marginTop: 1 }}>{icon}</Text>
@@ -442,7 +447,13 @@ function ReviewRow({ icon, label, value }: { icon: string; label: string; value:
   );
 }
 
-const styles = StyleSheet.create({
+type ThemeColors = {
+  background: string; surface: string; surfaceElevated: string; border: string;
+  accent: string; accentGlow: string; success: string; successBg: string;
+  warning: string; warningBg: string; error: string; errorBg: string;
+};
+
+const styles = (Colors: ThemeColors) => StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
   header: {
     flexDirection: 'row', alignItems: 'center',
