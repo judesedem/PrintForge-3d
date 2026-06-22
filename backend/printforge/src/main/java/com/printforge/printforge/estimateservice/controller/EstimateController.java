@@ -1,35 +1,75 @@
 package com.printforge.printforge.estimateservice.controller;
 
+import com.printforge.printforge.entity.User;
 import com.printforge.printforge.estimateservice.model.Estimate;
 import com.printforge.printforge.estimateservice.service.EstimateService;
+import com.printforge.printforge.repository.UserRepository;
 import jakarta.validation.constraints.*;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/api/estimates")
-@Validated // NEW: Tells Spring Boot to enforce the math rules below
+@Validated // Tells Spring Boot to enforce the math rules below
 public class EstimateController {
 
     private final EstimateService estimateService;
+    private final UserRepository userRepository;
 
-    public EstimateController(EstimateService estimateService) {
+    public EstimateController(EstimateService estimateService, UserRepository userRepository) {
         this.estimateService = estimateService;
+        this.userRepository = userRepository;
     }
 
+    // Previously took fileSizeKb directly from the client (@RequestParam
+    // Double fileSizeKb) — meaning a student could send any number and get
+    // whatever cost/duration that produced. Now it takes fileId and the
+    // service derives the real size from the stored file, plus the
+    // estimate is recorded against the caller's actual identity.
     @PostMapping
     public ResponseEntity<Estimate> createEstimate(
-            // Validation Rules added to block bad data!
-            @RequestParam @NotNull @Min(1) Double fileSizeKb,
+            @RequestParam @NotNull Long fileId,
             @RequestParam @NotBlank String quality,
             @RequestParam @NotNull @Min(0) @Max(100) Integer infillPercent,
             @RequestParam @NotNull @Min(1) Integer quantity,
-            @RequestParam @NotBlank String materialType) { // NEW: Expect the material type
+            @RequestParam @NotBlank String materialType,
+            Authentication authentication) {
+
+        Long requesterId = currentUser(authentication).getUserId();
 
         Estimate newEstimate = estimateService.calculateAndSaveEstimate(
-                fileSizeKb, quality, infillPercent, quantity, materialType);
+                fileId, quality, infillPercent, quantity, materialType, requesterId);
 
         return ResponseEntity.ok(newEstimate);
+    }
+
+    // NEW — didn't exist before at all. Contract doc calls for
+    // GET /api/estimates/{jobId}; this is by estimate id, since an estimate
+    // is created before a job exists (Queue Service's createPrintJob takes
+    // an existing estimateId as input).
+    @GetMapping("/{id}")
+    public ResponseEntity<Estimate> getEstimateById(@PathVariable Long id, Authentication authentication) {
+        Estimate estimate = estimateService.getEstimateById(id);
+
+        if (!isStaff(authentication) && !estimate.getUserId().equals(currentUser(authentication).getUserId())) {
+            throw new AccessDeniedException("You can only view your own estimates");
+        }
+        return ResponseEntity.ok(estimate);
+    }
+
+    private boolean isStaff(Authentication authentication) {
+        return authentication.getAuthorities().stream()
+                .map(GrantedAuthority::getAuthority)
+                .anyMatch(role -> role.equals("ROLE_LAB_STAFF") || role.equals("ROLE_ADMIN"));
+    }
+
+    private User currentUser(Authentication authentication) {
+        return userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 }

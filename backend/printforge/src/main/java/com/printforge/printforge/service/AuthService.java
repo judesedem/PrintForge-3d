@@ -8,6 +8,7 @@ import com.printforge.printforge.entity.Role;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.exception.EmailAlreadyExistsException;
 import com.printforge.printforge.exception.InvalidCredentialsException;
+import com.printforge.printforge.exception.InvalidRoleException;
 import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.security.JwtService;
 import lombok.RequiredArgsConstructor;
@@ -33,11 +34,13 @@ public class AuthService {
             throw new EmailAlreadyExistsException("Email already registered");
         }
 
+        Role role = resolveRole(request.getRole());
+
         User user = User.builder()
                 .fullName(request.getFullName())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
-                .role(Role.STUDENT)
+                .role(role)
                 .build();
 
         User savedUser = userRepository.save(user);
@@ -48,6 +51,32 @@ public class AuthService {
                 .token(token)
                 .user(toUserDto(savedUser))
                 .build();
+    }
+
+    /**
+     * Previously this method ignored request.getRole() entirely and every
+     * registration hardcoded Role.STUDENT — there was no way to create a
+     * LAB_STAFF or ADMIN account at all. Now it honors whatever role was
+     * sent (defaulting to STUDENT if none was given), case-insensitively,
+     * and rejects anything that isn't a real role with a clean 400 instead
+     * of letting Role.valueOf() throw an unhandled IllegalArgumentException.
+     *
+     * NOTE: this means /api/auth/register currently lets anyone self-elevate
+     * to ADMIN by just sending role=admin. That's intentional for now so a
+     * first admin account can be bootstrapped, but it's worth locking down
+     * once you have one: e.g. restrict this endpoint to STUDENT only, and
+     * add a separate admin-only endpoint for creating LAB_STAFF/ADMIN users.
+     */
+    private Role resolveRole(String requestedRole) {
+        if (requestedRole == null || requestedRole.isBlank()) {
+            return Role.STUDENT;
+        }
+        try {
+            return Role.valueOf(requestedRole.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidRoleException(
+                    "Invalid role '" + requestedRole + "'. Must be one of: STUDENT, LAB_STAFF, ADMIN.");
+        }
     }
 
     public AuthResponse login(LoginRequest request) {

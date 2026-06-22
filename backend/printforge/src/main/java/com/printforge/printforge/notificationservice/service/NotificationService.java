@@ -1,7 +1,9 @@
 package com.printforge.printforge.notificationservice.service;
 
+import com.printforge.printforge.notificationservice.exception.NotificationNotFoundException;
 import com.printforge.printforge.notificationservice.model.Notification;
 import com.printforge.printforge.notificationservice.repository.NotificationRepository;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -40,10 +42,25 @@ public class NotificationService {
         return notificationRepository.countByUserIdAndIsReadFalse(userId);
     }
 
-    // 5. Mark a single notification as read
-    public Notification markAsRead(Long notificationId) {
+    /**
+     * Mark a single notification as read.
+     *
+     * requesterId/requesterIsStaff come from the controller, which resolves
+     * them from the JWT. Previously this method took only notificationId and
+     * had no concept of "who's asking" — any authenticated user could mark
+     * any other user's notification as read just by guessing/incrementing an
+     * id. Now it checks the notification's actual owner (notification.userId)
+     * against the caller, and lets the request through if they match or the
+     * caller is LAB_STAFF/ADMIN.
+     */
+    public Notification markAsRead(Long notificationId, Long requesterId, boolean requesterIsStaff) {
         Notification notification = notificationRepository.findById(notificationId)
-                .orElseThrow(() -> new RuntimeException("Notification not found with ID: " + notificationId));
+                .orElseThrow(() -> new NotificationNotFoundException(notificationId));
+
+        if (!requesterIsStaff && !notification.getUserId().equals(requesterId)) {
+            throw new AccessDeniedException("You can only mark your own notifications as read");
+        }
+
         notification.setRead(true);
         return notificationRepository.save(notification);
     }
