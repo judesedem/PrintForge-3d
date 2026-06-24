@@ -16,6 +16,8 @@ import com.printforge.printforge.printerservice.exception.InvalidPrinterStatusEx
 import com.printforge.printforge.printerservice.exception.PrinterBusyException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
+import com.printforge.printforge.paymentservice.exception.PaymentNotFoundException;
+import com.printforge.printforge.paymentservice.exception.PaymentFailedException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -129,6 +131,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ListingNotPublishedException.class)
     public ResponseEntity<ErrorResponse> handleListingNotPublished(ListingNotPublishedException ex) {
         return buildError(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(PaymentNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentNotFound(PaymentNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(PaymentFailedException.class)
+    public ResponseEntity<ErrorResponse> handlePaymentFailed(PaymentFailedException ex) {
+        return buildError(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 
     @ExceptionHandler(IllegalStateException.class)
