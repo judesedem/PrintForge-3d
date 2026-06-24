@@ -82,4 +82,21 @@ class PrinterServiceTest {
         assertThrows(PrinterNotFoundException.class,
                 () -> service.updatePrinterStatus(404L, "AVAILABLE"));
     }
+
+    @Test
+    void deletingAnExistingPrinterSucceeds() {
+        Mockito.when(printerRepository.existsById(1L)).thenReturn(true);
+
+        service.deletePrinter(1L);
+
+        Mockito.verify(printerRepository).deleteById(1L);
+    }
+
+    @Test
+    void deletingAnUnknownPrinterThrowsNotFound() {
+        Mockito.when(printerRepository.existsById(404L)).thenReturn(false);
+
+        assertThrows(PrinterNotFoundException.class, () -> service.deletePrinter(404L));
+        Mockito.verify(printerRepository, Mockito.never()).deleteById(Mockito.any());
+    }
 }

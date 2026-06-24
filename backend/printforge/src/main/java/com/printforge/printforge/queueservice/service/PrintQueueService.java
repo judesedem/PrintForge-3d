@@ -6,11 +6,14 @@ import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
+import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
+import com.printforge.printforge.printerservice.exception.PrinterBusyException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
+import com.printforge.printforge.printerservice.model.Printer;
 import com.printforge.printforge.printerservice.repository.PrinterRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -22,37 +25,27 @@ import java.util.Set;
 @Service
 public class PrintQueueService {
 
-    // Matches the comment on PrintJob.status. Centralized here so
-    // updateJobStatus can actually enforce it instead of accepting anything.
     private static final Set<String> VALID_STATUSES =
-            Set.of("PENDING", "SLICING", "PRINTING", "COMPLETED", "FAILED");
+            Set.of("SUBMITTED", "APPROVED", "QUEUED", "PRINTING", "COMPLETED", "REJECTED");
 
     private final PrintJobRepository printJobRepository;
     private final ModelFileRepository modelFileRepository;
     private final EstimateRepository estimateRepository;
     private final PrinterRepository printerRepository;
+    private final NotificationService notificationService;
 
     public PrintQueueService(PrintJobRepository printJobRepository,
                               ModelFileRepository modelFileRepository,
                               EstimateRepository estimateRepository,
-                              PrinterRepository printerRepository) {
+                              PrinterRepository printerRepository,
+                              NotificationService notificationService) {
         this.printJobRepository = printJobRepository;
         this.modelFileRepository = modelFileRepository;
         this.estimateRepository = estimateRepository;
         this.printerRepository = printerRepository;
+        this.notificationService = notificationService;
     }
 
-    /**
-     * Triggered after a customer checks out.
-     *
-     * Previously this only checked that fileId/estimateId existed
-     * (existsById) — it never checked who they belonged to. A student who
-     * knew or guessed another student's fileId/estimateId could create a
-     * job using someone else's uploaded file or cost estimate. Now it
-     * fetches the real records and checks ownership against the caller.
-     * No staff override here: this is "create my own job with my own
-     * resources," not an on-behalf-of operation.
-     */
     public PrintJob createPrintJob(Long fileId, Long estimateId, Long callerId) {
         ModelFile file = modelFileRepository.findById(fileId)
                 .orElseThrow(() -> new ModelFileNotFoundException(fileId));
@@ -70,7 +63,6 @@ public class PrintQueueService {
         newJob.setFileId(fileId);
         newJob.setEstimateId(estimateId);
         newJob.setUserId(callerId);
-        // Note: status is automatically set to "PENDING" and submittedAt is set by @PrePersist in the Model
         return printJobRepository.save(newJob);
     }
 
@@ -79,7 +71,6 @@ public class PrintQueueService {
                 .orElseThrow(() -> new PrintJobNotFoundException(jobId));
     }
 
-    // 2. VIEW THE QUEUE (For the Admin/Staff Dashboard)
     public List<PrintJob> getAllJobs() {
         return printJobRepository.findAll();
     }
@@ -88,29 +79,18 @@ public class PrintQueueService {
         return printJobRepository.findByStatus(status.toUpperCase());
     }
 
-    /**
-     * Student-scoped view: only this user's own jobs, optionally filtered
-     * by status. The controller calls this instead of getAllJobs()/
-     * getJobsByStatus() for non-staff callers.
-     */
     public List<PrintJob> getJobsForUser(Long userId, String status) {
         List<PrintJob> jobs = printJobRepository.findByUserId(userId);
-        if (status == null || status.isBlank()) {
-            return jobs;
-        }
+        if (status == null || status.isBlank()) return jobs;
         String normalized = status.toUpperCase();
         return jobs.stream().filter(j -> normalized.equals(j.getStatus())).toList();
     }
 
-    // 3. UPDATE JOB STATUS (The most important operational method)
-    public PrintJob updateJobStatus(Long jobId, String newStatus, String printerId, String operatorNotes, String trackingNumber) {
-
-        // Find the job, or throw a proper 404 (was a generic RuntimeException -> 500 before)
+    public PrintJob updateJobStatus(Long jobId, String newStatus, String printerId,
+                                     String operatorNotes, String trackingNumber) {
         PrintJob job = printJobRepository.findById(jobId)
                 .orElseThrow(() -> new PrintJobNotFoundException(jobId));
 
-        // Previously any string was accepted here, uppercased, and saved —
-        // a typo created a permanently broken/unrecognized status with no error.
         String normalizedStatus = newStatus == null ? "" : newStatus.trim().toUpperCase();
         if (!VALID_STATUSES.contains(normalizedStatus)) {
             throw new InvalidJobStatusException(
@@ -118,30 +98,69 @@ public class PrintQueueService {
         }
         job.setStatus(normalizedStatus);
 
-        // Previously printerId was free text with no validation at all —
-        // staff could assign a job to a printer name that didn't exist
-        // anywhere, with no error. Now it has to match a real registered
-        // printer (see Printer/PrinterRepository).
+        // Printer assignment with cascading status
         if (printerId != null && !printerId.isBlank()) {
-            if (!printerRepository.existsByPrinterName(printerId)) {
-                throw new PrinterNotFoundException(printerId);
+            Printer newPrinter = printerRepository.findByPrinterName(printerId)
+                    .orElseThrow(() -> new PrinterNotFoundException(printerId));
+
+            boolean reassigningSamePrinter = printerId.equals(job.getAssignedPrinter());
+            if (!reassigningSamePrinter && !"AVAILABLE".equals(newPrinter.getStatus())) {
+                throw new PrinterBusyException(printerId, newPrinter.getStatus());
             }
+
+            // Free old printer if reassigning
+            String previousPrinter = job.getAssignedPrinter();
+            if (previousPrinter != null && !previousPrinter.isBlank() &&
+                    !previousPrinter.equals(printerId)) {
+                printerRepository.findByPrinterName(previousPrinter).ifPresent(old -> {
+                    old.setStatus("AVAILABLE");
+                    printerRepository.save(old);
+                });
+            }
+
+            newPrinter.setStatus("BUSY");
+            printerRepository.save(newPrinter);
             job.setAssignedPrinter(printerId);
         }
+
         if (operatorNotes != null) job.setOperatorNotes(operatorNotes);
         if (trackingNumber != null) job.setShippingTrackingNumber(trackingNumber);
 
-        // Smart Timestamp Logic based on the status change
+        // Timestamps and printer cleanup on terminal statuses
         if ("PRINTING".equals(normalizedStatus) && job.getStartedAt() == null) {
             job.setStartedAt(LocalDateTime.now());
-            // In a real scenario, you'd pull the durationMinutes from the Estimate Service here to set the ETA
-            // job.setEstimatedCompletionAt(LocalDateTime.now().plusMinutes(estimateDuration));
-        } else if ("COMPLETED".equals(normalizedStatus) || "FAILED".equals(normalizedStatus)) {
-            if (job.getCompletedAt() == null) {
-                job.setCompletedAt(LocalDateTime.now());
+        } else if ("COMPLETED".equals(normalizedStatus) || "REJECTED".equals(normalizedStatus)) {
+            if (job.getCompletedAt() == null) job.setCompletedAt(LocalDateTime.now());
+            String assignedPrinter = job.getAssignedPrinter();
+            if (assignedPrinter != null && !assignedPrinter.isBlank()) {
+                printerRepository.findByPrinterName(assignedPrinter).ifPresent(p -> {
+                    p.setStatus("AVAILABLE");
+                    printerRepository.save(p);
+                });
             }
         }
 
-        return printJobRepository.save(job);
+        PrintJob saved = printJobRepository.save(job);
+
+        // Auto-trigger notifications on key status changes (Phase 4 communication loop)
+        switch (normalizedStatus) {
+            case "PRINTING" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Print Started",
+                    "Your print job has started printing!",
+                    "info");
+            case "COMPLETED" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Print Complete",
+                    "Your print job is complete and ready for collection.",
+                    "success");
+            case "REJECTED" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Job Rejected",
+                    "Your print job was rejected. Check operator notes.",
+                    "error");
+        }
+
+        return saved;
     }
 }

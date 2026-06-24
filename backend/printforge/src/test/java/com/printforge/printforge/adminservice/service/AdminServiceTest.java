@@ -1,9 +1,11 @@
 package com.printforge.printforge.adminservice.service;
 
+import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.printerservice.model.Printer;
 import com.printforge.printforge.printerservice.repository.PrinterRepository;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
+import com.printforge.printforge.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -23,13 +25,19 @@ class AdminServiceTest {
 
     PrintJobRepository printJobRepository;
     PrinterRepository printerRepository;
+    DesignListingRepository designListingRepository;
+    UserRepository userRepository;
     AdminService service;
 
     @BeforeEach
     void setUp() {
         printJobRepository = Mockito.mock(PrintJobRepository.class);
         printerRepository = Mockito.mock(PrinterRepository.class);
-        service = new AdminService(printJobRepository, printerRepository);
+        designListingRepository = Mockito.mock(DesignListingRepository.class);
+        userRepository = Mockito.mock(UserRepository.class);
+        // sumEarningsByDesigner returns empty list by default — no earnings to display
+        Mockito.when(designListingRepository.sumEarningsByDesigner()).thenReturn(List.of());
+        service = new AdminService(printJobRepository, printerRepository, designListingRepository, userRepository);
     }
 
     private PrintJob jobWithStatus(String status) {
@@ -47,8 +55,8 @@ class AdminServiceTest {
     @Test
     void summaryCountsJobsAndPrintersByStatus() {
         Mockito.when(printJobRepository.findAll()).thenReturn(List.of(
-                jobWithStatus("PENDING"),
-                jobWithStatus("PENDING"),
+                jobWithStatus("SUBMITTED"),
+                jobWithStatus("SUBMITTED"),
                 jobWithStatus("PRINTING")
         ));
         Mockito.when(printerRepository.findAll()).thenReturn(List.of(
@@ -63,7 +71,7 @@ class AdminServiceTest {
 
         @SuppressWarnings("unchecked")
         Map<String, Long> jobsByStatus = (Map<String, Long>) summary.get("jobsByStatus");
-        assertEquals(2L, jobsByStatus.get("PENDING"));
+        assertEquals(2L, jobsByStatus.get("SUBMITTED"));
         assertEquals(1L, jobsByStatus.get("PRINTING"));
 
         @SuppressWarnings("unchecked")

@@ -49,9 +49,17 @@ public class EstimateController {
     }
 
     // NEW — didn't exist before at all. Contract doc calls for
-    // GET /api/estimates/{jobId}; this is by estimate id, since an estimate
-    // is created before a job exists (Queue Service's createPrintJob takes
-    // an existing estimateId as input).
+    // GET /api/estimates/{jobId}; this is intentionally by estimate id
+    // instead, since an estimate is created before a job exists (Queue
+    // Service's createPrintJob takes an existing estimateId as input).
+    // Note: an earlier revision of this endpoint renamed the path variable
+    // to {jobId} to look like it matched the contract doc, but the lookup
+    // underneath was never changed — it still queries by the estimate's own
+    // id. Calling it {jobId} while it actually required an estimate id was
+    // a real landmine: anyone reading the route would reasonably pass a
+    // print job's id and get a 404, or worse, an unrelated estimate that
+    // happens to share that numeric id. Reverted the name to {id} so the
+    // route says what it actually does.
     @GetMapping("/{id}")
     public ResponseEntity<Estimate> getEstimateById(@PathVariable Long id, Authentication authentication) {
         Estimate estimate = estimateService.getEstimateById(id);

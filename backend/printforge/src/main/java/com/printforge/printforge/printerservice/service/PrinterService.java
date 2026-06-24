@@ -67,4 +67,12 @@ public class PrinterService {
         printer.setStatus(normalized);
         return printerRepository.save(printer);
     }
+
+    /** Wasn't possible at all before — a typo'd printer name had no way to be removed. */
+    public void deletePrinter(Long id) {
+        if (!printerRepository.existsById(id)) {
+            throw new PrinterNotFoundException(id);
+        }
+        printerRepository.deleteById(id);
+    }
 }

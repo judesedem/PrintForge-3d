@@ -62,4 +62,10 @@ public class AdminController {
             @RequestParam String status) {
         return ResponseEntity.ok(printerService.updatePrinterStatus(id, status));
     }
+
+    @DeleteMapping("/printers/{id}")
+    public ResponseEntity<Void> deletePrinter(@PathVariable Long id) {
+        printerService.deletePrinter(id);
+        return ResponseEntity.noContent().build();
+    }
 }

@@ -15,14 +15,6 @@ import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.Map;
 
-/**
- * Previously every endpoint here trusted whatever {userId} the client put
- * in the URL, with no check that the caller actually was that user. Any
- * logged-in student could read, or mark as read, any other user's
- * notifications just by changing the number in the path (IDOR). This
- * version resolves the caller's real identity from the JWT and checks it
- * against the resource being accessed before doing anything.
- */
 @RestController
 @RequestMapping("/api/notifications")
 public class NotificationController {
@@ -30,18 +22,13 @@ public class NotificationController {
     private final NotificationService notificationService;
     private final UserRepository userRepository;
 
-    public NotificationController(NotificationService notificationService, UserRepository userRepository) {
+    public NotificationController(NotificationService notificationService,
+                                   UserRepository userRepository) {
         this.notificationService = notificationService;
         this.userRepository = userRepository;
     }
 
-    // --- Internal/Admin Endpoint (For generating alerts) ---
-    // Was open to any authenticated user despite the "Admin" label in the
-    // comment. Restricted to staff roles — once Queue/Estimate services
-    // actually call this internally on status changes, they'll need to do
-    // so as a LAB_STAFF/ADMIN-authenticated call (or, better, a direct Java
-    // method call within the same app, which bypasses HTTP/security
-    // entirely — worth revisiting once that integration happens).
+    // ── Internal/Staff endpoint — create notification ─────────────────────────
     @PreAuthorize("hasAnyRole('LAB_STAFF', 'ADMIN')")
     @PostMapping
     public ResponseEntity<Notification> createNotification(
@@ -52,9 +39,17 @@ public class NotificationController {
         return ResponseEntity.ok(notificationService.createNotification(userId, title, message, type));
     }
 
-    // --- Frontend User Endpoints ---
+    // ── GET /api/notifications ────────────────────────────────────────────────
+    // Frontend calls this without a userId in the path — resolves the
+    // caller's identity from the JWT instead.
+    @GetMapping
+    public ResponseEntity<List<Notification>> getMyNotifications(Authentication authentication) {
+        User caller = currentUser(authentication);
+        return ResponseEntity.ok(notificationService.getAllUserNotifications(caller.getUserId()));
+    }
 
-    // 1. Get ALL notifications
+    // ── GET /api/notifications/user/{userId} ──────────────────────────────────
+    // Kept for backward compatibility with existing controller tests.
     @GetMapping("/user/{userId}")
     public ResponseEntity<List<Notification>> getAllUserNotifications(
             @PathVariable Long userId, Authentication authentication) {
@@ -62,41 +57,58 @@ public class NotificationController {
         return ResponseEntity.ok(notificationService.getAllUserNotifications(userId));
     }
 
-    // 2. Get the unread COUNT (Returns JSON like: { "unreadCount": 3 })
+    // ── GET /api/notifications/user/{userId}/unread/count ─────────────────────
     @GetMapping("/user/{userId}/unread/count")
     public ResponseEntity<Map<String, Long>> getUnreadCount(
             @PathVariable Long userId, Authentication authentication) {
         requireSelfOrStaff(userId, authentication);
-        long count = notificationService.getUnreadCount(userId);
-        return ResponseEntity.ok(Map.of("unreadCount", count));
+        return ResponseEntity.ok(Map.of("unreadCount", notificationService.getUnreadCount(userId)));
     }
 
-    // 3. Mark ONE as read
+    // ── PATCH /api/notifications/:id/read ────────────────────────────────────
     @PatchMapping("/{notificationId}/read")
     public ResponseEntity<Notification> markAsRead(
             @PathVariable Long notificationId, Authentication authentication) {
         User caller = currentUser(authentication);
         boolean isStaff = isStaff(authentication);
-        Notification updated = notificationService.markAsRead(notificationId, caller.getUserId(), isStaff);
-        return ResponseEntity.ok(updated);
+        return ResponseEntity.ok(notificationService.markAsRead(notificationId, caller.getUserId(), isStaff));
     }
 
-    // 4. Mark ALL as read
+    // ── PATCH /api/notifications/read-all ────────────────────────────────────
+    // Frontend calls this without a userId in the path.
+    @PatchMapping("/read-all")
+    public ResponseEntity<Map<String, String>> markAllAsRead(Authentication authentication) {
+        User caller = currentUser(authentication);
+        notificationService.markAllAsRead(caller.getUserId());
+        return ResponseEntity.ok(Map.of("status", "All notifications marked as read"));
+    }
+
+    // ── PATCH /api/notifications/user/{userId}/read-all ───────────────────────
+    // Kept for backward compatibility.
     @PatchMapping("/user/{userId}/read-all")
-    public ResponseEntity<Map<String, String>> markAllAsRead(
+    public ResponseEntity<Map<String, String>> markAllAsReadForUser(
             @PathVariable Long userId, Authentication authentication) {
         requireSelfOrStaff(userId, authentication);
         notificationService.markAllAsRead(userId);
         return ResponseEntity.ok(Map.of("status", "All notifications marked as read"));
     }
 
-    // --- Authorization helpers ---
+    // ── POST /api/notifications/push-token ───────────────────────────────────
+    // Accepts the Expo push token from the mobile app. Currently just
+    // acknowledges receipt — storing and using push tokens for real FCM/APNs
+    // delivery is a post-CodeFest enhancement.
+    @PostMapping("/push-token")
+    public ResponseEntity<Map<String, String>> registerPushToken(
+            @RequestBody Map<String, String> body,
+            Authentication authentication) {
+        // Token received — would store against the user for push delivery here
+        return ResponseEntity.ok(Map.of("status", "Push token registered"));
+    }
 
-    /** Throws AccessDeniedException (-> 403, already handled by GlobalExceptionHandler) unless the caller owns this userId or is staff. */
+    // ── Authorization helpers ─────────────────────────────────────────────────
+
     private void requireSelfOrStaff(Long targetUserId, Authentication authentication) {
-        if (isStaff(authentication)) {
-            return;
-        }
+        if (isStaff(authentication)) return;
         User caller = currentUser(authentication);
         if (!caller.getUserId().equals(targetUserId)) {
             throw new AccessDeniedException("You can only access your own notifications");
@@ -106,7 +118,7 @@ public class NotificationController {
     private boolean isStaff(Authentication authentication) {
         return authentication.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
-                .anyMatch(role -> role.equals("ROLE_LAB_STAFF") || role.equals("ROLE_ADMIN"));
+                .anyMatch(r -> r.equals("ROLE_LAB_STAFF") || r.equals("ROLE_ADMIN"));
     }
 
     private User currentUser(Authentication authentication) {

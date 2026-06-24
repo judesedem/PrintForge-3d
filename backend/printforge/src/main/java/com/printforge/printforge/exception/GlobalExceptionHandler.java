@@ -1,6 +1,8 @@
 package com.printforge.printforge.exception;
 
+
 import com.printforge.printforge.dto.ErrorResponse;
+import com.printforge.printforge.fileservice.exception.CloudinaryUploadException;
 import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
@@ -11,6 +13,9 @@ import com.printforge.printforge.estimateservice.exception.EstimateNotFoundExcep
 import com.printforge.printforge.estimateservice.exception.InvalidEstimateInputException;
 import com.printforge.printforge.printerservice.exception.DuplicatePrinterException;
 import com.printforge.printforge.printerservice.exception.InvalidPrinterStatusException;
+import com.printforge.printforge.printerservice.exception.PrinterBusyException;
+import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
+import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -114,6 +119,30 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicatePrinterException.class)
     public ResponseEntity<ErrorResponse> handleDuplicatePrinter(DuplicatePrinterException ex) {
         return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(ListingNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleListingNotFound(ListingNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(ListingNotPublishedException.class)
+    public ResponseEntity<ErrorResponse> handleListingNotPublished(ListingNotPublishedException ex) {
+        return buildError(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<ErrorResponse> handleIllegalState(IllegalStateException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(PrinterBusyException.class)
+    public ResponseEntity<ErrorResponse> handlePrinterBusy(PrinterBusyException ex) {
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+    @ExceptionHandler(CloudinaryUploadException.class)
+    public ResponseEntity<ErrorResponse> handleCloudinaryUpload(CloudinaryUploadException ex) {
+        return buildError(HttpStatus.BAD_GATEWAY, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
