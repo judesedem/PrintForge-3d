@@ -2,6 +2,7 @@
 Frontend/node_modules/
 Frontend/.expo/
 Frontend/dist/
+Frontend
 
 # Backend
 **/target/
