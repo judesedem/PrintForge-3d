@@ -40,8 +40,14 @@ public class ModelFile {
     @Column(name = "uploaded_at", updatable = false)
     private LocalDateTime uploadedAt;
 
-    @Column(name = "uploaded_by")
-    private String uploadedBy;
+    // Who uploaded this file, tracked by userId like every other entity in
+    // the app (PrintJob, Estimate, Notification all use userId). This used
+    // to be the uploader's email instead — the only place in the codebase
+    // that tracked ownership that way — which made ownership checks here
+    // inconsistent with everywhere else. Nullable for the same reason as
+    // fileUrl above: don't assume a fresh DB.
+    @Column(name = "user_id")
+    private Long userId;
 
     @PrePersist
     protected void onCreate() {

@@ -22,23 +22,23 @@ public class FileService {
     }
 
     /**
-     * Writes the uploaded file's bytes to disk via FileStorageService, then
-     * persists the metadata row. fileUrl is filled in on a second save once
-     * the row has a generated id, since the download URL embeds that id.
+     * Uploads the file to Cloudinary via FileStorageService, then persists the
+     * metadata row. store() now returns a Cloudinary HTTPS URL directly, so
+     * both storedFilename and fileUrl are set to the same URL in one save.
      */
-    public ModelFile saveFileMetadata(MultipartFile file, String uploaderEmail) {
-        String storedFilename = fileStorageService.store(file);
+    public ModelFile saveFileMetadata(MultipartFile file, Long uploaderId) {
+        // store() now returns a Cloudinary HTTPS URL, not a local filename
+        String cloudinaryUrl = fileStorageService.store(file);
 
         ModelFile newFile = new ModelFile();
         newFile.setFileName(file.getOriginalFilename());
         newFile.setFileType(file.getContentType() != null ? file.getContentType() : "application/octet-stream");
-        newFile.setStoredFilename(storedFilename);
+        newFile.setStoredFilename(cloudinaryUrl);   // reuse field to store the URL
+        newFile.setFileUrl(cloudinaryUrl);          // direct public URL for the frontend
         newFile.setFileSizeBytes(file.getSize());
-        newFile.setUploadedBy(uploaderEmail);
+        newFile.setUserId(uploaderId);
 
-        ModelFile saved = fileRepository.save(newFile);
-        saved.setFileUrl("/api/files/" + saved.getFileId() + "/download");
-        return fileRepository.save(saved);
+        return fileRepository.save(newFile);        // single save — no second pass needed
     }
 
     public ModelFile getFileById(Long id) {
@@ -51,11 +51,11 @@ public class FileService {
     }
 
     /** Self-scoped view for non-staff callers: only files they uploaded. */
-    public List<ModelFile> getFilesForUser(String uploaderEmail) {
-        return fileRepository.findByUploadedBy(uploaderEmail);
+    public List<ModelFile> getFilesForUser(Long userId) {
+        return fileRepository.findByUserId(userId);
     }
 
-    /** Loads the actual file bytes off disk for a given metadata record, for the download endpoint. */
+    /** Loads the actual file via Cloudinary URL for the download endpoint. */
     public Resource loadFileContent(Long id) {
         ModelFile metadata = getFileById(id);
         return fileStorageService.load(metadata.getStoredFilename());

@@ -11,35 +11,41 @@ public class PrintJob {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // --- Cross-Service Links ---
+    // Cross-service links
     private Long fileId;
     private Long estimateId;
     private Long userId;
 
-    // --- Production Status ---
-    private String status;    // "PENDING", "SLICING", "PRINTING", "COMPLETED", "FAILED"
+    // Job metadata — stored at submit time so responses are self-contained
+    // without requiring joins back to File/Estimate services
+    private String material;
+    private String color;
+    private Integer quantity;
+    private String infill;
+    private String quality;
+    private String notes;
 
-    // NEW: Farm Management
-    private String assignedPrinter; // e.g., "Prusa-MK3-04"
-    private String operatorNotes;   // e.g., "Failed at 80% - nozzle clog"
+    // Production status
+    private String status;
 
-    // NEW: Fulfillment
+    // Farm management
+    private String assignedPrinter;
+    private String operatorNotes;
     private String shippingTrackingNumber;
 
-    // --- The Timeline ---
+    // Timeline
     private LocalDateTime submittedAt;
     private LocalDateTime startedAt;
-    private LocalDateTime estimatedCompletionAt; // NEW: For the frontend ETA
+    private LocalDateTime estimatedCompletionAt;
     private LocalDateTime completedAt;
 
-    // --- Lifecycle Callbacks ---
     @PrePersist
     protected void onCreate() {
         this.submittedAt = LocalDateTime.now();
-        this.status = "PENDING";
+        this.status = "SUBMITTED";
     }
 
-    // --- Getters and Setters ---
+    // Getters and setters
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
 
@@ -51,6 +57,24 @@ public class PrintJob {
 
     public Long getUserId() { return userId; }
     public void setUserId(Long userId) { this.userId = userId; }
+
+    public String getMaterial() { return material; }
+    public void setMaterial(String material) { this.material = material; }
+
+    public String getColor() { return color; }
+    public void setColor(String color) { this.color = color; }
+
+    public Integer getQuantity() { return quantity; }
+    public void setQuantity(Integer quantity) { this.quantity = quantity; }
+
+    public String getInfill() { return infill; }
+    public void setInfill(String infill) { this.infill = infill; }
+
+    public String getQuality() { return quality; }
+    public void setQuality(String quality) { this.quality = quality; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }

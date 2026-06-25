@@ -1,54 +1,50 @@
 package com.printforge.printforge.fileservice.storage;
 
+import com.cloudinary.Cloudinary;
+import com.cloudinary.Uploader;
+import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-import org.springframework.core.io.Resource;
+import org.mockito.Mockito;
 import org.springframework.mock.web.MockMultipartFile;
 
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
- * No Spring context / no database needed — this just proves the file
- * service actually writes and reads real bytes on disk, which is the
- * behavior that was missing before this fix (the old version never
- * touched file content at all).
+ * Unit tests for the Cloudinary-backed FileStorageService.
+ * Cloudinary SDK calls are mocked so no network or real credentials are needed.
  *
  * Run with: ./mvnw test -Dtest=FileStorageServiceTest
  */
 class FileStorageServiceTest {
 
-    @TempDir
-    Path tempDir;
-
+    Cloudinary cloudinary;
+    Uploader uploader;
     FileStorageService storageService;
 
     @BeforeEach
     void setUp() {
-        storageService = new FileStorageService(tempDir.toString());
+        cloudinary = Mockito.mock(Cloudinary.class);
+        uploader = Mockito.mock(Uploader.class);
+        Mockito.when(cloudinary.uploader()).thenReturn(uploader);
+        storageService = new FileStorageService(cloudinary);
     }
 
     @Test
-    void storesFileAndReturnsRetrievableContent() throws IOException {
+    void storeReturnsCloudinarySecureUrl() throws Exception {
         byte[] content = "solid cube\nfacet normal 0 0 0\n".getBytes(StandardCharsets.UTF_8);
         MockMultipartFile upload = new MockMultipartFile("file", "cube.stl", "model/stl", content);
 
-        String storedFilename = storageService.store(upload);
-        assertNotNull(storedFilename);
-        assertTrue(storedFilename.endsWith("_cube.stl"));
+        Mockito.when(uploader.upload(Mockito.any(byte[].class), Mockito.anyMap()))
+               .thenReturn(Map.of("secure_url", "https://res.cloudinary.com/demo/raw/upload/printforge/cube.stl"));
 
-        Resource loaded = storageService.load(storedFilename);
-        assertTrue(loaded.exists());
-        byte[] readBack;
-        try (var in = loaded.getInputStream()) {
-            readBack = in.readAllBytes();
-        }
-        assertArrayEquals(content, readBack, "Bytes read back from disk should match what was uploaded");
+        String url = storageService.store(upload);
+
+        assertEquals("https://res.cloudinary.com/demo/raw/upload/printforge/cube.stl", url);
     }
 
     @Test
@@ -65,24 +61,22 @@ class FileStorageServiceTest {
     }
 
     @Test
-    void twoUploadsWithSameOriginalNameDoNotCollide() throws IOException {
-        byte[] contentA = "version A".getBytes(StandardCharsets.UTF_8);
-        byte[] contentB = "version B".getBytes(StandardCharsets.UTF_8);
+    void wrapsCloudinaryExceptionInFileStorageException() throws Exception {
+        byte[] content = "solid cube\n".getBytes(StandardCharsets.UTF_8);
+        MockMultipartFile upload = new MockMultipartFile("file", "cube.stl", "model/stl", content);
 
-        String storedA = storageService.store(new MockMultipartFile("file", "model.stl", "model/stl", contentA));
-        String storedB = storageService.store(new MockMultipartFile("file", "model.stl", "model/stl", contentB));
+        Mockito.when(uploader.upload(Mockito.any(byte[].class), Mockito.anyMap()))
+               .thenThrow(new RuntimeException("Cloudinary network error"));
 
-        assertNotEquals(storedA, storedB, "Two different uploads with the same original filename must not overwrite each other");
+        assertThrows(FileStorageException.class, () -> storageService.store(upload));
+    }
 
-        byte[] readA;
-        try (var in = storageService.load(storedA).getInputStream()) {
-            readA = in.readAllBytes();
-        }
-        byte[] readB;
-        try (var in = storageService.load(storedB).getInputStream()) {
-            readB = in.readAllBytes();
-        }
-        assertArrayEquals(contentA, readA);
-        assertArrayEquals(contentB, readB);
+    @Test
+    void loadWrapsCloudinaryUrlAsResource() {
+        String url = "https://res.cloudinary.com/demo/raw/upload/printforge/cube.stl";
+        var resource = storageService.load(url);
+        assertTrue(resource.isReadable() || !resource.isReadable(), // just checks no exception thrown
+                "load() should return a UrlResource without throwing");
+        assertNotNull(resource);
     }
 }

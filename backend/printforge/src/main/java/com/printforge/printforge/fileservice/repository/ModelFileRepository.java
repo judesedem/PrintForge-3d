@@ -10,5 +10,5 @@ import java.util.List;
 public interface ModelFileRepository extends JpaRepository<ModelFile, Long> {
     // JpaRepository gives us built-in methods like save(), findAll(), findById(), and deleteById() automatically!
 
-    List<ModelFile> findByUploadedBy(String uploadedBy);
+    List<ModelFile> findByUserId(Long userId);
 }
