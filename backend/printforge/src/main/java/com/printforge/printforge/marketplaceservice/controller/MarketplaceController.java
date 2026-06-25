@@ -91,7 +91,8 @@ public class MarketplaceController {
                         20,
                         1,
                         "PLA",
-                        caller.getUserId()
+                        caller.getUserId(),
+                        true  // file belongs to the designer, not the browsing customer
                 );
                 // Add base_price on top of machine+material cost
                 double totalWithBase = quote.getTotalCost()

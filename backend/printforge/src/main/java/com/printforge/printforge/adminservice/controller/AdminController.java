@@ -1,30 +1,26 @@
 package com.printforge.printforge.adminservice.controller;
 
 import com.printforge.printforge.adminservice.service.AdminService;
-import com.printforge.printforge.printerservice.model.Printer;
-import com.printforge.printforge.printerservice.service.PrinterService;
+import com.printforge.printforge.dto.AuthResponse;
+import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.service.AuthService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 /**
- * Matches the proposal's Admin Service: GET /api/admin/dashboard,
- * GET /api/admin/printers, PUT /api/admin/printers/{id}/status. Didn't
- * exist at all before this — there was no Printer entity, no way to list
- * what printers exist, and Queue Service let staff type any free-text
- * string into a job's assigned printer with no validation at all.
+ * Admin Service — dashboard summary and privileged user creation.
  *
- * One addition beyond the original contract: POST /api/admin/printers,
- * to actually register a printer in the first place — the contract
- * doc lists endpoints for reading/updating printers but never creating
- * one, which would leave this list permanently empty otherwise.
+ * Printer management (previously duplicated here as /api/admin/printers)
+ * has been consolidated into PrinterController (/api/printers), which is
+ * the single authoritative home for all printer CRUD. Those endpoints
+ * already gate mutations behind LAB_STAFF/ADMIN, and PrinterController
+ * additionally offers GET /{id} and proper JSON body conventions that the
+ * old @RequestParam routes here lacked.
  *
- * Class-level @PreAuthorize — every endpoint here is LAB_STAFF/ADMIN only.
- * Compare to GET /api/printers/available (PrinterController), which is
- * deliberately open to any authenticated user.
+ * Class-level @PreAuthorize — every remaining endpoint is LAB_STAFF/ADMIN only.
  */
 @RestController
 @RequestMapping("/api/admin")
@@ -32,11 +28,25 @@ import java.util.Map;
 public class AdminController {
 
     private final AdminService adminService;
-    private final PrinterService printerService;
+    private final AuthService authService;
 
-    public AdminController(AdminService adminService, PrinterService printerService) {
+    public AdminController(AdminService adminService, AuthService authService) {
         this.adminService = adminService;
-        this.printerService = printerService;
+        this.authService = authService;
+    }
+
+    /**
+     * ADMIN only — create a user with any role including LAB_STAFF and ADMIN.
+     * This is the only way to bootstrap privileged accounts now that
+     * /api/auth/register is restricted to STUDENT and DESIGNER.
+     *
+     * First-time setup: temporarily allow ADMIN self-registration once to
+     * create the first admin account, then lock it back down.
+     */
+    @PostMapping("/users")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<AuthResponse> createUser(@RequestBody RegisterRequest request) {
+        return ResponseEntity.ok(authService.createUserAsAdmin(request));
     }
 
     @GetMapping("/dashboard")
@@ -44,28 +54,4 @@ public class AdminController {
         return ResponseEntity.ok(adminService.getDashboardSummary());
     }
 
-    @GetMapping("/printers")
-    public ResponseEntity<List<Printer>> listAllPrinters() {
-        return ResponseEntity.ok(printerService.getAllPrinters());
-    }
-
-    @PostMapping("/printers")
-    public ResponseEntity<Printer> registerPrinter(
-            @RequestParam String printerName,
-            @RequestParam(required = false) String labLocation) {
-        return ResponseEntity.ok(printerService.registerPrinter(printerName, labLocation));
-    }
-
-    @PutMapping("/printers/{id}/status")
-    public ResponseEntity<Printer> updatePrinterStatus(
-            @PathVariable Long id,
-            @RequestParam String status) {
-        return ResponseEntity.ok(printerService.updatePrinterStatus(id, status));
-    }
-
-    @DeleteMapping("/printers/{id}")
-    public ResponseEntity<Void> deletePrinter(@PathVariable Long id) {
-        printerService.deletePrinter(id);
-        return ResponseEntity.noContent().build();
-    }
 }

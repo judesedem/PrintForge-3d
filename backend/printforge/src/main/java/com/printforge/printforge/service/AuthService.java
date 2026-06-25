@@ -54,29 +54,58 @@ public class AuthService {
     }
 
     /**
-     * Previously this method ignored request.getRole() entirely and every
-     * registration hardcoded Role.STUDENT — there was no way to create a
-     * LAB_STAFF or ADMIN account at all. Now it honors whatever role was
-     * sent (defaulting to STUDENT if none was given), case-insensitively,
-     * and rejects anything that isn't a real role with a clean 400 instead
-     * of letting Role.valueOf() throw an unhandled IllegalArgumentException.
-     *
-     * NOTE: this means /api/auth/register currently lets anyone self-elevate
-     * to ADMIN by just sending role=admin. That's intentional for now so a
-     * first admin account can be bootstrapped, but it's worth locking down
-     * once you have one: e.g. restrict this endpoint to STUDENT only, and
-     * add a separate admin-only endpoint for creating LAB_STAFF/ADMIN users.
+     * Self-registration is restricted to STUDENT and DESIGNER only.
+     * LAB_STAFF and ADMIN accounts can only be created by an existing ADMIN
+     * through POST /api/admin/users. This prevents anyone from self-elevating
+     * to a privileged role through the public register endpoint.
      */
     private Role resolveRole(String requestedRole) {
         if (requestedRole == null || requestedRole.isBlank()) {
             return Role.STUDENT;
         }
+        Role role;
         try {
-            return Role.valueOf(requestedRole.trim().toUpperCase());
+            role = Role.valueOf(requestedRole.trim().toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new InvalidRoleException(
-                    "Invalid role '" + requestedRole + "'. Must be one of: STUDENT, LAB_STAFF, ADMIN.");
+                    "Invalid role '" + requestedRole + "'. Must be one of: STUDENT, DESIGNER.");
         }
+        if (role == Role.LAB_STAFF || role == Role.ADMIN) {
+            throw new InvalidRoleException(
+                    "Role '" + role + "' cannot be self-assigned. Contact an administrator.");
+        }
+        return role;
+    }
+
+    /**
+     * Called only by POST /api/admin/users (ADMIN role required).
+     * Creates a user with any role including LAB_STAFF and ADMIN.
+     */
+    public AuthResponse createUserAsAdmin(RegisterRequest request) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new EmailAlreadyExistsException("Email already registered");
+        }
+        Role role;
+        try {
+            role = request.getRole() == null || request.getRole().isBlank()
+                    ? Role.STUDENT
+                    : Role.valueOf(request.getRole().trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new InvalidRoleException(
+                    "Invalid role '" + request.getRole() + "'. Must be one of: STUDENT, DESIGNER, LAB_STAFF, ADMIN.");
+        }
+        User user = User.builder()
+                .fullName(request.getFullName())
+                .email(request.getEmail())
+                .password(passwordEncoder.encode(request.getPassword()))
+                .role(role)
+                .build();
+        User savedUser = userRepository.save(user);
+        String token = jwtService.generateToken(savedUser.getEmail());
+        return AuthResponse.builder()
+                .token(token)
+                .user(toUserDto(savedUser))
+                .build();
     }
 
     public AuthResponse login(LoginRequest request) {

@@ -2,6 +2,7 @@ package com.printforge.printforge.config;
 
 import com.printforge.printforge.security.JwtAuthEntryPoint;
 import com.printforge.printforge.security.JwtAuthFilter;
+import com.printforge.printforge.security.RateLimitFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
@@ -30,6 +31,7 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final AuthenticationProvider authenticationProvider;
     private final JwtAuthEntryPoint jwtAuthEntryPoint;
+    private final RateLimitFilter rateLimitFilter;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, CorsConfigurationSource corsConfigurationSource) throws Exception {
@@ -47,7 +49,14 @@ public class SecurityConfig {
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
             )
             .authenticationProvider(authenticationProvider)
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            // Correct order: RateLimitFilter runs first (before JWT parsing
+            // overhead is incurred), then JwtAuthFilter. Previously both were
+            // anchored to UsernamePasswordAuthenticationFilter — the last
+            // addFilterBefore wins the ordering race, so jwtAuthFilter was
+            // silently executing first. Anchoring jwtAuthFilter to
+            // RateLimitFilter makes the order explicit and stable.
+            .addFilterBefore(rateLimitFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterBefore(jwtAuthFilter, RateLimitFilter.class);
 
         return http.build();
     }

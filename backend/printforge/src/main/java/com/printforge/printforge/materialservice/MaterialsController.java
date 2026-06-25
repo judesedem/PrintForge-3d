@@ -12,6 +12,12 @@ import java.util.List;
  * GET /api/materials — returns the available print materials with colors
  * and pricing. Hardcoded for now (no DB table needed for CodeFest scope);
  * matches the Material TypeScript interface the frontend expects.
+ *
+ * cost_per_gram is expressed in GH₵ per gram and matches the rates used by
+ * EstimateService (PLA: 0.05, RESIN: 0.15, ABS: 0.08). Previously this
+ * field was named cost_per_unit and held values 100× too large (5.00,
+ * 15.00, 8.00), causing a visible mismatch between the materials listing
+ * and any cost estimate shown alongside it.
  */
 @RestController
 @RequestMapping("/api/materials")
@@ -23,19 +29,19 @@ public class MaterialsController {
             new MaterialDto(
                 "mat-1", "PLA",
                 List.of("White", "Black", "Grey", "Red", "Blue", "Green", "Yellow", "Orange"),
-                5.00, "available",
+                0.05, "available",
                 "Standard thermoplastic. Great for most prints — easy to use, low warp, good detail."
             ),
             new MaterialDto(
                 "mat-2", "RESIN",
                 List.of("Clear", "White", "Grey", "Black"),
-                15.00, "available",
+                0.15, "available",
                 "High-detail photopolymer resin. Best for miniatures, jewellery, and fine detail work."
             ),
             new MaterialDto(
                 "mat-3", "ABS",
                 List.of("Black", "White", "Grey"),
-                8.00, "low",
+                0.08, "low",
                 "Engineering-grade plastic. More durable and heat-resistant than PLA. Low stock."
             )
         ));
@@ -53,8 +59,8 @@ public class MaterialsController {
 
         private final List<String> colors;
 
-        @JsonProperty("cost_per_unit")
-        private final double costPerUnit;
+        @JsonProperty("cost_per_gram")
+        private final double costPerUnit;  // stored as GH₵ per gram
 
         @JsonProperty("availability_status")
         private final String availabilityStatus;
@@ -74,7 +80,7 @@ public class MaterialsController {
         public String getMaterialId() { return materialId; }
         public String getMaterialName() { return materialName; }
         public List<String> getColors() { return colors; }
-        public double getCostPerUnit() { return costPerUnit; }
+        public double getCostPerGram() { return costPerUnit; }
         public String getAvailabilityStatus() { return availabilityStatus; }
         public String getDescription() { return description; }
     }
