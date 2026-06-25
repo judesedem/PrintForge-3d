@@ -110,10 +110,10 @@ public class PrintJobFacadeController {
             if (existing.isPresent() && caller.getUserId().equals(existing.get().getUserId())) {
                 estimate = existing.get();
             } else {
-                estimate = calculateEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
+                estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
             }
         } else {
-            estimate = calculateEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
+            estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
         }
 
         // Add designer's base_price on top of machine+material cost
@@ -122,24 +122,19 @@ public class PrintJobFacadeController {
             estimateRepository.save(estimate);
         }
 
-        // 5. Create the print job
-        PrintJob job = new PrintJob();
-        job.setFileId(fileId);
-        job.setEstimateId(estimate.getId());
-        job.setUserId(caller.getUserId());
-        job.setMaterial(material);
-        job.setColor(color);
-        job.setQuantity(quantity);
-        job.setInfill(infill);
-        job.setQuality(quality);
-        job.setNotes(notes);
-        PrintJob savedJob = printJobRepository.save(job);
+        // 5. Create the print job via PrintQueueService.
+        // skipFileOwnershipCheck=true: the file belongs to the designer; the
+        // listing being PUBLISHED is the gate that authorises the customer to
+        // order it. Estimate ownership is still enforced inside the service.
+        PrintJob savedJob = printQueueService.createPrintJob(
+                fileId, estimate.getId(), caller.getUserId(),
+                material, color, quantity, infill, quality, notes,
+                true);
 
-        // 6. Increment designer earnings
-        listing.setTotalOrders(listing.getTotalOrders() + 1);
-        listing.setTotalEarnings(listing.getTotalEarnings().add(
-                listing.getBasePrice() != null ? listing.getBasePrice() : BigDecimal.ZERO));
-        designListingRepository.save(listing);
+        // 6. Designer earnings are incremented in PaymentService.handleWebhook
+        // after payment actually confirms — not here at submission time.
+        // Counting here would over-report if the user abandons checkout or
+        // payment fails.
 
         // 7. Notify customer
         notificationService.createNotification(
@@ -171,17 +166,13 @@ public class PrintJobFacadeController {
         ModelFile savedFile = fileService.saveFileMetadata(file, caller.getUserId());
         Estimate estimate = calculateEstimate(savedFile.getFileId(), quality, infill, quantity, material, caller.getUserId());
 
-        PrintJob job = new PrintJob();
-        job.setFileId(savedFile.getFileId());
-        job.setEstimateId(estimate.getId());
-        job.setUserId(caller.getUserId());
-        job.setMaterial(material);
-        job.setColor(color);
-        job.setQuantity(quantity);
-        job.setInfill(infill);
-        job.setQuality(quality);
-        job.setNotes(notes);
-        PrintJob savedJob = printJobRepository.save(job);
+        // Route through the service so ownership checks are always enforced.
+        // skipFileOwnershipCheck=false: the file was just uploaded by this
+        // caller, so the check will pass — but we keep it on for correctness.
+        PrintJob savedJob = printQueueService.createPrintJob(
+                savedFile.getFileId(), estimate.getId(), caller.getUserId(),
+                material, color, quantity, infill, quality, notes,
+                false);
 
         notificationService.createNotification(
                 caller.getUserId(),
@@ -324,12 +315,26 @@ public class PrintJobFacadeController {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    /** Used for bring-your-own-file submissions — the file belongs to the caller. */
     private Estimate calculateEstimate(Long fileId, String quality, String infill, int quantity,
                                         String material, Long userId) {
         String mappedQuality = mapQuality(quality);
         int infillPercent = parseInfill(infill);
         return estimateService.calculateAndSaveEstimate(
                 fileId, mappedQuality, infillPercent, quantity, material.toUpperCase(), userId);
+    }
+
+    /**
+     * Used for marketplace submissions — the file belongs to the designer, not
+     * the customer. skipOwnershipCheck=true is safe here because the listing
+     * has already been verified as PUBLISHED before this is called.
+     */
+    private Estimate calculateMarketplaceEstimate(Long fileId, String quality, String infill,
+                                                   int quantity, String material, Long userId) {
+        String mappedQuality = mapQuality(quality);
+        int infillPercent = parseInfill(infill);
+        return estimateService.calculateAndSaveEstimate(
+                fileId, mappedQuality, infillPercent, quantity, material.toUpperCase(), userId, true);
     }
 
     private PrintJobResponse toResponse(PrintJob job, ModelFile file, User owner, Estimate estimate) {

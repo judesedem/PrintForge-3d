@@ -1,5 +1,7 @@
 package com.printforge.printforge.estimateservice.service;
 
+import com.printforge.printforge.entity.Role;
+import com.printforge.printforge.entity.User;
 import com.printforge.printforge.estimateservice.exception.EstimateNotFoundException;
 import com.printforge.printforge.estimateservice.exception.InvalidEstimateInputException;
 import com.printforge.printforge.estimateservice.model.Estimate;
@@ -7,6 +9,7 @@ import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
+import com.printforge.printforge.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -27,21 +30,30 @@ class EstimateServiceTest {
 
     EstimateRepository estimateRepository;
     ModelFileRepository modelFileRepository;
+    UserRepository userRepository;
     EstimateService service;
 
     @BeforeEach
     void setUp() {
         estimateRepository = Mockito.mock(EstimateRepository.class);
         modelFileRepository = Mockito.mock(ModelFileRepository.class);
-        service = new EstimateService(estimateRepository, modelFileRepository);
+        userRepository = Mockito.mock(UserRepository.class);
+        service = new EstimateService(estimateRepository, modelFileRepository, userRepository);
 
         Mockito.when(estimateRepository.save(Mockito.any(Estimate.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
+
+        // Default: requester is a STUDENT who owns file ID 1
+        User student = new User();
+        student.setUserId(7L);
+        student.setRole(Role.STUDENT);
+        Mockito.when(userRepository.findById(7L)).thenReturn(Optional.of(student));
     }
 
     private ModelFile fileOfSize(long bytes) {
         ModelFile file = new ModelFile();
         file.setFileId(1L);
+        file.setUserId(7L); // same as requester — ownership check passes
         file.setFileSizeBytes(bytes);
         return file;
     }

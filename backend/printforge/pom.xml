@@ -74,6 +74,13 @@
 			<artifactId>cloudinary-http44</artifactId>
 			<version>1.38.0</version>
 		</dependency>
+
+		<!-- Rate limiting — per-IP bucket for login and register endpoints -->
+		<dependency>
+			<groupId>com.bucket4j</groupId>
+			<artifactId>bucket4j-core</artifactId>
+			<version>8.10.1</version>
+		</dependency>
 		
 		<dependency>
 			<groupId>me.paulschwarz</groupId>

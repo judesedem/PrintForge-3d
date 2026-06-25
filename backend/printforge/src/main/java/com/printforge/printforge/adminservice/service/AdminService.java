@@ -3,7 +3,6 @@ package com.printforge.printforge.adminservice.service;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.printerservice.model.Printer;
 import com.printforge.printforge.printerservice.repository.PrinterRepository;
-import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
 import com.printforge.printforge.repository.UserRepository;
 import org.springframework.stereotype.Service;
@@ -30,9 +29,13 @@ public class AdminService {
     }
 
     public Map<String, Object> getDashboardSummary() {
-        List<PrintJob> allJobs = printJobRepository.findAll();
-        Map<String, Long> jobsByStatus = allJobs.stream()
-                .collect(Collectors.groupingBy(PrintJob::getStatus, Collectors.counting()));
+        // Count jobs by status directly in the DB — no full table load into memory
+        List<Object[]> jobStatusRows = printJobRepository.countGroupedByStatus();
+        Map<String, Long> jobsByStatus = new LinkedHashMap<>();
+        for (Object[] row : jobStatusRows) {
+            jobsByStatus.put((String) row[0], ((Number) row[1]).longValue());
+        }
+        long totalJobs = printJobRepository.countAllJobs();
 
         List<Printer> allPrinters = printerRepository.findAll();
         Map<String, Long> printersByStatus = allPrinters.stream()
@@ -53,7 +56,7 @@ public class AdminService {
         }).toList();
 
         Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("totalJobs", (long) allJobs.size());
+        summary.put("totalJobs", totalJobs);
         summary.put("jobsByStatus", jobsByStatus);
         summary.put("totalPrinters", (long) allPrinters.size());
         summary.put("printersByStatus", printersByStatus);

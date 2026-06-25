@@ -161,11 +161,26 @@ public class PaymentService {
         payment.setStatus("COMPLETED");
         payment.setCompletedAt(LocalDateTime.now());
 
-        // 5. Create the PrintJob — this is the gate
+        // 5. Create the PrintJob — this is the gate.
+        // Pull print parameters from the linked Estimate so that lab staff
+        // see a fully-populated job in the queue view, not a row of nulls.
+        // color and notes have no source here (they are captured at
+        // submission time in the facade, never sent to EstimateService),
+        // so they are left null — honest rather than fabricated.
+        Estimate linkedEstimate = estimateRepository.findById(payment.getEstimateId())
+                .orElseThrow(() -> new EstimateNotFoundException(payment.getEstimateId()));
+
         PrintJob job = new PrintJob();
         job.setFileId(resolveFileId(payment));
         job.setEstimateId(payment.getEstimateId());
         job.setUserId(payment.getUserId());
+        job.setMaterial(linkedEstimate.getMaterialType());
+        job.setQuantity(linkedEstimate.getQuantity());
+        // infillPercent is stored as an integer (e.g. 20); normalise to the
+        // "20%" string format the rest of the app uses on PrintJob.infill
+        job.setInfill(linkedEstimate.getInfillPercent() != null
+                ? linkedEstimate.getInfillPercent() + "%" : null);
+        job.setQuality(linkedEstimate.getQuality());
         // status defaults to SUBMITTED via @PrePersist on PrintJob
         PrintJob savedJob = printJobRepository.save(job);
 
@@ -180,13 +195,21 @@ public class PaymentService {
                 "Your payment was successful. Your print job has been submitted and is in the queue.",
                 "success");
 
-        // 8. Update marketplace listing stats if this was a marketplace order
+        // 8. Update marketplace listing stats if this was a marketplace order.
+        // This is the single place earnings are recorded — the facade no longer
+        // increments at submission time to avoid double-counting on payment
+        // confirmation.
+        // totalEarnings tracks what the designer earns, which is basePrice only
+        // (not the full payment.getAmount(), which also includes the machine and
+        // material cost that goes to the lab, not the designer).
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
+                BigDecimal designerEarning = listing.getBasePrice() != null
+                        ? listing.getBasePrice() : BigDecimal.ZERO;
                 BigDecimal prev = listing.getTotalEarnings() != null
                         ? listing.getTotalEarnings() : BigDecimal.ZERO;
-                listing.setTotalEarnings(prev.add(payment.getAmount()));
+                listing.setTotalEarnings(prev.add(designerEarning));
                 listingRepository.save(listing);
             });
         }

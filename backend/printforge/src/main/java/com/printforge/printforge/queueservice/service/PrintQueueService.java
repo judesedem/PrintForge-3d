@@ -46,10 +46,37 @@ public class PrintQueueService {
         this.notificationService = notificationService;
     }
 
+    /**
+     * Standard (BYOF) job creation — enforces that both the file and the
+     * estimate belong to the calling user.
+     */
     public PrintJob createPrintJob(Long fileId, Long estimateId, Long callerId) {
+        return createPrintJob(fileId, estimateId, callerId,
+                null, null, null, null, null, null, false);
+    }
+
+    /**
+     * Full job creation used by the facade, with print parameters and a flag
+     * to skip the file-ownership check for marketplace orders (where the file
+     * belongs to the designer, not the customer).
+     *
+     * skipFileOwnershipCheck=true is only safe when the caller has already
+     * verified the file comes from a PUBLISHED listing — never pass true from
+     * a user-facing endpoint that accepts a raw fileId from the client.
+     *
+     * The estimate ownership check is always enforced regardless of the flag:
+     * the estimate must belong to the calling user so a customer cannot attach
+     * another user's cost calculation to their order.
+     */
+    public PrintJob createPrintJob(Long fileId, Long estimateId, Long callerId,
+                                   String material, String color, Integer quantity,
+                                   String infill, String quality, String notes,
+                                   boolean skipFileOwnershipCheck) {
+
         ModelFile file = modelFileRepository.findById(fileId)
                 .orElseThrow(() -> new ModelFileNotFoundException(fileId));
-        if (!callerId.equals(file.getUserId())) {
+
+        if (!skipFileOwnershipCheck && !callerId.equals(file.getUserId())) {
             throw new AccessDeniedException("You can only create a print job using a file you uploaded yourself");
         }
 
@@ -63,6 +90,12 @@ public class PrintQueueService {
         newJob.setFileId(fileId);
         newJob.setEstimateId(estimateId);
         newJob.setUserId(callerId);
+        newJob.setMaterial(material);
+        newJob.setColor(color);
+        newJob.setQuantity(quantity);
+        newJob.setInfill(infill);
+        newJob.setQuality(quality);
+        newJob.setNotes(notes);
         return printJobRepository.save(newJob);
     }
 
