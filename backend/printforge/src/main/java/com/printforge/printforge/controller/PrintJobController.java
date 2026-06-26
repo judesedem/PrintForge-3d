@@ -11,13 +11,13 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import com.printforge.printforge.entity.PrintJob;
+import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.service.PrintJobService;
 
 import lombok.RequiredArgsConstructor;
 
 @RestController
-@RequestMapping("/api/print-jobs")
+@RequestMapping("/api/job-service/print-jobs")
 @RequiredArgsConstructor
 public class PrintJobController {
 

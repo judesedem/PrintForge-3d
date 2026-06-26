@@ -4,9 +4,8 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
-import com.printforge.printforge.entity.JobStatus;
-import com.printforge.printforge.entity.PrintJob;
-import com.printforge.printforge.repository.PrintJobRepository;
+import com.printforge.printforge.queueservice.model.PrintJob;
+import com.printforge.printforge.repository.JobServicePrintJobRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -14,11 +13,11 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class PrintJobService {
 
-    private final PrintJobRepository printJobRepository;
+    private final JobServicePrintJobRepository printJobRepository;
 
     public PrintJob createPrintJob(PrintJob printJob) {
         if (printJob.getStatus() == null) {
-            printJob.setStatus(JobStatus.SUBMITTED);
+            printJob.setStatus("SUBMITTED");
         }
 
         return printJobRepository.save(printJob);
@@ -36,24 +35,56 @@ public class PrintJobService {
     public PrintJob updatePrintJob(Long id, PrintJob updatedJob) {
         PrintJob existingJob = getPrintJobById(id);
 
-        if (updatedJob.getUserId() != null) {
-            existingJob.setUserId(updatedJob.getUserId());
-        }
-
         if (updatedJob.getFileId() != null) {
             existingJob.setFileId(updatedJob.getFileId());
         }
 
-        if (updatedJob.getMaterialId() != null) {
-            existingJob.setMaterialId(updatedJob.getMaterialId());
+        if (updatedJob.getEstimateId() != null) {
+            existingJob.setEstimateId(updatedJob.getEstimateId());
+        }
+
+        if (updatedJob.getUserId() != null) {
+            existingJob.setUserId(updatedJob.getUserId());
+        }
+
+        if (updatedJob.getMaterial() != null) {
+            existingJob.setMaterial(updatedJob.getMaterial());
+        }
+
+        if (updatedJob.getColor() != null) {
+            existingJob.setColor(updatedJob.getColor());
         }
 
         if (updatedJob.getQuantity() != null) {
             existingJob.setQuantity(updatedJob.getQuantity());
         }
 
+        if (updatedJob.getInfill() != null) {
+            existingJob.setInfill(updatedJob.getInfill());
+        }
+
+        if (updatedJob.getQuality() != null) {
+            existingJob.setQuality(updatedJob.getQuality());
+        }
+
+        if (updatedJob.getNotes() != null) {
+            existingJob.setNotes(updatedJob.getNotes());
+        }
+
         if (updatedJob.getStatus() != null) {
             existingJob.setStatus(updatedJob.getStatus());
+        }
+
+        if (updatedJob.getAssignedPrinter() != null) {
+            existingJob.setAssignedPrinter(updatedJob.getAssignedPrinter());
+        }
+
+        if (updatedJob.getOperatorNotes() != null) {
+            existingJob.setOperatorNotes(updatedJob.getOperatorNotes());
+        }
+
+        if (updatedJob.getShippingTrackingNumber() != null) {
+            existingJob.setShippingTrackingNumber(updatedJob.getShippingTrackingNumber());
         }
 
         return printJobRepository.save(existingJob);
