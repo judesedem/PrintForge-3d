@@ -61,9 +61,9 @@ export default function SwipeTabBar({ activeIndex, onChange }: Props) {
 function makeStyles(colors: Colors, bottomInset: number) {
   return StyleSheet.create({
     shell: {
-      backgroundColor: colors.sidebar,
+      backgroundColor: colors.card,
       borderTopWidth: 1,
-      borderTopColor: colors.sidebarBorder,
+      borderTopColor: colors.border,
       paddingHorizontal: designTokens.spacing.sm,
       paddingTop: 7,
       paddingBottom: Math.max(7, bottomInset),

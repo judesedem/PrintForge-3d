@@ -3,20 +3,24 @@ import { StyleSheet } from 'react-native';
 export type Theme = 'dark' | 'light';
 
 /**
- * PrintForge 3D visual identity
+ * PrintForge 3D visual identity — rebuilt to match the brand identity doc
+ * exactly. The four core brand colors are used for nothing but their named
+ * roles below:
+ *   Warm Orange #FF5803  → primary accent
+ *   Off Black   #222222  → dark-mode surfaces/cards
+ *   Off White   #E5E5E5  → light-mode background, dark-mode text
+ *   Navy        #16182B  → dark-mode background, light-mode text
  *
- * The named color keys below intentionally preserve the existing theme API so
- * screens can continue to call makeStyles(colors) without structural changes.
- * Extra semantic tokens are additive and are used to keep buttons, chips and
- * status treatments visually consistent across the app.
+ * Everything else (destructive/success/warning/info, printer/material/
+ * chart colors) is supplementary and intentionally untouched — the brand
+ * doc doesn't cover them, and they're already proper theme tokens rather
+ * than hardcoded literals in component files.
  */
 const brand = {
   primary: '#FF5803',
   navy: '#16182B',
   offBlack: '#222222',
-  coolGray: '#697386',
-  lightGray: '#E8EBF0',
-  white: '#FFFFFF',
+  offWhite: '#E5E5E5',
 };
 
 const shared = {
@@ -26,9 +30,13 @@ const shared = {
   warning: '#D97706',
   info: '#2563EB',
 
-  primarySoft: '#FFF0E8',
-  primaryPressed: '#E84F00',
-  onPrimary: '#FFFFFF',
+  primaryPressed: '#E04E00',
+  // Both onPrimary (text/icons on top of a primary-colored surface) and
+  // white (text/icons on top of dark/colored surfaces elsewhere — avatar
+  // initials, checkmarks on badges, etc.) are repointed to the brand's Off
+  // White rather than pure #FFFFFF, so nothing renders an unlisted white.
+  onPrimary: '#E5E5E5',
+  white: '#E5E5E5',
 
   printerAvailable: '#22A06B',
   printerBusy: '#FF5803',
@@ -48,56 +56,82 @@ const shared = {
   chart5: '#D92D20',
 };
 
+type StatusColor = { bg: string; text: string };
+
+/**
+ * The brand doc only specifies 3 status buckets (approved/pending/failed),
+ * but StatusBadge.tsx needs a color for all 8 JobStatus values. Mapped as a
+ * traffic-light simplification: APPROVED + COMPLETED → approved (green);
+ * SUBMITTED/QUEUED/PRINTING/IN_PROGRESS → pending (orange, "in the
+ * pipeline"); FAILED + REJECTED → failed (red). The brand doc also doesn't
+ * give a `dot` sub-color (used for small status indicators throughout the
+ * app) — reused `text` for `dot` rather than inventing an unlisted color.
+ */
+function statusColors(approved: StatusColor, pending: StatusColor, failed: StatusColor) {
+  const withDot = (c: StatusColor) => ({ ...c, dot: c.text });
+  return {
+    statusApproved: withDot(approved),
+    statusCompleted: withDot(approved),
+    statusSubmitted: withDot(pending),
+    statusQueued: withDot(pending),
+    statusPrinting: withDot(pending),
+    statusInProgress: withDot(pending),
+    statusFailed: withDot(failed),
+    statusRejected: withDot(failed),
+  };
+}
+
 const dark = {
   ...shared,
-  background: '#10121D',
-  foreground: '#F8FAFC',
-  card: '#191C2B',
-  secondary: '#222638',
-  muted: '#2B3045',
-  mutedFg: '#A8B0C0',
-  border: '#30364A',
+  background: '#16182B',
+  foreground: '#E5E5E5',
+  card: '#222222',
+  cardElevated: '#2A2A2A',
+  secondary: '#2A2A2A',
+  muted: 'rgba(229, 229, 229, 0.08)',
+  mutedFg: 'rgba(229, 229, 229, 0.55)',
+  border: 'rgba(229, 229, 229, 0.10)',
   sidebar: '#16182B',
-  sidebarFg: '#B8C0D0',
-  sidebarBorder: '#2B3045',
-  inputBg: '#202436',
-  overlay: 'rgba(16,18,29,0.72)',
+  sidebarFg: 'rgba(229, 229, 229, 0.7)',
+  sidebarBorder: 'rgba(229, 229, 229, 0.08)',
+  // Login mockup calls for input fields on colors.card — reused here so
+  // every text input in the app (not just login) picks up the same
+  // dark-mode surface treatment.
+  inputBg: '#222222',
+  overlay: 'rgba(22, 24, 43, 0.72)',
   shadow: '#000000',
+  primarySoft: 'rgba(255, 88, 3, 0.15)',
 
-  statusSubmitted: { bg: '#3A311C', text: '#F5C451', dot: '#D9A11A' },
-  statusApproved: { bg: '#183548', text: '#77C8F2', dot: '#38A4D8' },
-  statusQueued: { bg: '#3A311C', text: '#F5C451', dot: '#D9A11A' },
-  statusPrinting: { bg: '#3D2419', text: '#FF9C68', dot: '#FF5803' },
-  statusInProgress: { bg: '#3D2419', text: '#FF9C68', dot: '#FF5803' },
-  statusCompleted: { bg: '#17372B', text: '#72D7A7', dot: '#22A06B' },
-  statusFailed: { bg: '#3F2020', text: '#FDA29B', dot: '#D92D20' },
-  statusRejected: { bg: '#3F2020', text: '#FDA29B', dot: '#D92D20' },
+  ...statusColors(
+    { bg: 'rgba(34,197,94,0.15)', text: '#22C55E' },
+    { bg: 'rgba(255,88,3,0.15)', text: '#FF5803' },
+    { bg: 'rgba(239,68,68,0.15)', text: '#EF4444' },
+  ),
 };
 
 const light = {
   ...shared,
-  background: '#F6F7F9',
+  background: '#E5E5E5',
   foreground: '#16182B',
   card: '#FFFFFF',
-  secondary: '#F1F3F6',
-  muted: '#E8EBF0',
-  mutedFg: '#697386',
-  border: '#DDE1E7',
+  cardElevated: '#F5F5F5',
+  secondary: '#F5F5F5',
+  muted: 'rgba(22, 24, 43, 0.06)',
+  mutedFg: 'rgba(22, 24, 43, 0.55)',
+  border: 'rgba(22, 24, 43, 0.10)',
   sidebar: '#FFFFFF',
-  sidebarFg: '#697386',
-  sidebarBorder: '#E8EBF0',
-  inputBg: '#F7F8FA',
-  overlay: 'rgba(22,24,43,0.52)',
+  sidebarFg: 'rgba(22, 24, 43, 0.7)',
+  sidebarBorder: 'rgba(22, 24, 43, 0.08)',
+  inputBg: '#FFFFFF',
+  overlay: 'rgba(22, 24, 43, 0.52)',
   shadow: '#16182B',
+  primarySoft: 'rgba(255, 88, 3, 0.12)',
 
-  statusSubmitted: { bg: '#FFF7DB', text: '#8A5A00', dot: '#D9A11A' },
-  statusApproved: { bg: '#EAF7FF', text: '#075985', dot: '#38A4D8' },
-  statusQueued: { bg: '#FFF7DB', text: '#8A5A00', dot: '#D9A11A' },
-  statusPrinting: { bg: '#FFF0E8', text: '#B83E00', dot: '#FF5803' },
-  statusInProgress: { bg: '#FFF0E8', text: '#B83E00', dot: '#FF5803' },
-  statusCompleted: { bg: '#EAF8F1', text: '#126B43', dot: '#22A06B' },
-  statusFailed: { bg: '#FDECEC', text: '#A61B1B', dot: '#D92D20' },
-  statusRejected: { bg: '#FDECEC', text: '#A61B1B', dot: '#D92D20' },
+  ...statusColors(
+    { bg: 'rgba(34,197,94,0.12)', text: '#16A34A' },
+    { bg: 'rgba(255,88,3,0.12)', text: '#EA4500' },
+    { bg: 'rgba(239,68,68,0.12)', text: '#DC2626' },
+  ),
 };
 
 export const themes = { dark, light };
@@ -121,11 +155,20 @@ export const designTokens = {
     pill: 999,
   },
   type: {
-    display: 'Outfit_700Bold',
-    heading: 'Outfit_600SemiBold',
-    body: 'Outfit_400Regular',
-    medium: 'Outfit_500Medium',
-    mono: 'JetBrainsMono_400Regular',
+    // Barlow Condensed replaces Outfit entirely. The brand brief specifies
+    // exactly one bold weight "for all headings/labels" — display and
+    // heading previously used two different Outfit weights (700/600), but
+    // Barlow Condensed 700Bold now covers both roles.
+    display: 'BarlowCondensed_700Bold',
+    heading: 'BarlowCondensed_700Bold',
+    body: 'BarlowCondensed_400Regular',
+    medium: 'BarlowCondensed_500Medium',
+    // Barlow Condensed has no monospace variant, and the brief calls for
+    // removing @expo-google-fonts/jetbrains-mono entirely. MonoText.tsx
+    // (job IDs, tracking numbers) now renders in the medium weight instead
+    // of a true mono font — a visible but accepted regression, flagged in
+    // Handoff.md's Progress Log.
+    mono: 'BarlowCondensed_500Medium',
   },
 } as const;
 
@@ -218,5 +261,6 @@ export function getMaterialChipColors(colors: Colors, material: string) {
   }
 }
 
-// Fallback static export for files not yet migrated to ThemeContext.
-export const colors = light;
+// Fallback static export for files not yet migrated to ThemeContext. Dark
+// is the app's default theme, so this mirrors that.
+export const colors = dark;

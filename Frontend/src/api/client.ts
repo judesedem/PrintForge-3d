@@ -1,4 +1,7 @@
+import { router } from 'expo-router';
 import type { ErrorResponse } from './types';
+import { clearStoredToken } from '../authStorage';
+import { emitToast } from '../ToastContext';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -54,7 +57,13 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   } catch (networkError) {
     // fetch() throws on DNS failure, no connection, etc. — before we
     // ever get a status code. Surface this distinctly from a 4xx/5xx.
-    throw new ApiError(0, 'Could not reach the server. Check your connection and API URL.');
+    // Toasted here (this is the one universal choke point for every API
+    // call in the app) in addition to whatever inline error the calling
+    // screen shows — "no connection" is worth surfacing immediately
+    // rather than relying on the user to spot an inline message.
+    const message = 'Could not reach the server. Check your connection and API URL.';
+    emitToast(message);
+    throw new ApiError(0, message);
   }
 
   // 204 No Content (e.g. DELETE endpoints) — nothing to parse.
@@ -67,7 +76,23 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
 
   if (!response.ok) {
     const errorBody = data as ErrorResponse | undefined;
-    throw new ApiError(response.status, errorBody?.message ?? `Request failed (${response.status})`);
+    const message = errorBody?.message ?? `Request failed (${response.status})`;
+
+    // The backend has no refresh-token flow, so a 401 on an authenticated
+    // request means the JWT itself is invalid/expired — re-login is the
+    // only correct recovery. Gated on `token` being present on this
+    // specific request: /api/auth/login and /api/auth/register are
+    // unauthenticated endpoints that also return 401 for wrong
+    // credentials, and that case must NOT force-navigate away from the
+    // login screen the user is already looking at (auth.ts's login()/
+    // register() never pass a token, so they can't trigger this).
+    if (response.status === 401 && token) {
+      await clearStoredToken();
+      emitToast('Your session expired — please sign in again.');
+      router.replace('/(auth)/login');
+    }
+
+    throw new ApiError(response.status, message);
   }
 
   return data as T;

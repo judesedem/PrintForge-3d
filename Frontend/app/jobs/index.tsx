@@ -1,4 +1,5 @@
 import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   Bell,
@@ -8,17 +9,56 @@ import {
   WalletCards,
 } from 'lucide-react-native';
 import { useTheme } from '../../src/ThemeContext';
+import { useSession } from '../../src/SessionContext';
 import { useJobs } from '../../src/JobsContext';
+import { fetchMyPayments } from '../../src/api/payments';
 import { Colors, designTokens } from '../../src/theme';
 import Card from '../../src/components/Card';
 import JobCard from '../../src/components/JobCard';
 import GhsAmount from '../../src/components/GhsAmount';
 
+// NOTE on why there's no "Pay Now" button here: the backend's payment
+// flow doesn't attach to an existing PrintJob at all — POST
+// /api/payments/initiate takes an estimateId (+ optional listingId), and
+// paying is what CREATES a new PrintJob via the Paystack webhook (status
+// SUBMITTED), not something you do to an already-APPROVED one. There is
+// no backend field or endpoint linking a payment to a pre-existing job,
+// and PrintJobApiResponse (src/api/jobs.ts) doesn't expose an estimateId
+// to pay against even if there were. The real payment trigger is wired
+// into app/(app)/marketplace/[id].tsx instead, where a real estimateId
+// exists (the listing's auto-generated quote). See Handoff.md's Payments
+// batch entry for the full reasoning.
+//
+// What IS wired here: cross-referencing GET /api/payments/my-payments
+// against this job list by printJobId, to show a "PAID" pill on jobs that
+// resulted from a completed payment — real data, no backend changes
+// needed, since Payment.printJobId and Job.id are both already exposed.
 export default function JobsList() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { token } = useSession();
   const { jobs } = useJobs();
   const s = makeStyles(colors);
+
+  const [paidJobIds, setPaidJobIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!token) {
+      setPaidJobIds(new Set());
+      return;
+    }
+    // Best-effort, supplementary data — the jobs list itself doesn't
+    // depend on this, so a failure here just means no PAID pills show up
+    // rather than blocking or erroring the whole screen.
+    fetchMyPayments(token)
+      .then(payments => {
+        const ids = payments
+          .filter(p => p.status === 'COMPLETED' && p.printJobId)
+          .map(p => p.printJobId as string);
+        setPaidJobIds(new Set(ids));
+      })
+      .catch(() => {});
+  }, [token]);
 
   const activeJobs = jobs.filter(job =>
     ['SUBMITTED', 'APPROVED', 'QUEUED', 'PRINTING', 'IN_PROGRESS'].includes(job.status),
@@ -88,7 +128,11 @@ export default function JobsList() {
           </>
         )}
         renderItem={({ item }) => (
-          <JobCard job={item} onPress={() => router.push(`/jobs/${item.id}`)} />
+          <JobCard
+            job={item}
+            paid={paidJobIds.has(item.id)}
+            onPress={() => router.push(`/jobs/${item.id}`)}
+          />
         )}
         ListEmptyComponent={(
           <Card style={s.emptyCard}>
@@ -169,6 +213,8 @@ function makeStyles(colors: Colors) {
       flex: 1,
       padding: designTokens.spacing.md,
       alignItems: 'flex-start',
+      borderLeftWidth: 3,
+      borderLeftColor: colors.primary,
     },
     statIconOrange: {
       width: 34,

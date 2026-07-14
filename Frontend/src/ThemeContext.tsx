@@ -9,14 +9,17 @@ type ThemeContextType = {
 };
 
 const ThemeContext = createContext<ThemeContextType>({
-  theme: 'light',
-  colors: themes.light,
+  theme: 'dark',
+  colors: themes.dark,
   toggleTheme: () => {},
-  isDark: false,
+  isDark: true,
 });
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>('light');
+  // Dark mode is this app's default per the brand guide — always starts
+  // dark regardless of the device's system color-scheme setting (no
+  // useColorScheme() read here on purpose).
+  const [theme, setTheme] = useState<Theme>('dark');
 
   const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 

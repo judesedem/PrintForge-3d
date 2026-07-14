@@ -1,10 +1,9 @@
 import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
   Box,
-  CheckCircle,
   Clock,
   File,
   Gauge,
@@ -13,14 +12,19 @@ import {
   Plus,
   ShieldCheck,
   Sparkles,
-  Star,
 } from 'lucide-react-native';
 import ImageWithFallback from '@/components/ImageWithFallback';
 import Card from '@/components/Card';
 import GhsAmount from '@/components/GhsAmount';
 import MonoText from '@/components/MonoText';
-import { LISTINGS, Material, Quality } from '@/data/mockData';
+import PaystackWebView from '@/components/PaystackWebView';
+import { Material, Quality } from '@/data/mockData';
+import { fetchListing, MarketplaceListing, Quote } from '@/api/marketplace';
+import { initiatePayment, Payment } from '@/api/payments';
 import { useTheme } from '@/ThemeContext';
+import { useSession } from '@/SessionContext';
+import { useJobs } from '@/JobsContext';
+import { useToast } from '@/ToastContext';
 import {
   Colors,
   designTokens,
@@ -39,20 +43,135 @@ const INFILL_LEVELS = [10, 20, 40, 60];
 export default function ListingDetail() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { id } = useLocalSearchParams();
-  const listing = LISTINGS.find(item => item.id === String(id)) ?? LISTINGS[0];
+  const { token, authLoading } = useSession();
+  const { refetch: refetchJobs } = useJobs();
+  const { showToast } = useToast();
+  const { id } = useLocalSearchParams<{ id?: string }>();
+  const [listing, setListing] = useState<MarketplaceListing | null>(null);
+  const [quote, setQuote] = useState<Quote | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [qty, setQty] = useState(1);
-  const [material, setMaterial] = useState<Material>(listing.material);
+  const [material, setMaterial] = useState<Material>('PLA');
   const [quality, setQuality] = useState<Quality>('STANDARD');
   const [infill, setInfill] = useState(20);
-  const [isPurchased, setIsPurchased] = useState(false);
-  const images = [listing.image, listing.image, listing.image];
   const [selectedImageIndex, setSelectedImageIndex] = useState(0);
-  const selectedImage = images[selectedImageIndex];
+  const [payment, setPayment] = useState<Payment | null>(null);
+  const [paymentPhase, setPaymentPhase] = useState<'idle' | 'initiating' | 'checkout'>('idle');
+  const [paymentError, setPaymentError] = useState<string | null>(null);
   const styles = makeStyles(colors);
   const controls = makeControlStyles(colors);
   const materialVisual = getMaterialChipColors(colors, material);
-  const estimatedTotal = listing.price * qty;
+
+  const load = useCallback(async () => {
+    if (!token || !id) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchListing(token, String(id));
+      setListing(data.listing);
+      setQuote(data.quote);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load this listing');
+    } finally {
+      setLoading(false);
+    }
+  }, [token, id]);
+
+  useEffect(() => {
+    // Same rationale as everywhere else in this app: wait for
+    // SessionContext to finish restoring/validating a stored token before
+    // deciding there's "no token".
+    if (authLoading) return;
+    load();
+  }, [authLoading, load]);
+
+  const handlePay = async () => {
+    if (!token || !listing || !quote || paymentPhase !== 'idle') return;
+    setPaymentError(null);
+    setPaymentPhase('initiating');
+    try {
+      const created = await initiatePayment(token, {
+        estimateId: quote.estimateId,
+        listingId: listing.id,
+      });
+      setPayment(created);
+      setPaymentPhase('checkout');
+    } catch (err) {
+      setPaymentError(err instanceof Error ? err.message : 'Could not start payment.');
+      setPaymentPhase('idle');
+    }
+  };
+
+  const handlePaymentSuccess = useCallback(() => {
+    setPayment(null);
+    setPaymentPhase('idle');
+    // A new PrintJob now exists (created server-side by the Paystack
+    // webhook once payment cleared) — refetch so the jobs list is current
+    // before navigating there.
+    refetchJobs();
+    showToast('Your print job has been submitted!');
+    // This screen is a stack route outside the (tabs) pager (reached via
+    // router.push from the marketplace tab), so it has no access to
+    // SwipeTabsContext/goToTab the way submit.tsx does — router.replace to
+    // the standalone /jobs stack route (app/jobs/index.tsx, the same
+    // JobsList component the "orders" tab re-exports) is the reliable
+    // equivalent from here.
+    router.replace('/jobs');
+  }, [refetchJobs, showToast, router]);
+
+  const handlePaymentCancel = useCallback(() => {
+    setPayment(null);
+    setPaymentPhase('idle');
+  }, []);
+
+  const handlePaymentError = useCallback(
+    (message: string) => {
+      setPayment(null);
+      setPaymentPhase('idle');
+      setPaymentError(message);
+      showToast(message);
+    },
+    [showToast]
+  );
+
+  if (!listing) {
+    // Previously this screen used `LISTINGS.find(...) ?? LISTINGS[0]` —
+    // safe with mock data (always non-empty) but wrong once listings come
+    // from a real fetch that can legitimately be loading, empty, or 404.
+    // Same fix already applied to app/jobs/[id].tsx for the same reason.
+    return (
+      <View style={[styles.screen, styles.centered]}>
+        <Text style={styles.stateText}>
+          {loading ? 'Loading model details…' : error ?? "This listing couldn't be found."}
+        </Text>
+        {!loading ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={error ? load : () => router.back()}
+            style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
+          >
+            <Text style={styles.retryText}>{error ? 'Try again' : 'Go back'}</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
+
+  const images = [listing.thumbnailUrl, listing.thumbnailUrl, listing.thumbnailUrl];
+  const selectedImage = images[selectedImageIndex];
+  // The amount actually charged is whatever the backend's quote (a saved
+  // Estimate row) says — GET /api/marketplace/{id} generates it with fixed
+  // params (Standard/20%/qty 1/PLA; see MarketplaceController.getListing()),
+  // not whatever material/quality/infill/qty is selected below. Those
+  // selectors don't feed into pricing at all currently — showing the real
+  // quote total here (instead of the old listing.price × qty guess) so the
+  // number on screen always matches what Paystack will actually charge,
+  // since this is now wired to real payment.
+  const estimatedTotal = quote?.totalCost ?? listing.price;
 
   return (
     <View style={styles.screen}>
@@ -89,10 +208,6 @@ export default function ListingDetail() {
             <Text style={[styles.materialBadgeText, { color: materialVisual.color }]}>
               {material}
             </Text>
-          </View>
-          <View style={styles.ratingBadge}>
-            <Star size={13} color="#D9A11A" fill="#D9A11A" />
-            <Text style={styles.ratingBadgeText}>{listing.rating}</Text>
           </View>
           <View style={styles.heroCaption}>
             <Text style={styles.heroCaptionLabel}>READY TO PRINT</Text>
@@ -135,13 +250,13 @@ export default function ListingDetail() {
               <ShieldCheck size={14} color={colors.success} />
               <Text style={styles.verifiedText}>Verified designer</Text>
             </View>
-            <Text style={styles.downloads}>{listing.downloads} orders</Text>
+            <Text style={styles.downloads}>{listing.totalOrders} orders</Text>
           </View>
           <Text style={styles.title}>{listing.title}</Text>
-          <Text style={styles.designer}>Designed by {listing.designer}</Text>
           <Text style={styles.description}>
-            A print-ready model prepared for reliable campus-lab production, clean support
-            removal, and consistent finishing across common engineering materials.
+            {listing.description ||
+              'A print-ready model prepared for reliable campus-lab production, clean support ' +
+                'removal, and consistent finishing across common engineering materials.'}
           </Text>
         </View>
 
@@ -328,58 +443,61 @@ export default function ListingDetail() {
           </View>
 
           <View style={styles.divider} />
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Estimated price per copy</Text>
-            <GhsAmount amount={listing.price} size="md" />
-          </View>
-          <View style={styles.priceRow}>
-            <Text style={styles.priceLabel}>Quantity</Text>
-            <MonoText style={styles.quantitySummary}>× {qty}</MonoText>
-          </View>
           <View style={styles.totalRow}>
             <View>
-              <Text style={styles.totalLabel}>Estimated total</Text>
-              <Text style={styles.totalHint}>Final price confirmed by lab staff</Text>
+              <Text style={styles.totalLabel}>Total to pay</Text>
+              <Text style={styles.totalHint}>
+                {quote ? 'Reflects this listing’s standard quoted configuration' : 'No quote available for this listing'}
+              </Text>
             </View>
             <GhsAmount amount={estimatedTotal} size="xl" style={styles.totalAmount} />
           </View>
         </Card>
 
+        {paymentError ? (
+          <View style={styles.paymentErrorBanner}>
+            <Text style={styles.paymentErrorText}>{paymentError}</Text>
+          </View>
+        ) : null}
+
         <Pressable
           accessibilityRole="button"
+          disabled={!quote || paymentPhase !== 'idle'}
           style={({ pressed }) => [
             controls.primaryButton,
             styles.orderButton,
-            pressed && controls.primaryButtonPressed,
+            (!quote || paymentPhase !== 'idle') && styles.orderButtonDisabled,
+            pressed && quote && paymentPhase === 'idle' && controls.primaryButtonPressed,
           ]}
-          onPress={() => setIsPurchased(true)}
+          onPress={handlePay}
         >
-          <Text style={controls.primaryButtonText}>Order this print</Text>
-          <Text style={styles.orderPrice}>• GH₵ {estimatedTotal.toFixed(2)}</Text>
+          <Text style={controls.primaryButtonText}>
+            {paymentPhase === 'initiating' ? 'Starting payment...' : 'Pay Now'}
+          </Text>
+          {paymentPhase === 'idle' ? (
+            <Text style={styles.orderPrice}>• GH₵ {estimatedTotal.toFixed(2)}</Text>
+          ) : null}
         </Pressable>
 
         <View style={styles.orderNote}>
           <ShieldCheck size={15} color={colors.success} />
           <Text style={styles.orderNoteText}>
-            Your order is sent to lab staff for approval before it enters the print queue.
+            Payment is handled by Paystack. Your print job is created automatically once payment
+            is confirmed — no separate approval step for marketplace orders.
           </Text>
         </View>
-
-        {isPurchased ? (
-          <View style={styles.successCard}>
-            <View style={styles.successIcon}>
-              <CheckCircle size={22} color={colors.success} />
-            </View>
-            <View style={styles.successCopy}>
-              <Text style={styles.successTitle}>Order submitted</Text>
-              <Text style={styles.successText}>
-                Your order now has the backend-aligned SUBMITTED status and is waiting for lab
-                approval.
-              </Text>
-            </View>
-          </View>
-        ) : null}
       </ScrollView>
+
+      {payment && paymentPhase === 'checkout' && token ? (
+        <PaystackWebView
+          checkoutUrl={payment.checkoutUrl}
+          paymentId={payment.id}
+          token={token}
+          onSuccess={handlePaymentSuccess}
+          onCancel={handlePaymentCancel}
+          onError={handlePaymentError}
+        />
+      ) : null}
     </View>
   );
 }
@@ -396,6 +514,32 @@ function makeStyles(colors: Colors) {
     },
     pressed: {
       opacity: 0.72,
+    },
+    centered: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: designTokens.spacing.xl,
+    },
+    stateText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 13,
+      textAlign: 'center',
+      marginBottom: designTokens.spacing.md,
+    },
+    retryButton: {
+      minHeight: 42,
+      borderRadius: designTokens.radius.md,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: designTokens.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    retryText: {
+      color: colors.primary,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
     },
     backRow: {
       flexDirection: 'row',
@@ -891,10 +1035,27 @@ function makeStyles(colors: Colors) {
     orderButton: {
       marginTop: 2,
     },
+    orderButtonDisabled: {
+      opacity: 0.5,
+    },
     orderPrice: {
       color: colors.onPrimary,
       fontFamily: designTokens.type.heading,
       fontSize: 15,
+    },
+    paymentErrorBanner: {
+      padding: 12,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.statusFailed.bg,
+      borderWidth: 1,
+      borderColor: colors.statusFailed.dot,
+      marginBottom: designTokens.spacing.md,
+    },
+    paymentErrorText: {
+      color: colors.statusFailed.text,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+      lineHeight: 17,
     },
     orderNote: {
       flexDirection: 'row',

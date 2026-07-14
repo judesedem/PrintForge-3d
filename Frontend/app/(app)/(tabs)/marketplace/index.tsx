@@ -1,5 +1,5 @@
 import { ScrollView, StyleSheet, Text, TextInput, View, Pressable } from 'react-native';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Box,
   Boxes,
@@ -14,13 +14,13 @@ import {
 } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/ThemeContext';
-import { Colors, designTokens, makeControlStyles } from '@/theme';
-import { LISTINGS, PRINTERS } from '@/data/mockData';
+import { useSession } from '@/SessionContext';
+import { Colors, designTokens } from '@/theme';
+import { PRINTERS } from '@/data/mockData';
+import { fetchListings, MarketplaceListing } from '@/api/marketplace';
 import ListingCard from '@/components/ListingCard';
 import PrinterDot from '@/components/PrinterDot';
 import SectionHeader from '@/components/SectionHeader';
-
-const materials = ['ALL', 'PLA', 'RESIN', 'ABS'] as const;
 
 const categories = [
   { label: 'Mechanical\nParts', icon: CircuitBoard },
@@ -32,17 +32,67 @@ const categories = [
 export default function MarketplaceScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { token, authLoading } = useSession();
   const [search, setSearch] = useState('');
-  const [material, setMaterial] = useState<(typeof materials)[number]>('ALL');
+  const [listings, setListings] = useState<MarketplaceListing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const s = makeStyles(colors);
-  const controls = makeControlStyles(colors);
 
-  const filtered = LISTINGS.filter(listing =>
-    (material === 'ALL' || listing.material === material) &&
+  const load = useCallback(async () => {
+    if (!token) {
+      setListings([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchListings(token);
+      setListings(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load the marketplace');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    load();
+  }, [authLoading, load]);
+
+  // Material filtering was dropped along with the mock Listing shape —
+  // DesignListing (the real backend model) has no material field to filter
+  // by. See src/api/marketplace.ts's MarketplaceListing comment for why.
+  const filtered = listings.filter(listing =>
     listing.title.toLowerCase().includes(search.trim().toLowerCase())
   );
 
   const topLabs = PRINTERS.slice(0, 3);
+
+  if (loading) {
+    return (
+      <View style={[s.screen, s.centered]}>
+        <Text style={s.stateText}>Loading marketplace…</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[s.screen, s.centered]}>
+        <Text style={s.stateText}>{error}</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={load}
+          style={({ pressed }) => [s.retryButton, pressed && s.pressed]}
+        >
+          <Text style={s.retryText}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={s.screen}>
@@ -85,7 +135,7 @@ export default function MarketplaceScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.featuredRow}
         >
-          {LISTINGS.slice(0, 4).map(listing => (
+          {listings.slice(0, 4).map(listing => (
             <View key={listing.id} style={s.featuredCardWrap}>
               <ListingCard
                 listing={listing}
@@ -149,37 +199,8 @@ export default function MarketplaceScreen() {
         </ScrollView>
 
         <View style={s.designHeader}>
-          <View>
-            <Text style={s.designTitle}>All designs</Text>
-            <Text style={s.designCount}>{filtered.length} models available</Text>
-          </View>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.materialFilters}
-          >
-            {materials.map(item => (
-              <Pressable
-                key={item}
-                onPress={() => setMaterial(item)}
-                style={({ pressed }) => [
-                  controls.chip,
-                  s.materialChip,
-                  material === item && controls.chipSelected,
-                  pressed && s.pressed,
-                ]}
-              >
-                <Text
-                  style={[
-                    controls.chipText,
-                    material === item && controls.chipTextSelected,
-                  ]}
-                >
-                  {item}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
+          <Text style={s.designTitle}>All designs</Text>
+          <Text style={s.designCount}>{filtered.length} models available</Text>
         </View>
 
         {filtered.length > 0 ? (
@@ -199,15 +220,12 @@ export default function MarketplaceScreen() {
               <Search size={26} color={colors.primary} />
             </View>
             <Text style={s.emptyTitle}>No matching designs</Text>
-            <Text style={s.emptyBody}>Try another model name or material filter.</Text>
+            <Text style={s.emptyBody}>Try another model name.</Text>
             <Pressable
-              onPress={() => {
-                setSearch('');
-                setMaterial('ALL');
-              }}
+              onPress={() => setSearch('')}
               style={({ pressed }) => [s.resetButton, pressed && s.pressed]}
             >
-              <Text style={s.resetText}>Clear filters</Text>
+              <Text style={s.resetText}>Clear search</Text>
               <ChevronRight size={15} color={colors.primary} />
             </Pressable>
           </View>
@@ -409,8 +427,28 @@ function makeStyles(colors: Colors) {
       marginTop: 3,
       marginBottom: 11,
     },
-    materialFilters: { gap: 7 },
-    materialChip: { minHeight: 33, paddingVertical: 6, paddingHorizontal: 12 },
+    centered: { alignItems: 'center', justifyContent: 'center', paddingHorizontal: designTokens.spacing.xl },
+    stateText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 13,
+      textAlign: 'center',
+      marginBottom: designTokens.spacing.md,
+    },
+    retryButton: {
+      minHeight: 42,
+      borderRadius: designTokens.radius.md,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: designTokens.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    retryText: {
+      color: colors.primary,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+    },
     grid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 10 },
     gridItem: { width: '50%' },
     emptyState: {

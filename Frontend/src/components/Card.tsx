@@ -8,13 +8,13 @@ type Props = {
 };
 
 export default function Card({ children, style }: Props) {
-  const { colors } = useTheme();
-  const s = makeStyles(colors);
+  const { colors, isDark } = useTheme();
+  const s = makeStyles(colors, isDark);
 
   return <View style={[s.card, style]}>{children}</View>;
 }
 
-function makeStyles(colors: Colors) {
+function makeStyles(colors: Colors, isDark: boolean) {
   return StyleSheet.create({
     card: {
       backgroundColor: colors.card,
@@ -22,11 +22,18 @@ function makeStyles(colors: Colors) {
       borderWidth: 1,
       borderColor: colors.border,
       padding: designTokens.spacing.lg,
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.06,
-      shadowRadius: 14,
-      elevation: 2,
+      // Brand guide: shadow-based elevation in light mode, border-only
+      // definition in dark mode (a shadow barely reads against a dark
+      // background anyway).
+      ...(isDark
+        ? { elevation: 0 }
+        : {
+            shadowColor: colors.navy,
+            shadowOffset: { width: 0, height: 2 },
+            shadowOpacity: 0.08,
+            shadowRadius: 8,
+            elevation: 2,
+          }),
     },
   });
 }

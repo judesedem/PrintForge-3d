@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, useCallback, R
 import { Job } from './data/mockData';
 import { fetchJobs } from './api/jobs';
 import { useSession } from './SessionContext';
+import { useToast } from './ToastContext';
 
 type JobsContextType = {
   jobs: Job[];
@@ -27,6 +28,7 @@ const JobsContext = createContext<JobsContextType>({
 
 export function JobsProvider({ children }: { children: ReactNode }) {
   const { token, authLoading } = useSession();
+  const { showToast } = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -43,11 +45,19 @@ export function JobsProvider({ children }: { children: ReactNode }) {
       const data = await fetchJobs(token);
       setJobs(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load jobs');
+      const message = err instanceof Error ? err.message : 'Failed to load jobs';
+      setError(message);
+      // `error` above has no consumer — none of the 5 screens reading
+      // useJobs() (jobs/index.tsx, jobs/[id].tsx, staff/queue.tsx,
+      // profile.tsx, dashboard/student.tsx) destructure it, so a failed
+      // background fetch would otherwise show an empty list with zero
+      // explanation. This is exactly the "no better UI home" case the
+      // toast is for.
+      showToast(message);
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, showToast]);
 
   useEffect(() => {
     // Wait for SessionContext to finish restoring/validating a stored
