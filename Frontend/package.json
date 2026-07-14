@@ -10,8 +10,7 @@
     "web": "expo start --web"
   },
   "dependencies": {
-    "@expo-google-fonts/jetbrains-mono": "^0.3.0",
-    "@expo-google-fonts/outfit": "^0.3.0",
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
     "@miblanchard/react-native-slider": "^2.6.0",
     "@react-native-picker/picker": "2.11.4",
     "expo": "~56.0.12",
@@ -21,6 +20,7 @@
     "expo-font": "~56.0.7",
     "expo-linking": "~56.0.14",
     "expo-router": "~56.2.11",
+    "expo-secure-store": "~56.0.4",
     "expo-splash-screen": "~56.0.4",
     "expo-status-bar": "~56.0.4",
     "expo-web-browser": "~56.0.5",

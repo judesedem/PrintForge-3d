@@ -30,6 +30,8 @@ import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/ThemeContext';
 import { useJobs } from '@/JobsContext';
+import { useSession } from '@/SessionContext';
+import { approveJob, rejectJob } from '@/api/jobs';
 import {
   Job,
   Printer as PrinterModel,
@@ -80,7 +82,8 @@ function getWaitLabel(printer: PrinterModel) {
 export default function StaffQueue() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { jobs } = useJobs();
+  const { jobs, refetch } = useJobs();
+  const { token } = useSession();
   const s = makeStyles(colors);
   const controls = makeControlStyles(colors);
 
@@ -91,8 +94,44 @@ export default function StaffQueue() {
   const [notes, setNotes] = useState('');
   const [sortBy, setSortBy] = useState('Date Submitted');
   const [printerFilter, setPrinterFilter] = useState<PrinterFilter>('ALL');
+  const [actionLoading, setActionLoading] = useState<'approve' | 'reject' | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const selected = jobs.find(job => job.id === selectedJob);
+
+  // Reuses the existing "operator notes" field as the reject reason —
+  // there's no separate reject-reason UI anywhere in this screen, and the
+  // field's own placeholder ("Add setup, support, or pickup notes...") is
+  // generic enough to double as one rather than inventing a new modal/input.
+  const handleApprove = async () => {
+    if (!selected || !token || actionLoading) return;
+    setActionLoading('approve');
+    setActionError(null);
+    try {
+      await approveJob(token, selected.id, { printerId: printer });
+      await refetch();
+      setNotes('');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to approve job');
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!selected || !token || actionLoading) return;
+    setActionLoading('reject');
+    setActionError(null);
+    try {
+      await rejectJob(token, selected.id, notes.trim() || undefined);
+      await refetch();
+      setNotes('');
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to reject job');
+    } finally {
+      setActionLoading(null);
+    }
+  };
   const availablePrinters = PRINTERS.filter(item => item.status === 'AVAILABLE');
   const busyPrinters = PRINTERS.filter(item => item.status === 'BUSY');
   const filteredPrinters = useMemo(
@@ -306,33 +345,48 @@ export default function StaffQueue() {
               placeholderTextColor={colors.mutedFg}
             />
 
+            {selected.status !== 'SUBMITTED' ? (
+              <View style={s.reviewedNote}>
+                <Text style={s.reviewedNoteText}>
+                  This job has already been reviewed (status: {selected.status}).
+                </Text>
+              </View>
+            ) : null}
+
             <View style={s.decisionRow}>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => {}}
-                style={({ pressed }) => [s.rejectButton, pressed && s.pressed]}
+                disabled={selected.status !== 'SUBMITTED' || actionLoading !== null}
+                onPress={handleReject}
+                style={({ pressed }) => [
+                  s.rejectButton,
+                  (selected.status !== 'SUBMITTED' || actionLoading !== null) && s.actionButtonDisabled,
+                  pressed && s.pressed,
+                ]}
               >
                 <XCircle size={18} color={colors.destructive} />
-                <Text style={s.rejectButtonText}>Reject</Text>
+                <Text style={s.rejectButtonText}>
+                  {actionLoading === 'reject' ? 'Rejecting…' : 'Reject'}
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
-                onPress={() => {}}
-                style={({ pressed }) => [s.approveButton, pressed && s.pressed]}
+                disabled={selected.status !== 'SUBMITTED' || actionLoading !== null}
+                onPress={handleApprove}
+                style={({ pressed }) => [
+                  s.approveButton,
+                  (selected.status !== 'SUBMITTED' || actionLoading !== null) && s.actionButtonDisabled,
+                  pressed && s.pressed,
+                ]}
               >
                 <CheckCircle2 size={18} color={colors.success} />
-                <Text style={s.approveButtonText}>Approve</Text>
+                <Text style={s.approveButtonText}>
+                  {actionLoading === 'approve' ? 'Approving…' : 'Approve'}
+                </Text>
               </Pressable>
             </View>
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {}}
-              style={({ pressed }) => [controls.primaryButton, pressed && controls.primaryButtonPressed]}
-            >
-              <Text style={controls.primaryButtonText}>Update job status</Text>
-              <ChevronRight size={19} color={colors.onPrimary} />
-            </Pressable>
+            {actionError ? <Text style={s.actionErrorText}>{actionError}</Text> : null}
 
             <Pressable
               accessibilityRole="button"
@@ -1100,6 +1154,28 @@ function makeStyles(colors: Colors) {
       color: colors.success,
       fontFamily: designTokens.type.heading,
       fontSize: 14,
+    },
+    actionButtonDisabled: {
+      opacity: 0.5,
+    },
+    reviewedNote: {
+      padding: 12,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.secondary,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: 12,
+    },
+    reviewedNoteText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+    },
+    actionErrorText: {
+      color: colors.destructive,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+      marginBottom: 10,
     },
     viewDetailsButton: {
       alignItems: 'center',

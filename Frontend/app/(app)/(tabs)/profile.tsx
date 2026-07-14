@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Linking,
   Pressable,
@@ -23,6 +23,7 @@ import {
   Mail,
   Moon,
   PackageCheck,
+  Receipt,
   Scale,
   ShieldCheck,
   Sparkles,
@@ -30,12 +31,13 @@ import {
   UserRound,
   WalletCards,
 } from 'lucide-react-native';
-import { useTheme } from '../src/ThemeContext';
-import { useJobs } from '../src/JobsContext';
-import { useSession } from '../src/SessionContext';
-import { Colors, designTokens } from '../src/theme';
-import Card from '../src/components/Card';
-import GhsAmount from '../src/components/GhsAmount';
+import { useTheme } from '../../../src/ThemeContext';
+import { useJobs } from '../../../src/JobsContext';
+import { useSession } from '../../../src/SessionContext';
+import { fetchMyPayments, Payment } from '../../../src/api/payments';
+import { Colors, designTokens } from '../../../src/theme';
+import Card from '../../../src/components/Card';
+import GhsAmount from '../../../src/components/GhsAmount';
 
 const user = {
   name: 'Kwame Mensah',
@@ -48,12 +50,50 @@ const user = {
 
 const APP_VERSION = '1.0.0';
 
+function paymentStatusVisual(status: Payment['status'], colors: Colors) {
+  switch (status) {
+    case 'COMPLETED':
+      return { bg: colors.statusApproved.bg, text: colors.statusApproved.text, label: 'Paid' };
+    case 'FAILED':
+      return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: 'Failed' };
+    default:
+      return { bg: colors.statusSubmitted.bg, text: colors.statusSubmitted.text, label: 'Pending' };
+  }
+}
+
 export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
   const { jobs } = useJobs();
-  const { signOut } = useSession();
+  const { signOut, token, authLoading } = useSession();
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [paymentsLoading, setPaymentsLoading] = useState(true);
+  const [paymentsError, setPaymentsError] = useState<string | null>(null);
+
+  const loadPayments = useCallback(async () => {
+    if (!token) {
+      setPayments([]);
+      setPaymentsLoading(false);
+      return;
+    }
+    setPaymentsLoading(true);
+    setPaymentsError(null);
+    try {
+      const data = await fetchMyPayments(token);
+      setPayments(data);
+    } catch (err) {
+      setPaymentsError(err instanceof Error ? err.message : 'Failed to load payment history');
+    } finally {
+      setPaymentsLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    loadPayments();
+  }, [authLoading, loadPayments]);
 
   const totalJobs = jobs.length;
   const activeJobs = jobs.filter(job =>
@@ -183,6 +223,58 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
           </View>
         </Card>
 
+        <SectionTitle label="PAYMENT HISTORY" title="Past payments" styles={s} />
+        {paymentsLoading ? (
+          <Card style={s.paymentsStateCard}>
+            <Text style={s.paymentsStateText}>Loading payment history…</Text>
+          </Card>
+        ) : paymentsError ? (
+          <Card style={s.paymentsStateCard}>
+            <Text style={s.paymentsStateText}>{paymentsError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={loadPayments}
+              style={({ pressed }) => [s.paymentsRetryButton, pressed && s.iconButtonPressed]}
+            >
+              <Text style={s.paymentsRetryText}>Try again</Text>
+            </Pressable>
+          </Card>
+        ) : payments.length === 0 ? (
+          <Card style={s.paymentsStateCard}>
+            <View style={s.rowIconOrange}>
+              <Receipt size={18} color={colors.primary} />
+            </View>
+            <Text style={s.paymentsEmptyTitle}>No payments yet</Text>
+            <Text style={s.paymentsStateText}>
+              Payments for marketplace orders will show up here once you check out.
+            </Text>
+          </Card>
+        ) : (
+          <View style={s.settingsCard}>
+            {payments.map((payment, index) => {
+              const visual = paymentStatusVisual(payment.status, colors);
+              const date = payment.completedAt ?? payment.initiatedAt;
+              return (
+                <View
+                  key={payment.id}
+                  style={[s.settingRow, index > 0 && s.settingBorder]}
+                >
+                  <View style={[s.rowIconOrange, { backgroundColor: visual.bg }]}>
+                    <Receipt size={18} color={visual.text} />
+                  </View>
+                  <View style={s.settingCopy}>
+                    <Text style={s.settingLabel}>
+                      {date ? new Date(date).toLocaleDateString() : 'Payment'}
+                    </Text>
+                    <Text style={s.settingDescription}>{visual.label}</Text>
+                  </View>
+                  <GhsAmount amount={payment.amount} size="sm" />
+                </View>
+              );
+            })}
+          </View>
+        )}
+
         <SectionTitle label="ACCOUNT DETAILS" title="Your information" styles={s} />
         <View style={s.settingsCard}>
           <SettingsRow
@@ -232,9 +324,9 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
           <View style={[s.settingRow, s.settingBorder]}>
             <View style={s.rowIconPurple}>
               {isDark ? (
-                <Moon size={18} color="#7F56D9" />
+                <Moon size={18} color={colors.chart4} />
               ) : (
-                <Sun size={18} color="#7F56D9" />
+                <Sun size={18} color={colors.chart4} />
               )}
             </View>
             <View style={s.settingCopy}>
@@ -284,7 +376,7 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
             bordered
           />
           <LinkRow
-            icon={<Scale size={18} color="#7F56D9" />}
+            icon={<Scale size={18} color={colors.chart4} />}
             iconStyle={s.rowIconPurple}
             label="Privacy policy"
             description="How your account data is handled"
@@ -308,7 +400,7 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
           <View style={s.footerLogo}>
             <Sparkles size={14} color={colors.primary} />
           </View>
-          <Text style={s.versionText}>PrintForge 3D · v{APP_VERSION}</Text>
+          <Text style={s.versionText}>PrintForge 3D � v{APP_VERSION}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -626,31 +718,35 @@ function makeStyles(colors: Colors) {
       width: 44,
       height: 44,
       borderRadius: 15,
-      backgroundColor: 'rgba(255,88,3,0.16)',
+      backgroundColor: colors.primarySoft,
       alignItems: 'center',
       justifyContent: 'center',
     },
     spendCopy: {
       flex: 1,
     },
+    // spendCard's background is a fixed colors.navy regardless of theme
+    // (see above), so its text needs fixed off-white tones rather than
+    // colors.mutedFg/foreground — those flip to dark navy text in light
+    // mode and would be nearly invisible here.
     spendLabel: {
-      color: '#A8B0C0',
+      color: 'rgba(229, 229, 229, 0.6)',
       fontFamily: designTokens.type.heading,
       fontSize: 9,
       letterSpacing: 1,
       marginBottom: 4,
     },
     spendAmount: {
-      color: '#FFFFFF',
+      color: colors.offWhite,
     },
     spendPill: {
       paddingHorizontal: 9,
       paddingVertical: 6,
       borderRadius: designTokens.radius.pill,
-      backgroundColor: 'rgba(255,255,255,0.09)',
+      backgroundColor: 'rgba(229, 229, 229, 0.10)',
     },
     spendPillText: {
-      color: '#FFFFFF',
+      color: colors.offWhite,
       fontFamily: designTokens.type.medium,
       fontSize: 10,
     },
@@ -682,6 +778,39 @@ function makeStyles(colors: Colors) {
       shadowOpacity: 0.04,
       shadowRadius: 12,
       elevation: 1,
+    },
+    paymentsStateCard: {
+      alignItems: 'center',
+      paddingVertical: designTokens.spacing.xl,
+      marginBottom: designTokens.spacing.xl,
+      gap: 6,
+    },
+    paymentsStateText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+      textAlign: 'center',
+    },
+    paymentsEmptyTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 15,
+      marginTop: 4,
+    },
+    paymentsRetryButton: {
+      marginTop: designTokens.spacing.sm,
+      minHeight: 38,
+      borderRadius: designTokens.radius.md,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: designTokens.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    paymentsRetryText: {
+      color: colors.primary,
+      fontFamily: designTokens.type.heading,
+      fontSize: 12,
     },
     settingRow: {
       minHeight: 72,

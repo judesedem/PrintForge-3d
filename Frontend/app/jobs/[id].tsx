@@ -329,7 +329,7 @@ export default function JobDetail() {
           </Card>
           <Card style={s.specCard}>
             <View style={s.specIconPurple}>
-              <Layers3 size={19} color="#7F56D9" />
+              <Layers3 size={19} color={colors.chart4} />
             </View>
             <Text style={s.specLabel}>Infill</Text>
             <Text style={s.specValue}>20%</Text>

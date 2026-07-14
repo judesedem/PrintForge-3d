@@ -126,13 +126,10 @@ export default function StudentDashboard() {
               style={({ pressed }) => [s.quickCard, pressed && s.quickCardPressed]}
             >
               <View style={s.quickIcon}>
-                <Icon size={22} color={colors.primary} strokeWidth={2} />
+                <Icon size={24} color={colors.primary} strokeWidth={2} />
               </View>
-              <View style={s.quickCopy}>
-                <Text style={s.quickLabel}>{label}</Text>
-                <Text style={s.quickDetail} numberOfLines={1}>{detail}</Text>
-              </View>
-              <ChevronRight size={17} color={colors.mutedFg} />
+              <Text style={s.quickLabel}>{label}</Text>
+              <Text style={s.quickDetail} numberOfLines={1}>{detail}</Text>
             </Pressable>
           ))}
         </View>
@@ -334,37 +331,40 @@ function makeStyles(colors: Colors) {
       marginBottom: 10,
     },
     inlineAction: { color: colors.primary, fontFamily: designTokens.type.heading, fontSize: 12 },
-    quickGrid: { gap: 10, marginBottom: designTokens.spacing.xxl },
-    quickCard: {
-      minHeight: 70,
+    quickGrid: {
       flexDirection: 'row',
-      alignItems: 'center',
-      gap: 12,
+      flexWrap: 'wrap',
+      gap: 10,
+      marginBottom: designTokens.spacing.xxl,
+    },
+    quickCard: {
+      width: '48%',
+      flexGrow: 1,
+      minHeight: 116,
       borderRadius: designTokens.radius.md,
       borderWidth: 1,
       borderColor: colors.border,
       backgroundColor: colors.card,
-      paddingHorizontal: 13,
-      paddingVertical: 11,
+      padding: 14,
     },
     quickCardPressed: {
       borderColor: colors.primary,
       backgroundColor: colors.primarySoft,
-      transform: [{ scale: 0.995 }],
+      transform: [{ scale: 0.985 }],
     },
     quickIcon: {
-      width: 42,
-      height: 42,
+      width: 44,
+      height: 44,
       borderRadius: 12,
       backgroundColor: colors.primarySoft,
       alignItems: 'center',
       justifyContent: 'center',
+      marginBottom: 12,
     },
-    quickCopy: { flex: 1 },
     quickLabel: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 14,
+      fontSize: 15,
       marginBottom: 3,
     },
     quickDetail: { color: colors.mutedFg, fontFamily: designTokens.type.body, fontSize: 11 },
@@ -375,6 +375,8 @@ function makeStyles(colors: Colors) {
       borderRadius: designTokens.radius.md,
       borderWidth: 1,
       borderColor: colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.primary,
       backgroundColor: colors.card,
       padding: 11,
     },

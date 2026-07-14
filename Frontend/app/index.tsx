@@ -1,248 +1,149 @@
-import { useRouter } from 'expo-router';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import { ArrowRight, Box, GraduationCap, Layers3, Printer } from 'lucide-react-native';
+import { Redirect } from 'expo-router';
+import { StyleSheet, Text, View } from 'react-native';
+import { Box } from 'lucide-react-native';
+import { useSession } from '../src/SessionContext';
 import { useTheme } from '../src/ThemeContext';
-import { Colors, designTokens, makeControlStyles } from '../src/theme';
+import { Colors, designTokens } from '../src/theme';
 
-export default function SplashOnboardingScreen() {
-  const router = useRouter();
+// ASSUMPTIONS (flagged in Handoff.md):
+// 1. assets/icon.png and assets/splash.png are placeholder text files, not
+//    real images (confirmed by reading their bytes) — used the existing
+//    "logo mark" pattern from login.tsx/the old onboarding screen (a Box
+//    icon in a rounded navy square) instead of an <Image>.
+// 2. The brief says this screen "already has auth-redirect logic — keep
+//    that, just restyle." It didn't — app/index.tsx was a static "Get
+//    started" onboarding screen with no session check at all (the only
+//    real redirect-by-role logic in the app lives in
+//    app/(app)/(tabs)/dashboard/index.tsx, which runs post-login). Since
+//    the splash's own design (loading dots, "Please wait...") only makes
+//    sense for a transient auto-redirecting screen, added the missing
+//    redirect here: wait for authLoading, then send signed-in users to the
+//    app and everyone else to login. This replaces the previous
+//    onboarding/marketing content (hero illustration, feature cards, "Get
+//    started" CTA) entirely, per "rebuild this screen to match the brand
+//    guide's splash."
+// 3. "REALITY" is specified as Warm Orange text — on this screen's solid
+//    Warm Orange background that would be literally invisible (zero
+//    contrast). Kept the exact letter color (#FF5803) but added a small
+//    dark navy text-shadow purely for legibility. Same issue applies to
+//    the single "orange" accent dot — given a thin off-white ring so it
+//    reads against the identical-color background.
+export default function SplashScreen() {
   const { colors } = useTheme();
+  const { token, authLoading } = useSession();
   const s = makeStyles(colors);
-  const controls = makeControlStyles(colors);
+
+  if (!authLoading) {
+    return <Redirect href={token ? '/(app)/(tabs)' : '/(auth)/login'} />;
+  }
 
   return (
-    <SafeAreaView style={s.safeArea}>
-      <View style={s.screen}>
-        <View style={s.topRow}>
-          <View style={s.brandRow}>
-            <BrandMark colors={colors} compact />
-            <View>
-              <Text style={s.brandName}>PrintForge</Text>
-              <Text style={s.brandSuffix}>3D</Text>
-            </View>
-          </View>
-          <View style={s.labPill}>
-            <GraduationCap size={15} color={colors.primary} />
-            <Text style={s.labPillText}>Built for campus labs</Text>
-          </View>
-        </View>
-
-        <View style={s.hero}>
-          <View style={s.heroGlow} />
-          <View style={s.heroGrid}>
-            <View style={[s.floatingCard, s.cardLeft]}>
-              <Layers3 size={25} color={colors.primary} strokeWidth={1.8} />
-              <Text style={s.floatingLabel}>Discover models</Text>
-            </View>
-
-            <View style={s.brandOrb}>
-              <BrandMark colors={colors} />
-            </View>
-
-            <View style={[s.floatingCard, s.cardRight]}>
-              <Printer size={25} color={colors.primary} strokeWidth={1.8} />
-              <Text style={s.floatingLabel}>Track your print</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={s.copyBlock}>
-          <View style={s.eyebrowRow}>
-            <View style={s.eyebrowLine} />
-            <Text style={s.eyebrow}>DESIGN. QUOTE. PRINT.</Text>
-          </View>
-          <Text style={s.title}>Turn your ideas into real things.</Text>
-          <Text style={s.body}>
-            Browse student-made designs, get an instant estimate, and send your model to a verified university print lab.
-          </Text>
-        </View>
-
-        <View style={s.footer}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Get started with PrintForge 3D"
-            onPress={() => router.push('/(auth)/login')}
-            style={({ pressed }) => [controls.primaryButton, pressed && controls.primaryButtonPressed]}
-          >
-            <Text style={controls.primaryButtonText}>Get started</Text>
-            <ArrowRight size={19} color={colors.onPrimary} />
-          </Pressable>
-          <Text style={s.caption}>For students, designers, and print lab teams.</Text>
-        </View>
+    <View style={s.screen}>
+      <View style={s.logoMark}>
+        <Box size={40} color={colors.primary} strokeWidth={2.2} />
       </View>
-    </SafeAreaView>
-  );
-}
 
-function BrandMark({ colors, compact = false }: { colors: Colors; compact?: boolean }) {
-  return (
-    <View style={[styles.mark, compact && styles.markCompact, { backgroundColor: colors.navy }]}>
-      <Box size={compact ? 19 : 40} color={colors.primary} strokeWidth={2.2} />
-      {!compact ? <View style={[styles.markAccent, { backgroundColor: colors.primary }]} /> : null}
+      <View style={s.textStack}>
+        <Text style={s.bringing}>Bringing</Text>
+        <Text style={s.ideas}>IDEAS</Text>
+        <Text style={s.into}>into</Text>
+        <Text style={s.reality}>REALITY</Text>
+      </View>
+
+      <View style={s.dotsRow}>
+        <View style={s.dotSmall} />
+        <View style={s.dotSmall} />
+        <View style={s.dotAccent} />
+        <View style={s.dotSmall} />
+        <View style={s.dotSmall} />
+      </View>
+      <Text style={s.waitText}>Please wait...</Text>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  mark: {
-    width: 100,
-    height: 100,
-    borderRadius: 30,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
-  },
-  markCompact: {
-    width: 42,
-    height: 42,
-    borderRadius: 13,
-  },
-  markAccent: {
-    position: 'absolute',
-    bottom: 18,
-    width: 34,
-    height: 5,
-    borderRadius: 3,
-  },
-});
-
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
-    safeArea: { flex: 1, backgroundColor: colors.background },
     screen: {
       flex: 1,
-      paddingHorizontal: 22,
-      paddingTop: 12,
-      paddingBottom: 20,
-    },
-    topRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: 12,
-    },
-    brandRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-    brandName: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 18,
-      lineHeight: 19,
-      letterSpacing: -0.3,
-    },
-    brandSuffix: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 12,
-      letterSpacing: 1.3,
-    },
-    labPill: {
-      minHeight: 34,
-      paddingHorizontal: 11,
-      borderRadius: designTokens.radius.pill,
-      backgroundColor: colors.primarySoft,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    labPillText: {
-      color: colors.primary,
-      fontFamily: designTokens.type.medium,
-      fontSize: 11,
-    },
-    hero: {
-      flex: 1,
-      minHeight: 300,
+      backgroundColor: colors.primary,
       alignItems: 'center',
       justifyContent: 'center',
-      position: 'relative',
+      paddingHorizontal: designTokens.spacing.xl,
     },
-    heroGlow: {
-      position: 'absolute',
-      width: 280,
-      height: 280,
-      borderRadius: 140,
-      backgroundColor: colors.primarySoft,
-      opacity: 0.82,
-    },
-    heroGrid: {
-      width: '100%',
-      minHeight: 270,
+    logoMark: {
+      width: 92,
+      height: 92,
+      borderRadius: 26,
+      backgroundColor: colors.navy,
       alignItems: 'center',
       justifyContent: 'center',
-      position: 'relative',
+      marginBottom: designTokens.spacing.section,
     },
-    brandOrb: {
-      width: 138,
-      height: 138,
-      borderRadius: 44,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
+    textStack: {
       alignItems: 'center',
-      justifyContent: 'center',
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 16 },
-      shadowOpacity: 0.12,
-      shadowRadius: 28,
-      elevation: 8,
-      transform: [{ rotate: '-4deg' }],
+      marginBottom: designTokens.spacing.section,
     },
-    floatingCard: {
-      position: 'absolute',
-      width: 132,
-      minHeight: 94,
-      borderRadius: designTokens.radius.lg,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      padding: 14,
-      justifyContent: 'space-between',
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 8 },
-      shadowOpacity: 0.08,
-      shadowRadius: 18,
-      elevation: 4,
-    },
-    cardLeft: { left: 3, top: 23, transform: [{ rotate: '-5deg' }] },
-    cardRight: { right: 3, bottom: 19, transform: [{ rotate: '5deg' }] },
-    floatingLabel: {
-      marginTop: 12,
-      color: colors.foreground,
+    bringing: {
+      color: colors.offWhite,
       fontFamily: designTokens.type.heading,
-      fontSize: 13,
-      lineHeight: 17,
+      fontSize: 32,
+      lineHeight: 36,
     },
-    copyBlock: { marginBottom: 24 },
-    eyebrowRow: { flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 12 },
-    eyebrowLine: { width: 28, height: 3, borderRadius: 2, backgroundColor: colors.primary },
-    eyebrow: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 11,
-      letterSpacing: 1.4,
+    ideas: {
+      color: colors.offWhite,
+      fontFamily: 'BarlowCondensed_700Bold_Italic',
+      fontSize: 46,
+      lineHeight: 50,
+      letterSpacing: 1,
+      textShadowColor: 'rgba(255, 88, 3, 0.8)',
+      textShadowOffset: { width: 0, height: 0 },
+      textShadowRadius: 12,
     },
-    title: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.display,
-      fontSize: 38,
-      lineHeight: 42,
-      letterSpacing: -1.2,
-      maxWidth: 340,
-    },
-    body: {
-      color: colors.mutedFg,
+    into: {
+      color: colors.offWhite,
       fontFamily: designTokens.type.body,
-      fontSize: 16,
+      fontSize: 20,
       lineHeight: 24,
-      marginTop: 14,
-      maxWidth: 350,
+      marginTop: 2,
     },
-    footer: { gap: 12 },
-    caption: {
-      color: colors.mutedFg,
+    reality: {
+      color: colors.primary,
+      fontFamily: designTokens.type.heading,
+      fontSize: 34,
+      lineHeight: 38,
+      letterSpacing: 1,
+      // Legibility fix — see file-level comment #3. Letter color is still
+      // exactly the specified #FF5803.
+      textShadowColor: 'rgba(22, 24, 43, 0.55)',
+      textShadowOffset: { width: 0, height: 1 },
+      textShadowRadius: 4,
+    },
+    dotsRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: designTokens.spacing.md,
+    },
+    dotSmall: {
+      width: 6,
+      height: 6,
+      borderRadius: 3,
+      backgroundColor: 'rgba(229, 229, 229, 0.45)',
+    },
+    dotAccent: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.primary,
+      borderWidth: 1.5,
+      borderColor: colors.offWhite,
+    },
+    waitText: {
+      color: colors.offWhite,
       fontFamily: designTokens.type.body,
       fontSize: 12,
-      textAlign: 'center',
+      opacity: 0.85,
     },
   });
 }

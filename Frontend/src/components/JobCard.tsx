@@ -7,7 +7,15 @@ import { Job } from '../data/mockData';
 import { useTheme } from '../ThemeContext';
 import { Colors, designTokens, getMaterialChipColors } from '../theme';
 
-export default function JobCard({ job, onPress, selected }: { job: Job; onPress?: () => void; selected?: boolean }) {
+type Props = {
+  job: Job;
+  onPress?: () => void;
+  selected?: boolean;
+  /** Optional — set when this job is known to have a COMPLETED payment behind it (see jobs/index.tsx). Defaults to hidden so other callers (dashboard/student.tsx) are unaffected. */
+  paid?: boolean;
+};
+
+export default function JobCard({ job, onPress, selected, paid }: Props) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
   const material = getMaterialChipColors(colors, job.material);
@@ -18,7 +26,14 @@ export default function JobCard({ job, onPress, selected }: { job: Job; onPress?
       style={({ pressed }) => [s.card, selected && s.selectedCard, pressed && s.pressed]}
     >
       <View style={s.topRow}>
-        <StatusBadge status={job.status} />
+        <View style={s.topRowLeft}>
+          <StatusBadge status={job.status} />
+          {paid ? (
+            <View style={s.paidPill}>
+              <Text style={s.paidPillText}>PAID</Text>
+            </View>
+          ) : null}
+        </View>
         <MonoText style={s.jobId}>{job.id}</MonoText>
       </View>
 
@@ -76,6 +91,19 @@ function makeStyles(colors: Colors) {
       justifyContent: 'space-between',
       alignItems: 'center',
       marginBottom: 13,
+    },
+    topRowLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+    paidPill: {
+      borderRadius: designTokens.radius.pill,
+      backgroundColor: colors.statusApproved.bg,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+    },
+    paidPillText: {
+      color: colors.statusApproved.text,
+      fontFamily: designTokens.type.heading,
+      fontSize: 9,
+      letterSpacing: 0.4,
     },
     jobId: {
       color: colors.mutedFg,

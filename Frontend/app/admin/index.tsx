@@ -1,126 +1,245 @@
 import { View, Text, StyleSheet, FlatList, Pressable } from 'react-native';
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useTheme } from '../../src/ThemeContext';
-import { JOBS, LISTINGS, PRINTERS } from '../../src/data/mockData';
-import StatusBadge from '../../src/components/StatusBadge';
+import { useSession } from '../../src/SessionContext';
+import { designTokens, Colors } from '../../src/theme';
+import { fetchAdminDashboard, AdminDashboard } from '../../src/api/admin';
 import MonoText from '../../src/components/MonoText';
 
 const tabs = ['Users', 'Printers', 'Earnings', 'Logs'] as const;
 
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<'Users' | 'Printers' | 'Earnings' | 'Logs'>('Users');
-  const { colors } = useTheme(); // ✅ hook called inside the component
+  const { colors } = useTheme();
+  const { token, authLoading } = useSession();
+  const s = makeStyles(colors);
+
+  const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await fetchAdminDashboard(token);
+      setDashboard(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load the admin dashboard');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    load();
+  }, [authLoading, load]);
+
+  if (loading || error || !dashboard) {
+    return (
+      <View style={[s.screen, s.centered]}>
+        <Text style={s.stateText}>
+          {loading ? 'Loading admin dashboard…' : error ?? 'No dashboard data available.'}
+        </Text>
+        {error ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={load}
+            style={({ pressed }) => [s.retryButton, pressed && s.pressed]}
+          >
+            <Text style={s.retryText}>Try again</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    );
+  }
+
+  const printerStatusRows = Object.entries(dashboard.printersByStatus);
+  const submittedJobs = dashboard.jobsByStatus['SUBMITTED'] ?? 0;
+  const totalOwed = dashboard.designerEarnings.reduce((sum, e) => sum + e.totalOwed, 0);
 
   return (
-    <View style={[styles.screen, { backgroundColor: colors.background }]}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.foreground }]}>Admin Panel</Text>
-        <Text style={styles.subtitle}>Overview of users, printers, and platform activity.</Text>
+    <View style={s.screen}>
+      <View style={s.header}>
+        <Text style={s.title}>Admin Panel</Text>
+        <Text style={s.subtitle}>Overview of users, printers, and platform activity.</Text>
       </View>
-      <View style={styles.statsRow}>
-        <View style={[styles.statCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-          <Text style={styles.statLabel}>Total Users</Text>
-          <Text style={[styles.statValue, { color: colors.foreground }]}>128</Text>
+      <View style={s.statsRow}>
+        <View style={s.statCard}>
+          <Text style={s.statLabel}>Total Jobs</Text>
+          <Text style={s.statValue}>{dashboard.totalJobs}</Text>
         </View>
-        <View style={[styles.statCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-          <Text style={styles.statLabel}>Active Printers</Text>
-          <Text style={[styles.statValue, { color: colors.foreground }]}>4</Text>
+        <View style={s.statCard}>
+          <Text style={s.statLabel}>Total Printers</Text>
+          <Text style={s.statValue}>{dashboard.totalPrinters}</Text>
         </View>
-        <View style={[styles.statCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-          <Text style={styles.statLabel}>Monthly Revenue</Text>
-          <Text style={[styles.statValue, { color: colors.foreground }]}>GH₵ 35,400</Text>
+        <View style={s.statCard}>
+          <Text style={s.statLabel}>Awaiting Review</Text>
+          <Text style={s.statValue}>{submittedJobs}</Text>
         </View>
-        <View style={[styles.statCard, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-          <Text style={styles.statLabel}>Jobs This Month</Text>
-          <Text style={[styles.statValue, { color: colors.foreground }]}>84</Text>
+        <View style={s.statCard}>
+          <Text style={s.statLabel}>Owed to Designers</Text>
+          <Text style={s.statValue}>GH₵ {totalOwed.toFixed(0)}</Text>
         </View>
       </View>
-      <View style={styles.tabRow}>
+      <View style={s.tabRow}>
         {tabs.map(tab => (
           <Pressable
             key={tab}
             onPress={() => setActiveTab(tab)}
-            style={[
-              styles.tabItem,
-              { backgroundColor: colors.secondary },
-              activeTab === tab && { borderColor: colors.primary, borderWidth: 1 },
-            ]}
+            style={[s.tabItem, activeTab === tab && s.tabItemActive]}
           >
-            <Text style={[styles.tabText, { color: activeTab === tab ? colors.primary : colors.foreground }]}>
-              {tab}
-            </Text>
+            <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>{tab}</Text>
           </Pressable>
         ))}
       </View>
 
       {activeTab === 'Users' ? (
-        <FlatList
-          data={[...Array(6).keys()].map(i => ({
-            id: `U${i}`, name: `User ${i + 1}`, email: `user${i + 1}@printforge.com`,
-            role: i % 2 === 0 ? 'Designer' : 'Student', jobs: 8 + i, spent: 120 + i * 15, joined: '2026-04-12',
-          }))}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <View style={[styles.row, { backgroundColor: colors.secondary }]}>
-              <MonoText>{item.id}</MonoText>
-              <View style={styles.rowContent}>
-                <Text style={[styles.rowTitle, { color: colors.foreground }]}>{item.name}</Text>
-                <Text style={styles.smallText}>{item.email}</Text>
-              </View>
-              <Text style={[styles.rowTag, { color: colors.primary }]}>{item.role}</Text>
-            </View>
-          )}
-        />
+        // The backend has no user-listing endpoint (only POST /api/admin/users
+        // to create one) — nothing honest to show here yet.
+        <View style={s.emptyState}>
+          <Text style={s.sectionTitle}>User directory not available yet</Text>
+          <Text style={s.smallText}>
+            The backend doesn't expose a user-listing endpoint yet — only account creation
+            (POST /api/admin/users). This tab will list real accounts once that exists.
+          </Text>
+        </View>
       ) : activeTab === 'Printers' ? (
         <FlatList
-          data={PRINTERS}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => (
-            <View style={[styles.printerCard, { backgroundColor: colors.secondary }]}>
-              <View style={styles.printerHeader}>
-                <MonoText>{item.name}</MonoText>
-                <Text style={styles.smallText}>{item.location}</Text>
+          data={printerStatusRows}
+          keyExtractor={([status]) => status}
+          ListEmptyComponent={
+            <View style={s.emptyState}>
+              <Text style={s.sectionTitle}>No printers registered</Text>
+              <Text style={s.smallText}>Printer status counts will appear here once printers exist.</Text>
+            </View>
+          }
+          renderItem={({ item: [status, count] }) => (
+            <View style={s.printerCard}>
+              <View style={s.printerHeader}>
+                <MonoText>{status}</MonoText>
               </View>
-              <Text style={styles.smallMono}>{item.status}</Text>
+              <Text style={s.smallMono}>{count} printer{count === 1 ? '' : 's'}</Text>
             </View>
           )}
         />
       ) : activeTab === 'Earnings' ? (
-        <View style={[styles.emptyState, { backgroundColor: colors.secondary }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>June Revenue</Text>
-          <Text style={styles.smallText}>Revenue charts and payouts will display here.</Text>
-        </View>
+        <FlatList
+          data={dashboard.designerEarnings}
+          keyExtractor={(item, index) => `${item.designerName}-${index}`}
+          ListEmptyComponent={
+            <View style={s.emptyState}>
+              <Text style={s.sectionTitle}>No designer earnings yet</Text>
+              <Text style={s.smallText}>Payouts owed to designers will appear here once orders come in.</Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <View style={s.row}>
+              <View style={s.rowContent}>
+                <Text style={s.rowTitle}>{item.designerName}</Text>
+              </View>
+              <Text style={s.rowTag}>GH₵ {item.totalOwed.toFixed(2)}</Text>
+            </View>
+          )}
+        />
       ) : (
-        <View style={[styles.emptyState, { backgroundColor: colors.secondary }]}>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Activity logs will appear here.</Text>
-          <Text style={styles.smallText}>Operational logs, alerts, and admin actions land here.</Text>
+        <View style={s.emptyState}>
+          <Text style={s.sectionTitle}>Activity logs will appear here.</Text>
+          <Text style={s.smallText}>Operational logs, alerts, and admin actions land here.</Text>
         </View>
       )}
     </View>
   );
 }
 
-// ✅ Only static/layout values here — no colors
-const styles = StyleSheet.create({
-  screen: { flex: 1, padding: 16 },
-  header: { marginBottom: 18 },
-  title: { fontSize: 28, fontWeight: '700', marginBottom: 6 },
-  subtitle: { color: '#94A3B8' },
-  statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
-  statCard: { borderRadius: 16, borderWidth: 1, padding: 16, width: '48%' },
-  statLabel: { color: '#94A3B8', marginBottom: 6 },
-  statValue: { fontSize: 20, fontWeight: '700' },
-  tabRow: { flexDirection: 'row', gap: 12, marginBottom: 18 },
-  tabItem: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 999 },
-  tabText: { fontWeight: '700' },
-  row: { marginBottom: 14, padding: 14, borderRadius: 16, flexDirection: 'row', alignItems: 'center' },
-  rowTitle: { fontWeight: '700', marginVertical: 4 },
-  smallText: { color: '#94A3B8' },
-  printerCard: { borderRadius: 16, padding: 16, marginBottom: 14 },
-  printerHeader: { marginBottom: 8 },
-  smallMono: { color: '#94A3B8', fontFamily: 'JetBrainsMono_400Regular' },
-  rowContent: { flex: 1, marginLeft: 12 },
-  rowTag: { fontWeight: '700' },
-  emptyState: { padding: 18, borderRadius: 16 },
-  sectionTitle: { fontSize: 18, fontWeight: '700' },
-});
+function makeStyles(colors: Colors) {
+  return StyleSheet.create({
+    screen: { flex: 1, padding: 16, backgroundColor: colors.background },
+    centered: { alignItems: 'center', justifyContent: 'center' },
+    stateText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 13,
+      textAlign: 'center',
+      marginBottom: designTokens.spacing.md,
+    },
+    retryButton: {
+      minHeight: 42,
+      borderRadius: designTokens.radius.md,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: designTokens.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    retryText: { color: colors.primary, fontFamily: designTokens.type.heading, fontSize: 13 },
+    pressed: { opacity: 0.72 },
+    header: { marginBottom: 18 },
+    title: {
+      fontSize: 28,
+      fontFamily: designTokens.type.heading,
+      marginBottom: 6,
+      color: colors.foreground,
+    },
+    subtitle: { color: colors.mutedFg, fontFamily: designTokens.type.body },
+    statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
+    statCard: {
+      borderRadius: 16,
+      borderWidth: 1,
+      padding: 16,
+      width: '48%',
+      backgroundColor: colors.card,
+      borderColor: colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.primary,
+    },
+    statLabel: { color: colors.mutedFg, fontFamily: designTokens.type.body, marginBottom: 6 },
+    statValue: { fontSize: 20, fontFamily: designTokens.type.heading, color: colors.foreground },
+    tabRow: { flexDirection: 'row', gap: 12, marginBottom: 18 },
+    tabItem: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
+      borderRadius: 999,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: 'transparent',
+    },
+    tabItemActive: { borderColor: colors.primary },
+    tabText: { fontFamily: designTokens.type.heading, color: colors.foreground },
+    tabTextActive: { color: colors.primary },
+    row: {
+      marginBottom: 14,
+      padding: 14,
+      borderRadius: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.card,
+    },
+    rowTitle: {
+      fontFamily: designTokens.type.heading,
+      marginVertical: 4,
+      color: colors.foreground,
+    },
+    smallText: { color: colors.mutedFg, fontFamily: designTokens.type.body },
+    printerCard: {
+      borderRadius: 16,
+      padding: 16,
+      marginBottom: 14,
+      backgroundColor: colors.card,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+    },
+    printerHeader: { marginBottom: 0 },
+    smallMono: { color: colors.mutedFg, fontFamily: designTokens.type.mono },
+    rowContent: { flex: 1, marginLeft: 0 },
+    rowTag: { fontFamily: designTokens.type.heading, color: colors.primary },
+    emptyState: { padding: 18, borderRadius: 16, backgroundColor: colors.card, gap: 6 },
+    sectionTitle: { fontSize: 18, fontFamily: designTokens.type.heading, color: colors.foreground },
+  });
+}

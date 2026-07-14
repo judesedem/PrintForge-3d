@@ -1,22 +1,23 @@
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { ArrowUpRight, Star } from 'lucide-react-native';
+import { ArrowUpRight } from 'lucide-react-native';
 import ImageWithFallback from './ImageWithFallback';
 import { useTheme } from '../ThemeContext';
-import { Listing } from '../data/mockData';
-import { Colors, designTokens, getMaterialChipColors } from '../theme';
+import { MarketplaceListing } from '../api/marketplace';
+import { Colors, designTokens } from '../theme';
 
-export default function ListingCard({ listing, onPress }: { listing: Listing; onPress?: () => void }) {
+// Rebuilt against MarketplaceListing (the real DesignListing shape) instead
+// of mockData's Listing — that mock shape had material/rating/designer
+// fields with no backend equivalent, so this card now shows totalOrders in
+// place of the old "downloads"/rating display, and drops the material
+// badge and designer name entirely rather than fake them.
+export default function ListingCard({ listing, onPress }: { listing: MarketplaceListing; onPress?: () => void }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
-  const material = getMaterialChipColors(colors, listing.material);
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [s.card, pressed && s.pressed]}>
       <View style={s.imageWrap}>
-        <ImageWithFallback source={{ uri: listing.image }} style={s.image} resizeMode="cover" />
-        <View style={[s.materialBadge, { backgroundColor: material.backgroundColor }]}>
-          <Text style={[s.materialText, { color: material.color }]}>{listing.material}</Text>
-        </View>
+        <ImageWithFallback source={{ uri: listing.thumbnailUrl }} style={s.image} resizeMode="cover" />
         <View style={s.openBadge}>
           <ArrowUpRight size={15} color={colors.foreground} />
         </View>
@@ -24,13 +25,11 @@ export default function ListingCard({ listing, onPress }: { listing: Listing; on
 
       <View style={s.content}>
         <Text style={s.title} numberOfLines={2}>{listing.title}</Text>
-        <Text style={s.designer} numberOfLines={1}>by {listing.designer}</Text>
+        <Text style={s.meta} numberOfLines={1}>
+          {listing.totalOrders} {listing.totalOrders === 1 ? 'order' : 'orders'}
+        </Text>
         <View style={s.bottomRow}>
           <Text style={s.price}>GH₵ {listing.price.toFixed(2)}</Text>
-          <View style={s.ratingRow}>
-            <Star size={13} color="#D9A11A" fill="#D9A11A" />
-            <Text style={s.rating}>{listing.rating}</Text>
-          </View>
         </View>
       </View>
     </Pressable>
@@ -57,15 +56,6 @@ function makeStyles(colors: Colors) {
     pressed: { opacity: 0.86, transform: [{ scale: 0.99 }] },
     imageWrap: { position: 'relative' },
     image: { width: '100%', height: 148 },
-    materialBadge: {
-      position: 'absolute',
-      top: 12,
-      left: 12,
-      borderRadius: designTokens.radius.pill,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-    },
-    materialText: { fontFamily: designTokens.type.heading, fontSize: 10 },
     openBadge: {
       position: 'absolute',
       right: 12,
@@ -85,7 +75,7 @@ function makeStyles(colors: Colors) {
       lineHeight: 20,
       minHeight: 40,
     },
-    designer: {
+    meta: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 12,
@@ -98,7 +88,5 @@ function makeStyles(colors: Colors) {
       marginTop: 13,
     },
     price: { color: colors.primary, fontFamily: designTokens.type.heading, fontSize: 14 },
-    ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-    rating: { color: colors.foreground, fontFamily: designTokens.type.medium, fontSize: 12 },
   });
 }

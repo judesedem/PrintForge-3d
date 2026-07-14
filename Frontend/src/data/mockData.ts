@@ -40,15 +40,6 @@ export type Printer = {
   progress?: number;
 };
 
-export type Notification = {
-  id: string;
-  title: string;
-  body: string;
-  type: 'success' | 'info' | 'warning' | 'error';
-  timestamp: string;
-  unread: boolean;
-};
-
 export const JOBS: Job[] = [
   {
     id: 'PF-2024-0041',
@@ -244,45 +235,3 @@ export const PRINTERS: Printer[] = [
   },
 ];
 
-export const NOTIFICATIONS: Notification[] = [
-  {
-    id: 'notif-1',
-    title: 'Job Approved',
-    body: 'Your print job PF-2024-0047 has been approved and queued for print.',
-    type: 'success',
-    timestamp: '2h ago',
-    unread: true,
-  },
-  {
-    id: 'notif-2',
-    title: 'Payment Received',
-    body: 'Your Paystack payment for PF-2024-0041 was successful.',
-    type: 'info',
-    timestamp: '5h ago',
-    unread: false,
-  },
-  {
-    id: 'notif-3',
-    title: 'Printer Maintenance',
-    body: 'FlashForge Adventurer 3 is under maintenance until tomorrow.',
-    type: 'warning',
-    timestamp: '1d ago',
-    unread: true,
-  },
-  {
-    id: 'notif-4',
-    title: 'Job Failed',
-    body: 'PF-2024-0031 failed during printing. Please review the notes.',
-    type: 'error',
-    timestamp: '2d ago',
-    unread: false,
-  },
-  {
-    id: 'notif-5',
-    title: 'New Listing Live',
-    body: 'A new Marketplace design is available in the PLA collection.',
-    type: 'info',
-    timestamp: '3d ago',
-    unread: true,
-  },
-];

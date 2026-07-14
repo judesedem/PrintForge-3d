@@ -73,10 +73,10 @@ export default function LoginScreen() {
             <View style={s.brandMarkLine} />
           </View>
           <View style={s.brandCopy}>
-            <View style={s.brandNameRow}>
-              <Text style={s.brandName}>PrintForge</Text>
-              <Text style={s.brand3d}>3D</Text>
-            </View>
+            <Text style={s.brandNameRow}>
+              <Text style={s.brandName}>PRINT</Text>
+              <Text style={s.brand3d}>FORGE 3D</Text>
+            </Text>
             <Text style={s.brandTagline}>DESIGN \u00b7 PRINT \u00b7 BUILD</Text>
           </View>
         </View>
@@ -187,8 +187,8 @@ export default function LoginScreen() {
         </View>
 
         <Pressable onPress={() => router.push('/(auth)/register')} style={s.footerLink}>
-          <Text style={s.footerText}>New to PrintForge 3D?</Text>
-          <Text style={s.footerAction}> Create an account</Text>
+          <Text style={s.footerText}>Don't have an account?</Text>
+          <Text style={s.footerAction}> Sign Up</Text>
         </Pressable>
       </ScrollView>
     </SafeAreaView>
@@ -205,7 +205,7 @@ function makeStyles(colors: Colors) {
       paddingBottom: 36,
     },
     brandBlock: {
-      flexDirection: 'row',
+      flexDirection: 'column',
       alignItems: 'center',
       gap: 12,
       marginBottom: 30,
@@ -232,8 +232,8 @@ function makeStyles(colors: Colors) {
       borderRadius: 2,
       backgroundColor: colors.primary,
     },
-    brandCopy: { gap: 3 },
-    brandNameRow: { flexDirection: 'row', alignItems: 'baseline', gap: 5 },
+    brandCopy: { gap: 3, alignItems: 'center' },
+    brandNameRow: { textAlign: 'center' },
     brandName: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
@@ -243,7 +243,8 @@ function makeStyles(colors: Colors) {
     brand3d: {
       color: colors.primary,
       fontFamily: designTokens.type.heading,
-      fontSize: 16,
+      fontSize: 21,
+      letterSpacing: -0.45,
     },
     brandTagline: {
       color: colors.mutedFg,
@@ -345,7 +346,7 @@ function makeStyles(colors: Colors) {
       paddingVertical: 10,
     },
     footerText: {
-      color: colors.mutedFg,
+      color: colors.foreground,
       fontFamily: designTokens.type.body,
       fontSize: 14,
     },

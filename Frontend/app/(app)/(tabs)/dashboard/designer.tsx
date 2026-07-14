@@ -240,7 +240,7 @@ export default function DesignerDashboard() {
                 </View>
 
                 <View style={s.ratingRow}>
-                  <Star size={13} color="#D9A11A" fill="#D9A11A" />
+                  <Star size={13} color={colors.warning} fill={colors.warning} />
                   <Text style={s.ratingText}>{listing.rating}</Text>
                   <Text style={s.ratingMeta}>Marketplace rating</Text>
                 </View>
@@ -447,6 +447,8 @@ function makeStyles(colors: Colors) {
       backgroundColor: colors.card,
       borderWidth: 1,
       borderColor: colors.border,
+      borderLeftWidth: 3,
+      borderLeftColor: colors.primary,
     },
     statIcon: {
       width: 34,

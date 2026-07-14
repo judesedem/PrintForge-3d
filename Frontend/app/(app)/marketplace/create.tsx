@@ -30,17 +30,22 @@ import {
   X,
 } from 'lucide-react-native';
 import { useTheme } from '@/ThemeContext';
+import { useSession } from '@/SessionContext';
+import { uploadFile } from '@/api/files';
+import { createListing } from '@/api/marketplace';
 import { Colors, designTokens, makeControlStyles } from '@/theme';
 import Card from '@/components/Card';
 import MonoText from '@/components/MonoText';
 
 type PickedAsset = DocumentPicker.DocumentPickerAsset;
+type SubmitPhase = 'idle' | 'uploading' | 'creating';
 
 const MAX_DESCRIPTION_LENGTH = 280;
 
 export default function CreateListingScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { token } = useSession();
   const s = makeStyles(colors);
   const controls = makeControlStyles(colors);
 
@@ -49,6 +54,8 @@ export default function CreateListingScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [basePrice, setBasePrice] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [phase, setPhase] = useState<SubmitPhase>('idle');
 
   const numericBasePrice = Number.parseFloat(basePrice || '0');
   const isReady = Boolean(modelFile && title.trim() && numericBasePrice > 0);
@@ -87,7 +94,7 @@ export default function CreateListingScreen() {
     }
   };
 
-  const createDraftPreview = () => {
+  const handleSubmit = async () => {
     if (!isReady) {
       Alert.alert(
         'Complete the required fields',
@@ -95,11 +102,55 @@ export default function CreateListingScreen() {
       );
       return;
     }
+    if (!token || !modelFile) return;
 
-    Alert.alert(
-      'Draft preview ready',
-      'Your listing has the information required for a draft. After it is saved, you can review and publish it from My Listings.',
-    );
+    setSubmitError(null);
+    let uploadedFileId: string | null = null;
+    try {
+      setPhase('uploading');
+      const uploaded = await uploadFile(token, {
+        uri: modelFile.uri,
+        name: modelFile.name,
+        mimeType: modelFile.mimeType,
+      });
+      uploadedFileId = uploaded.id;
+
+      setPhase('creating');
+      await createListing(token, {
+        fileId: Number(uploaded.id),
+        title: title.trim(),
+        description: description.trim() || undefined,
+        basePrice: numericBasePrice,
+        thumbnail: thumbnail
+          ? { uri: thumbnail.uri, name: thumbnail.name, type: thumbnail.mimeType ?? 'image/jpeg' }
+          : undefined,
+      });
+
+      // This app's tabs aren't separate routes (SwipePager + local state,
+      // not URL-based — (tabs)/_layout.tsx renders the same pager
+      // regardless of matched sub-route), so there's no direct route back
+      // to "the marketplace tab specifically" from this stack screen
+      // (reached from dashboard/designer.tsx, outside the tabs). back()
+      // returns to that dashboard, which is the closest available
+      // equivalent without wiring cross-stack tab-switch signaling.
+      router.back();
+    } catch (err) {
+      if (uploadedFileId) {
+        // Upload succeeded but createListing failed — the file is now
+        // orphaned server-side. Logged for visibility; cleanup is out of
+        // scope for this batch (would need a DELETE /api/files/{id}
+        // endpoint, which doesn't exist yet).
+        console.error(
+          `Listing creation failed after file upload succeeded (orphaned file id ${uploadedFileId}):`,
+          err
+        );
+      } else {
+        console.error('File upload failed:', err);
+      }
+      setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setPhase('idle');
+    }
   };
 
   return (
@@ -396,28 +447,48 @@ export default function CreateListingScreen() {
             </View>
           </Card>
 
+          {submitError ? (
+            <View style={s.submitErrorBanner}>
+              <Info size={16} color={colors.destructive} />
+              <Text style={s.submitErrorText}>{submitError}</Text>
+            </View>
+          ) : null}
+
           <View style={s.actions}>
             <Pressable
               accessibilityRole="button"
+              disabled={phase !== 'idle'}
               onPress={() => router.back()}
-              style={({ pressed }) => [controls.secondaryButton, s.cancelButton, pressed && controls.secondaryButtonPressed]}
+              style={({ pressed }) => [
+                controls.secondaryButton,
+                s.cancelButton,
+                phase !== 'idle' && s.createButtonDisabled,
+                pressed && controls.secondaryButtonPressed,
+              ]}
             >
               <Text style={controls.secondaryButtonText}>Cancel</Text>
             </Pressable>
 
             <Pressable
               accessibilityRole="button"
-              accessibilityState={{ disabled: !isReady }}
-              onPress={createDraftPreview}
+              accessibilityState={{ disabled: !isReady || phase !== 'idle' }}
+              disabled={phase !== 'idle'}
+              onPress={handleSubmit}
               style={({ pressed }) => [
                 controls.primaryButton,
                 s.createButton,
-                !isReady && s.createButtonDisabled,
-                pressed && isReady && controls.primaryButtonPressed,
+                (!isReady || phase !== 'idle') && s.createButtonDisabled,
+                pressed && isReady && phase === 'idle' && controls.primaryButtonPressed,
               ]}
             >
               <Save size={18} color={colors.onPrimary} />
-              <Text style={controls.primaryButtonText}>Create draft</Text>
+              <Text style={controls.primaryButtonText}>
+                {phase === 'uploading'
+                  ? 'Uploading...'
+                  : phase === 'creating'
+                    ? 'Creating listing...'
+                    : 'Create draft'}
+              </Text>
             </Pressable>
           </View>
 
@@ -519,8 +590,11 @@ function makeStyles(colors: Colors) {
       backgroundColor: colors.primary,
     },
     heroCopy: { flex: 1 },
+    // heroCard's background is a fixed colors.navy regardless of theme —
+    // text here needs fixed off-white tones, not colors.mutedFg (which
+    // flips to dark navy-on-navy, nearly invisible, in light mode).
     heroEyebrow: {
-      color: '#FFB18B',
+      color: colors.primary,
       fontFamily: designTokens.type.heading,
       fontSize: 9,
       letterSpacing: 1,
@@ -533,7 +607,7 @@ function makeStyles(colors: Colors) {
       letterSpacing: -0.35,
     },
     heroText: {
-      color: '#C9CEDB',
+      color: 'rgba(229, 229, 229, 0.75)',
       fontFamily: designTokens.type.body,
       fontSize: 12,
       lineHeight: 18,
@@ -872,6 +946,24 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.body,
       fontSize: 10,
       lineHeight: 15,
+    },
+    submitErrorBanner: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+      padding: 12,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.statusFailed.bg,
+      borderWidth: 1,
+      borderColor: colors.statusFailed.dot,
+      marginBottom: designTokens.spacing.md,
+    },
+    submitErrorText: {
+      flex: 1,
+      color: colors.statusFailed.text,
+      fontFamily: designTokens.type.body,
+      fontSize: 11,
+      lineHeight: 16,
     },
     actions: { flexDirection: 'row', gap: 10 },
     cancelButton: { flex: 0.82 },
