@@ -29,12 +29,27 @@ function RootStack() {
   const { colors } = useTheme();
   return (
     <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+      {/*
+        Each name below must match an actual resolvable route: either a
+        group with its own _layout.tsx (only "(app)" qualifies — it has
+        app/(app)/_layout.tsx), or a literal file/index route. "(auth)" has
+        no _layout.tsx or index route of its own (only login.tsx and
+        register.tsx), so it must be registered as its two real leaf
+        routes. Same for "staff" (only staff/queue.tsx exists, no
+        staff/index.tsx). "profile" never existed at this level at all —
+        the only profile.tsx in the app lives at app/(app)/(tabs)/profile.tsx,
+        rendered directly by that layout's SwipePager, not routed here —
+        this was a stale leftover from before profile.tsx was moved into
+        (tabs). All three previously fired an Expo Router "[Layout
+        children]: No route named ... exists in nested children" warning
+        on every launch.
+      */}
+      <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+      <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
       <Stack.Screen name="(app)" options={{ headerShown: false }} />
       <Stack.Screen name="jobs" options={{ headerShown: false }} />
       <Stack.Screen name="admin" options={{ headerShown: false }} />
-      <Stack.Screen name="staff" options={{ headerShown: false }} />
-      <Stack.Screen name="profile" options={{ headerShown: false }} />
+      <Stack.Screen name="staff/queue" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
   );

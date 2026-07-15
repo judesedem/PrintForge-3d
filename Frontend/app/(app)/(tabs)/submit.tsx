@@ -17,7 +17,7 @@ import {
   X,
 } from 'lucide-react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import Slider from '@miblanchard/react-native-slider';
+import { Slider } from '@miblanchard/react-native-slider';
 import { useTheme } from '@/ThemeContext';
 import { useSession } from '@/SessionContext';
 import { useJobs } from '@/JobsContext';
@@ -140,13 +140,26 @@ export default function SubmitScreen() {
     setEstimateError(null);
     try {
       setEstimatePhase('uploading');
-      const uploaded = await uploadFile(token, {
-        uri: modelFile.uri,
-        name: modelFile.name,
-        mimeType: modelFile.mimeType,
-      });
+
+      // Upload has its own try/catch so a failure here is logged as an
+      // UPLOAD failure specifically (and rethrown to the outer handler for
+      // the UI error state) — distinct from an estimate-call failure below.
+      let uploaded;
+      try {
+        console.log('[Submit] Uploading file...');
+        uploaded = await uploadFile(token, {
+          uri: modelFile.uri,
+          name: modelFile.name,
+          mimeType: modelFile.mimeType,
+        });
+        console.log('[Submit] File uploaded, fileId:', uploaded.id);
+      } catch (error) {
+        console.log('[Submit] Upload failed:', error);
+        throw error;
+      }
 
       setEstimatePhase('estimating');
+      console.log('[Submit] Calling estimate with fileId:', uploaded.id);
       const created = await createEstimate(token, {
         fileId: uploaded.id,
         quality,

@@ -53,11 +53,26 @@ const SessionContext = createContext<SessionContextType>({
   signOut: async () => {},
 });
 
+// token/appUser/authLoading live in ONE state object so a consumer can
+// never observe them torn: any effect keyed on (authLoading, token) sees
+// both change in the same commit, by construction — there is no window
+// where authLoading has flipped to false but token is still null after a
+// successful auth. (Separate useState calls in the same synchronous block
+// are batched by React 18 too, but this makes the invariant structural
+// rather than dependent on batching semantics.)
+type SessionState = {
+  token: string | null;
+  appUser: UserDto | null;
+  authLoading: boolean;
+};
+
 export function SessionProvider({ children }: { children: ReactNode }) {
-  const [appUser, setAppUser] = useState<UserDto | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [session, setSession] = useState<SessionState>({
+    token: null,
+    appUser: null,
+    authLoading: true,
+  });
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
 
   const [, , promptAsync] = Google.useIdTokenAuthRequest({
     clientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '',
@@ -71,18 +86,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     (async () => {
       const stored = await getStoredToken();
       if (!stored) {
-        setAuthLoading(false);
+        setSession(prev => ({ ...prev, authLoading: false }));
         return;
       }
       try {
         const user = await getCurrentUser(stored);
-        setToken(stored);
-        setAppUser(user);
+        setSession({ token: stored, appUser: user, authLoading: false });
       } catch {
         // Expired/invalid — clear it so the app doesn't keep retrying with a dead token.
         await clearStoredToken();
-      } finally {
-        setAuthLoading(false);
+        setSession({ token: null, appUser: null, authLoading: false });
       }
     })();
   }, []);
@@ -96,17 +109,17 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
-      setAuthLoading(true);
+      setSession(prev => ({ ...prev, authLoading: true }));
       const result = await promptAsync();
 
       if (result.type !== 'success') {
-        setAuthLoading(false);
+        setSession(prev => ({ ...prev, authLoading: false }));
         return null;
       }
 
       const { id_token } = result.params as { id_token?: string };
       if (!id_token) {
-        setAuthLoading(false);
+        setSession(prev => ({ ...prev, authLoading: false }));
         return null;
       }
 
@@ -122,13 +135,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       const authResponse = await loginWithFirebase(firebaseIdToken);
 
       await setStoredToken(authResponse.token);
-      setToken(authResponse.token);
-      setAppUser(authResponse.user);
-      setAuthLoading(false);
+      setSession({ token: authResponse.token, appUser: authResponse.user, authLoading: false });
       return authResponse.user;
     } catch (err) {
       console.warn('signInWithGoogle failed:', err);
-      setAuthLoading(false);
+      setSession(prev => ({ ...prev, authLoading: false }));
       return null;
     }
   };
@@ -138,44 +149,48 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   // back real forms — let ApiError propagate so the screen can render the
   // backend's actual message (bad credentials, duplicate email, etc.).
   const login = async (payload: LoginPayload) => {
-    setAuthLoading(true);
+    setSession(prev => ({ ...prev, authLoading: true }));
     try {
       const authResponse = await apiLogin(payload);
       await setStoredToken(authResponse.token);
-      setToken(authResponse.token);
-      setAppUser(authResponse.user);
+      // Success commits token + user + authLoading=false as one update —
+      // never a state where loading has resolved but the token is missing.
+      setSession({ token: authResponse.token, appUser: authResponse.user, authLoading: false });
       return authResponse.user;
-    } finally {
-      setAuthLoading(false);
+    } catch (err) {
+      setSession(prev => ({ ...prev, authLoading: false }));
+      throw err;
     }
   };
 
   const register = async (payload: RegisterPayload) => {
-    setAuthLoading(true);
+    console.log('[Session] register() called');
+    setSession(prev => ({ ...prev, authLoading: true }));
     try {
       const authResponse = await apiRegister(payload);
       await setStoredToken(authResponse.token);
-      setToken(authResponse.token);
-      setAppUser(authResponse.user);
+      setSession({ token: authResponse.token, appUser: authResponse.user, authLoading: false });
+      console.log('[Session] token set:', !!authResponse.token);
+      console.log('[Session] authLoading set to false');
       return authResponse.user;
-    } finally {
-      setAuthLoading(false);
+    } catch (err) {
+      setSession(prev => ({ ...prev, authLoading: false }));
+      throw err;
     }
   };
 
   const signOut = async () => {
-    if (token) {
+    if (session.token) {
       // Best-effort — backend logout is stateless, so a failure here
       // shouldn't block clearing the local session.
       try {
-        await apiLogout(token);
+        await apiLogout(session.token);
       } catch {
         // ignore
       }
     }
     await clearStoredToken();
-    setToken(null);
-    setAppUser(null);
+    setSession({ token: null, appUser: null, authLoading: false });
     await firebaseSignOut(auth);
     setFirebaseUser(null);
   };
@@ -183,11 +198,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   return (
     <SessionContext.Provider
       value={{
-        appUser,
-        role: appUser?.role ?? 'student',
-        token,
+        appUser: session.appUser,
+        role: session.appUser?.role ?? 'student',
+        token: session.token,
         firebaseUser,
-        authLoading,
+        authLoading: session.authLoading,
         signInWithGoogle,
         login,
         register,

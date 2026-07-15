@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
-import { StyleSheet, View } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/ThemeContext';
+import { useSession } from '@/SessionContext';
 import { SwipeTabsContext, TAB_KEYS, TabKey } from '@/SwipeTabsContext';
 import SwipePager from '@/components/SwipePager';
 import SwipeTabBar from '@/components/SwipeTabBar';
@@ -22,6 +23,7 @@ const PAGES = [
 
 export default function TabsLayout() {
   const { colors } = useTheme();
+  const { token, authLoading } = useSession();
   const insets = useSafeAreaInsets();
   const [activeIndex, setActiveIndex] = useState(0);
 
@@ -35,6 +37,21 @@ export default function TabsLayout() {
   }, []);
 
   const contextValue = useMemo(() => ({ activeIndex, goToTab }), [activeIndex, goToTab]);
+
+  // register.tsx/login.tsx replace() straight to this route the moment
+  // auth succeeds, but SwipePager mounts all 5 tabs at once (not lazily —
+  // see its own file comment), and each one fires an authenticated fetch
+  // on mount. Holding the tabs off-screen until the token is confirmed
+  // present closes the window where those fetches could go out with no/
+  // stale Authorization header, 401, and race client.ts's session-expiry
+  // redirect back to login against this screen's own navigation.
+  if (authLoading || !token) {
+    return (
+      <View style={[styles.screen, styles.loadingScreen, { backgroundColor: colors.background }]}>
+        <ActivityIndicator color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <SwipeTabsContext.Provider value={contextValue}>
@@ -50,5 +67,6 @@ export default function TabsLayout() {
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  loadingScreen: { alignItems: 'center', justifyContent: 'center' },
   pagerWrap: { flex: 1 },
 });

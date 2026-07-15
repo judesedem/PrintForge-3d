@@ -59,8 +59,15 @@ export default function MarketplaceScreen() {
 
   useEffect(() => {
     if (authLoading) return;
+    // Explicit guard (load() already checks this internally) so
+    // fetchListings can never go out with a null token.
+    if (!token) {
+      setListings([]);
+      setLoading(false);
+      return;
+    }
     load();
-  }, [authLoading, load]);
+  }, [authLoading, token, load]);
 
   // Material filtering was dropped along with the mock Listing shape —
   // DesignListing (the real backend model) has no material field to filter

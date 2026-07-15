@@ -48,6 +48,22 @@ export async function uploadFile(
   token: string,
   asset: { uri: string; name: string; mimeType?: string | null }
 ): Promise<ModelFile> {
+  // Diagnostic for "Could not reach the server" on this endpoint: the
+  // request plumbing (files.ts/client.ts) is correct, so if fetch() still
+  // throws at the network layer the usual cause is the uri not being a
+  // readable file:// path at request time — e.g. remote JS debugging is
+  // on (fetch runs in desktop V8, which can't read the device's files) or
+  // a content:// SAF uri slipped through. Log the scheme so that's visible
+  // in one run rather than inferred.
+  const scheme = asset.uri.split(':', 1)[0];
+  console.log(
+    '[Files] uploadFile uri:', asset.uri,
+    '| scheme:', scheme,
+    '| isFileUri:', asset.uri.startsWith('file://'),
+    '| name:', asset.name,
+    '| type:', asset.mimeType ?? 'application/octet-stream',
+  );
+
   const form = new FormData();
   form.append('file', {
     uri: asset.uri,

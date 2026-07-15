@@ -1,4 +1,5 @@
 import { Redirect } from 'expo-router';
+import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { Box } from 'lucide-react-native';
 import { useSession } from '../src/SessionContext';
@@ -33,8 +34,30 @@ export default function SplashScreen() {
   const { token, authLoading } = useSession();
   const s = makeStyles(colors);
 
-  if (!authLoading) {
-    return <Redirect href={token ? '/(app)/(tabs)' : '/(auth)/login'} />;
+  // Decide the destination exactly once, the first time the initial
+  // stored-token check resolves. expo-router's <Redirect> re-fires its
+  // router.replace() on every focus event (it's built on useFocusEffect,
+  // not a plain mount-only effect) — if this screen recomputed `href` from
+  // `token`/`authLoading` on every render, any later auth-state change from
+  // elsewhere in the app (e.g. login()/register() toggling authLoading)
+  // could make this long-lived root screen re-dispatch a stray navigation
+  // of its own, racing whatever explicit router.replace() the active
+  // screen already issued and surfacing as an "Unmatched Route" flash.
+  const [destination, setDestination] = useState<string | null>(null);
+  useEffect(() => {
+    if (!authLoading && destination === null) {
+      // '/(app)/(tabs)/dashboard' (a concrete leaf), not '/(app)/(tabs)':
+      // the bare group href has an empty concrete pathname and can resolve
+      // to Unmatched Route — see register.tsx's handleCreateAccount comment.
+      const dest = token ? '/(app)/(tabs)/dashboard' : '/(auth)/login';
+      console.log('[Index] destination set to:', dest);
+      setDestination(dest);
+    }
+  }, [authLoading, token, destination]);
+
+  if (destination) {
+    console.log('[Index] Redirecting to:', destination);
+    return <Redirect href={destination} />;
   }
 
   return (

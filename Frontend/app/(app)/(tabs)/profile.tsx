@@ -92,8 +92,15 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (authLoading) return;
+    // Explicit guard (loadPayments() already checks this internally) so
+    // fetchMyPayments can never go out with a null token.
+    if (!token) {
+      setPayments([]);
+      setPaymentsLoading(false);
+      return;
+    }
     loadPayments();
-  }, [authLoading, loadPayments]);
+  }, [authLoading, token, loadPayments]);
 
   const totalJobs = jobs.length;
   const activeJobs = jobs.filter(job =>

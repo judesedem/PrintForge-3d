@@ -14,6 +14,15 @@ if (!BASE_URL) {
   );
 }
 
+// All 5 tabs (dashboard/marketplace/submit/orders/profile) mount at once
+// under (app)/(tabs) — see SwipePager, which renders every page eagerly
+// rather than lazily — so a single expired/invalid token can make several
+// authenticated requests 401 in the same tick. Without this guard each one
+// would independently call router.replace('/(auth)/login'), and those
+// redundant replace() calls can race a screen's own in-flight navigation
+// (e.g. register.tsx replacing to '/(app)/(tabs)' the instant it succeeds).
+let redirectingToLogin = false;
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {
@@ -86,10 +95,18 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     // credentials, and that case must NOT force-navigate away from the
     // login screen the user is already looking at (auth.ts's login()/
     // register() never pass a token, so they can't trigger this).
-    if (response.status === 401 && token) {
+    if (response.status === 401) {
+      console.log('[Client] 401 received, token present:', !!token, 'redirecting:', redirectingToLogin);
+    }
+
+    if (response.status === 401 && token && !redirectingToLogin) {
+      redirectingToLogin = true;
       await clearStoredToken();
       emitToast('Your session expired — please sign in again.');
       router.replace('/(auth)/login');
+      // Reset shortly after so a genuine future session expiry (not just
+      // this burst of parallel 401s) can still trigger the redirect again.
+      setTimeout(() => { redirectingToLogin = false; }, 2000);
     }
 
     throw new ApiError(response.status, message);

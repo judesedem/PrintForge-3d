@@ -98,6 +98,7 @@ export default function RegisterScreen() {
     setError(null);
     setSubmitting(true);
     try {
+      console.log('[Register] Calling session.register()');
       await register({
         full_name: fullName,
         email: email.trim(),
@@ -105,10 +106,17 @@ export default function RegisterScreen() {
         confirm_password: confirmPassword,
         role: selectedBackendRole,
       });
-      // Land on the shared workspace route — dashboard/index.tsx redirects
-      // to the right screen based on the real role the backend assigned.
-      router.replace('/(app)/(tabs)');
+      console.log('[Register] Success, navigating to /(app)/(tabs)/dashboard');
+      // Must target a concrete leaf route, not the bare '/(app)/(tabs)'
+      // group: (app) and (tabs) are both pathless groups and (tabs) has no
+      // index.tsx, so the group href's concrete pathname is the empty
+      // string — when resolution fails, expo-router shows Unmatched Route
+      // at exp://<host>/--/ (createURL of that empty path). dashboard's
+      // index.tsx redirects staff/admin to the right screen from there.
+      router.replace('/(app)/(tabs)/dashboard');
+      console.log('[Register] Navigation called');
     } catch (err) {
+      console.log('[Register] Error:', err);
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
     } finally {
       setSubmitting(false);
@@ -122,7 +130,8 @@ export default function RegisterScreen() {
     // applies to the email/password path.
     const user = await signInWithGoogle();
     if (user) {
-      router.replace('/(app)/(tabs)');
+      // Concrete leaf route — see comment in handleCreateAccount.
+      router.replace('/(app)/(tabs)/dashboard');
     } else {
       setError('Google sign-in didn\u2019t complete. Try again.');
     }

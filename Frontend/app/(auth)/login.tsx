@@ -40,7 +40,10 @@ export default function LoginScreen() {
     setSubmitting(true);
     try {
       await login({ email: email.trim(), password });
-      router.replace('/(app)/(tabs)');
+      // Concrete leaf route — the bare '/(app)/(tabs)' group href has an
+      // empty concrete pathname ((tabs) has no index.tsx) and can resolve
+      // to Unmatched Route. See register.tsx's handleCreateAccount comment.
+      router.replace('/(app)/(tabs)/dashboard');
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
     } finally {
@@ -52,7 +55,7 @@ export default function LoginScreen() {
     setError(null);
     const user = await signInWithGoogle();
     if (user) {
-      router.replace('/(app)/(tabs)');
+      router.replace('/(app)/(tabs)/dashboard');
     } else {
       setError('Google sign-in didn\u2019t complete. Try again.');
     }
@@ -157,6 +160,12 @@ export default function LoginScreen() {
             )}
           </Pressable>
 
+          {/*
+            Google Sign-In hidden for the demo \u2014 Google OAuth requires a
+            development build due to expo-auth-session redirect URI
+            instability in Expo Go SDK 56. Email/password login is working
+            correctly and is what we're demoing instead.
+
           <View style={s.dividerRow}>
             <View style={s.divider} />
             <Text style={s.dividerText}>OR</Text>
@@ -178,6 +187,7 @@ export default function LoginScreen() {
               {authLoading ? 'Connecting\u2026' : 'Continue with Google'}
             </Text>
           </Pressable>
+          */}
 
           {Platform.OS === 'ios' ? (
             <Pressable style={[controls.secondaryButton, s.disabled]} disabled>

@@ -64,8 +64,17 @@ export function JobsProvider({ children }: { children: ReactNode }) {
     // token before deciding there's "no token" — otherwise this fires
     // once with token=null on every app start before the real token loads.
     if (authLoading) return;
+    // Explicit guard (load() already checks this internally) so it's
+    // impossible for fetchJobs to go out with a null token even if this
+    // effect ever fires in the same tick authLoading resolves but before
+    // token has committed — a null token here just means "signed out."
+    if (!token) {
+      setJobs([]);
+      setLoading(false);
+      return;
+    }
     load();
-  }, [authLoading, load]);
+  }, [authLoading, token, load]);
 
   const updateJob = (id: string, changes: Partial<Job>) => {
     setJobs(prev => prev.map(job => (job.id === id ? { ...job, ...changes } : job)));
