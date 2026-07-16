@@ -33,6 +33,8 @@ import { uploadFile } from '@/api/files';
 import { createEstimate, Estimate } from '@/api/estimates';
 import { initiatePayment, Payment } from '@/api/payments';
 
+
+console.log('🔥🔥🔥 SUBMIT.TSX LOADED 🔥🔥🔥');
 // Slider typing workaround for this project.
 const SliderComponent: any = Slider;
 
@@ -136,6 +138,7 @@ export default function SubmitScreen() {
   const isReadyForEstimate = Boolean(modelFile && materialName && !materialsLoading);
 
   const handleGetEstimate = async () => {
+    console.log('[Submit] tapped, token:', !!token, 'modelFile:', !!modelFile, 'materialName:', materialName, 'phase:', estimatePhase);
     if (!token || !modelFile || !materialName || estimatePhase !== 'idle') return;
     setEstimateError(null);
     try {
