@@ -4,7 +4,7 @@ cmds = ["apt-get update && apt-get install -y maven"]
 [phases.build]
 dependsOn = ["setup"]
 cwd = "backend/printforge"
-cmds = ["./mvnw clean package -DskipTests"]
+cmds = ["mvn clean package -DskipTests"]
 
 [phases.start]
 cwd = "backend/printforge"
