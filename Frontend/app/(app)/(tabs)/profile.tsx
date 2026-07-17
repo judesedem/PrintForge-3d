@@ -586,7 +586,7 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.heading,
       fontSize: 18,
     },
-    earningsValue: { color: colors.primary, fontSize: 15 },
+    earningsValue: { color: '#FF6A00', fontSize: 15, fontFamily: designTokens.type.heading },
     statLabel: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
@@ -611,10 +611,10 @@ function makeStyles(colors: Colors) {
     },
     editButton: {
       minHeight: 44,
-      borderRadius: 12,
-      backgroundColor: colors.muted,
-      borderWidth: 1,
-      borderColor: colors.border,
+      borderRadius: 14,
+      backgroundColor: 'transparent',
+      borderWidth: 1.5,
+      borderColor: colors.foreground,
       alignItems: 'center',
       justifyContent: 'center',
       marginTop: designTokens.spacing.md,
@@ -737,7 +737,7 @@ function makeStyles(colors: Colors) {
     designThumb: {
       width: '32%',
       aspectRatio: 1,
-      borderRadius: 10,
+      borderRadius: 14,
       backgroundColor: colors.cardElevated,
     },
     upgradeButton: {

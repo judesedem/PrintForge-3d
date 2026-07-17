@@ -123,6 +123,8 @@ function makeStyles(colors: Colors, bottomInset: number) {
       // pager edge; sibling order + elevation keep it drawn on top.
       marginTop: -28,
       backgroundColor: colors.primary,
+      borderWidth: 3,
+      borderColor: '#FFFFFF',
       alignItems: 'center',
       justifyContent: 'center',
       shadowColor: colors.primary,

@@ -104,7 +104,7 @@ export default function LoginScreen() {
           >
             <View style={s.card}>
               <View style={s.logoMark}>
-                <Box size={30} color={ORANGE} strokeWidth={2.2} />
+                <Box size={30} color="#FFFFFF" strokeWidth={2.2} />
               </View>
               <Text style={s.brandTitle}>PrintForge 3D</Text>
               <Text style={s.brandSubtitle}>Print. Share. Build the future.</Text>
@@ -257,7 +257,7 @@ const s = StyleSheet.create({
     width: 60,
     height: 60,
     borderRadius: 18,
-    backgroundColor: 'rgba(255, 106, 0, 0.12)',
+    backgroundColor: '#FF6A00',
     alignItems: 'center',
     justifyContent: 'center',
     alignSelf: 'center',

@@ -211,16 +211,17 @@ function makeStyles(colors: Colors) {
     followButton: {
       alignSelf: 'stretch',
       minHeight: 46,
-      borderRadius: 12,
+      borderRadius: 14,
       borderWidth: 1.5,
-      borderColor: colors.primary,
+      borderColor: '#FF6A00',
+      backgroundColor: 'transparent',
       alignItems: 'center',
       justifyContent: 'center',
       marginBottom: designTokens.spacing.xl,
     },
     followButtonFollowing: { borderColor: colors.border },
     followText: {
-      color: colors.primary,
+      color: '#FF6A00',
       fontFamily: designTokens.type.heading,
       fontSize: 14,
     },
@@ -247,7 +248,7 @@ function makeStyles(colors: Colors) {
     designThumb: {
       width: '32%',
       aspectRatio: 1,
-      borderRadius: 10,
+      borderRadius: 14,
       backgroundColor: colors.cardElevated,
     },
   });

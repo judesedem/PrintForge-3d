@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  FlatList,
+  Dimensions,
   Image,
   Pressable,
   ScrollView,
@@ -16,21 +16,6 @@ import { useSession } from '@/SessionContext';
 import { Colors, designTokens } from '@/theme';
 import { fetchListings, MarketplaceListing } from '@/api/marketplace';
 
-/**
- * Discover screen — Bolt redesign Pass 1 (was the "Browse 3D models"
- * marketplace layout with featured rail / category cards / campus labs).
- *
- * The real data path is UNCHANGED: fetchListings() with the same
- * auth-gated effect, loading, error + retry states as before. Only the
- * presentation moved to the 2-column grid. Mock cards render ONLY when
- * the backend returns zero listings, purely so the grid design is
- * visible before real listings exist — mock cards don't navigate
- * anywhere (a fake id would just error on the real detail screen).
- */
-
-// UI-only for now: DesignListing has no category field, so the pills
-// don't filter anything yet (matches the reference, which also treats
-// them as visual until a category model exists).
 const CATEGORIES = ['All', 'Gears', 'Drones', 'Enclosures', 'Miniatures', 'Articulated'] as const;
 type Category = (typeof CATEGORIES)[number];
 
@@ -38,9 +23,8 @@ type GridItem = {
   id: string;
   name: string;
   likes: number;
-  price: string | null; // display string; null renders the "Free" badge
+  price: string | null;
   img: string;
-  /** Real backend listing id — null for mock fallback cards. */
   listingId: string | null;
 };
 
@@ -95,7 +79,7 @@ const MOCK_GRID: GridItem[] = [
   },
 ];
 
-const FREE_BADGE_BG = '#10B981'; // emerald-500 per the reference
+const FREE_BADGE_BG = '#10B981';
 
 export default function MarketplaceScreen() {
   const router = useRouter();
@@ -128,8 +112,6 @@ export default function MarketplaceScreen() {
 
   useEffect(() => {
     if (authLoading) return;
-    // Explicit guard (load() already checks this internally) so
-    // fetchListings can never go out with a null token.
     if (!token) {
       setListings([]);
       setLoading(false);
@@ -143,8 +125,6 @@ export default function MarketplaceScreen() {
     return listings.map(listing => ({
       id: listing.id,
       name: listing.title,
-      // DesignListing has no likes field — totalOrders stands in as the
-      // popularity count until the backend grows a social model.
       likes: listing.totalOrders,
       price: listing.price > 0 ? `GH₵ ${listing.price.toFixed(2)}` : null,
       img: listing.thumbnailUrl,
@@ -156,28 +136,42 @@ export default function MarketplaceScreen() {
     item.name.toLowerCase().includes(search.trim().toLowerCase())
   );
 
-  const renderCard = ({ item }: { item: GridItem }) => (
+  const rows = useMemo(() => {
+    const result: GridItem[][] = [];
+    for (let i = 0; i < filtered.length; i += 2) {
+      result.push(filtered.slice(i, i + 2));
+    }
+    return result;
+  }, [filtered]);
+
+  const renderCard = (item: GridItem) => (
     <Pressable
+      key={item.id}
       accessibilityRole={item.listingId ? 'button' : undefined}
       accessibilityLabel={item.listingId ? `Open ${item.name}` : `${item.name} (sample)`}
       disabled={!item.listingId}
       onPress={() => item.listingId && router.push(`/(app)/marketplace/${item.listingId}`)}
       style={({ pressed }) => [s.gridCard, pressed && s.gridCardPressed]}
     >
+      {/* Full width image */}
       {item.img ? (
         <Image source={{ uri: item.img }} style={s.gridImage} />
       ) : (
         <View style={[s.gridImage, s.gridImageFallback]} />
       )}
+
+      {/* Price badge overlaid on image */}
       <View style={[s.priceBadge, !item.price && s.freeBadge]}>
         <Text style={s.priceText}>{item.price ?? 'Free'}</Text>
       </View>
-      <View style={s.gridCardBody}>
-        <Text style={s.gridName} numberOfLines={1}>
+
+      {/* White bottom section */}
+      <View style={s.cardBody}>
+        <Text style={s.cardName} numberOfLines={1}>
           {item.name}
         </Text>
         <View style={s.likesRow}>
-          <Heart size={12} color={colors.mutedFg} />
+          <Heart size={12} color="#6B7280" />
           <Text style={s.likesText}>{item.likes.toLocaleString()}</Text>
         </View>
       </View>
@@ -186,6 +180,10 @@ export default function MarketplaceScreen() {
 
   return (
     <View style={s.screen}>
+      {/* Header */}
+      <Text style={s.header}>Browse Designs</Text>
+
+      {/* Search + Category pills */}
       <View style={s.topArea}>
         <View style={s.searchBar}>
           <Search size={17} color={colors.mutedFg} />
@@ -221,6 +219,7 @@ export default function MarketplaceScreen() {
         </ScrollView>
       </View>
 
+      {/* Grid */}
       {loading ? (
         <View style={s.centered}>
           <Text style={s.stateText}>Loading designs…</Text>
@@ -237,15 +236,11 @@ export default function MarketplaceScreen() {
           </Pressable>
         </View>
       ) : (
-        <FlatList
-          data={filtered}
-          numColumns={2}
-          keyExtractor={item => item.id}
-          renderItem={renderCard}
-          columnWrapperStyle={s.gridRow}
+        <ScrollView
           contentContainerStyle={s.gridContent}
           showsVerticalScrollIndicator={false}
-          ListEmptyComponent={
+        >
+          {rows.length === 0 ? (
             <View style={s.emptyState}>
               <Text style={s.emptyTitle}>No matching designs</Text>
               <Text style={s.emptyBody}>Try another search.</Text>
@@ -257,33 +252,55 @@ export default function MarketplaceScreen() {
                 <Text style={s.retryText}>Clear search</Text>
               </Pressable>
             </View>
-          }
-        />
+          ) : (
+            rows.map((row, rowIndex) => (
+              <View key={rowIndex} style={s.gridRow}>
+                {row.map(item => renderCard(item))}
+                {/* Fill empty slot if odd number of items */}
+                {row.length === 1 && <View style={s.gridCard} />}
+              </View>
+            ))
+          )}
+        </ScrollView>
       )}
     </View>
   );
 }
 
 function makeStyles(colors: Colors) {
+  const { width } = Dimensions.get('window');
+  const HORIZONTAL_PADDING = 16;
+  const GAP = 12;
+  const CARD_WIDTH = (width - HORIZONTAL_PADDING * 2 - GAP) / 2;
+  const IMAGE_HEIGHT = CARD_WIDTH * 1.1;
+
   return StyleSheet.create({
     screen: {
       flex: 1,
       backgroundColor: colors.background,
     },
+    header: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.display,
+      fontSize: 26,
+      fontWeight: '700',
+      paddingHorizontal: HORIZONTAL_PADDING,
+      paddingTop: 16,
+      paddingBottom: 8,
+    },
     topArea: {
-      paddingTop: designTokens.spacing.sm,
-      paddingBottom: designTokens.spacing.md,
+      paddingBottom: 12,
     },
     searchBar: {
-      minHeight: 44,
       flexDirection: 'row',
       alignItems: 'center',
       gap: 9,
-      marginHorizontal: designTokens.spacing.lg,
-      marginBottom: designTokens.spacing.md,
-      paddingHorizontal: 16,
-      borderRadius: designTokens.radius.pill,
-      backgroundColor: colors.muted,
+      marginHorizontal: HORIZONTAL_PADDING,
+      marginBottom: 12,
+      paddingHorizontal: 14,
+      borderRadius: 99,
+      backgroundColor: colors.card,
+      minHeight: 44,
     },
     searchInput: {
       flex: 1,
@@ -293,17 +310,17 @@ function makeStyles(colors: Colors) {
       paddingVertical: 10,
     },
     pillsRow: {
-      paddingHorizontal: designTokens.spacing.lg,
+      paddingHorizontal: HORIZONTAL_PADDING,
       gap: 8,
     },
     pill: {
-      borderRadius: designTokens.radius.pill,
-      backgroundColor: colors.muted,
+      borderRadius: 99,
+      backgroundColor: colors.card,
       paddingHorizontal: 16,
       paddingVertical: 6,
     },
     pillActive: {
-      backgroundColor: colors.primary,
+      backgroundColor: '#FF6A00',
     },
     pillText: {
       color: colors.mutedFg,
@@ -313,29 +330,30 @@ function makeStyles(colors: Colors) {
     pillTextActive: {
       color: '#FFFFFF',
     },
-    gridRow: {
-      gap: 12,
-      paddingHorizontal: designTokens.spacing.lg,
-    },
     gridContent: {
-      gap: 12,
-      // Clears the floating Upload circle overlapping the pager bottom.
-      paddingBottom: 48,
+      paddingBottom: 80,
+    },
+    gridRow: {
+      flexDirection: 'row',
+      paddingHorizontal: HORIZONTAL_PADDING,
+      gap: GAP,
+      marginBottom: GAP,
     },
     gridCard: {
-      flex: 1,
-      maxWidth: '48.5%',
+      width: CARD_WIDTH,
       borderRadius: 16,
       overflow: 'hidden',
-      backgroundColor: colors.card,
+      backgroundColor: '#FFFFFF',
     },
     gridCardPressed: {
       opacity: 0.85,
     },
     gridImage: {
-      width: '100%',
-      height: 140,
+      width: CARD_WIDTH,
+      height: IMAGE_HEIGHT,
       resizeMode: 'cover',
+      borderTopLeftRadius: 16,
+      borderTopRightRadius: 16,
     },
     gridImageFallback: {
       backgroundColor: colors.cardElevated,
@@ -344,8 +362,8 @@ function makeStyles(colors: Colors) {
       position: 'absolute',
       top: 8,
       right: 8,
-      borderRadius: designTokens.radius.pill,
-      backgroundColor: colors.primary,
+      borderRadius: 99,
+      backgroundColor: '#FF6A00',
       paddingHorizontal: 9,
       paddingVertical: 4,
     },
@@ -357,52 +375,56 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.heading,
       fontSize: 11,
     },
-    gridCardBody: {
-      paddingHorizontal: 11,
-      paddingTop: 9,
-      paddingBottom: 11,
+    // White bottom section — always white regardless of theme
+    cardBody: {
+      backgroundColor: '#FFFFFF',
+      paddingHorizontal: 10,
+      paddingTop: 8,
+      paddingBottom: 10,
       gap: 4,
+      borderBottomRightRadius: 16,
+      borderBottomLeftRadius: 16,
     },
-    gridName: {
-      color: colors.foreground,
+    cardName: {
+      color: '#1A1A1A',
       fontFamily: designTokens.type.heading,
-      fontSize: 14,
+      fontSize: 13,
     },
     likesRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 5,
+      gap: 4,
     },
     likesText: {
-      color: colors.mutedFg,
+      color: '#6B7280',
       fontFamily: designTokens.type.body,
-      fontSize: 12,
+      fontSize: 11,
     },
     centered: {
       flex: 1,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingHorizontal: designTokens.spacing.xl,
+      paddingHorizontal: 24,
     },
     stateText: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 13,
       textAlign: 'center',
-      marginBottom: designTokens.spacing.md,
+      marginBottom: 12,
     },
     retryButton: {
       minHeight: 40,
-      borderRadius: designTokens.radius.pill,
+      borderRadius: 99,
       borderWidth: 1,
-      borderColor: colors.primary,
-      paddingHorizontal: designTokens.spacing.lg,
+      borderColor: '#FF6A00',
+      paddingHorizontal: 20,
       alignItems: 'center',
       justifyContent: 'center',
-      marginTop: designTokens.spacing.sm,
+      marginTop: 8,
     },
     retryText: {
-      color: colors.primary,
+      color: '#FF6A00',
       fontFamily: designTokens.type.heading,
       fontSize: 13,
     },
@@ -412,7 +434,7 @@ function makeStyles(colors: Colors) {
     emptyState: {
       alignItems: 'center',
       paddingTop: 64,
-      paddingHorizontal: designTokens.spacing.xl,
+      paddingHorizontal: 24,
     },
     emptyTitle: {
       color: colors.foreground,

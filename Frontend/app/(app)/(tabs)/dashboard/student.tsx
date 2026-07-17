@@ -323,7 +323,7 @@ function makeStyles(colors: Colors) {
     },
     card: {
       backgroundColor: CARD_BG,
-      borderRadius: 16,
+      borderRadius: 32,
       marginHorizontal: designTokens.spacing.lg,
       marginBottom: designTokens.spacing.lg,
       overflow: 'hidden',
@@ -392,7 +392,7 @@ function makeStyles(colors: Colors) {
     },
     cardImage: {
       width: '100%',
-      height: 280,
+      height: 240,
       resizeMode: 'cover',
     },
     popularBadge: {
