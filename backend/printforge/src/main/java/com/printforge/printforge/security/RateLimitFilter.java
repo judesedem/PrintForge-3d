@@ -26,10 +26,12 @@ import java.util.concurrent.ConcurrentHashMap;
  *            so User A and User B on the same network each get
  *            their own independent 5-attempt quota.
  *
- * Register — 3 attempts per hour, keyed by IP only
+ * Register — 10 attempts per 4 minutes, keyed by IP only
  *            (no email in body yet at registration time from a
  *            rate-limit perspective — we use IP to stop bulk
- *            account creation from one machine).
+ *            account creation from one machine). Loosened from the
+ *            original 3/hour for easier local testing — still a real
+ *            limit, not disabled.
  *
  * Buckets are in-memory — they reset on server restart.
  * For production, swap ConcurrentHashMap for Redis + Bucket4j
@@ -77,7 +79,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             Bucket bucket = registerBuckets.computeIfAbsent(ip, k -> buildRegisterBucket());
             if (!bucket.tryConsume(1)) {
                 rejectTooManyRequests(response,
-                        "Too many registration attempts. Try again in 1 hour.");
+                        "Too many registration attempts. Try again in 4 minutes.");
                 return;
             }
         }
@@ -94,8 +96,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private Bucket buildRegisterBucket() {
-        Bandwidth limit = Bandwidth.classic(3,
-                Refill.intervally(3, Duration.ofHours(1)));
+        // Was 3 attempts / 1 hour — loosened for testing (still a real
+        // limit, not disabled): 10 attempts / 4 minutes.
+        Bandwidth limit = Bandwidth.classic(10,
+                Refill.intervally(10, Duration.ofMinutes(4)));
         return Bucket.builder().addLimit(limit).build();
     }
 

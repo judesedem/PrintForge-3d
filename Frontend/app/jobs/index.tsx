@@ -1,43 +1,109 @@
-import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
-import { useEffect, useState } from 'react';
+import { FlatList, Pressable, StyleSheet, Text, View, Animated } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   Bell,
-  ClipboardList,
-  PackageCheck,
+  Box,
+  CheckCircle2,
+  Inbox,
   Printer,
-  WalletCards,
+  Wallet,
 } from 'lucide-react-native';
 import { useTheme } from '../../src/ThemeContext';
 import { useSession } from '../../src/SessionContext';
 import { useJobs } from '../../src/JobsContext';
+import { useSwipeTabs } from '../../src/SwipeTabsContext';
 import { fetchMyPayments } from '../../src/api/payments';
 import { Colors, designTokens } from '../../src/theme';
-import Card from '../../src/components/Card';
-import JobCard from '../../src/components/JobCard';
 import GhsAmount from '../../src/components/GhsAmount';
+import type { Job, JobStatus } from '../../src/data/mockData';
 
-// NOTE on why there's no "Pay Now" button here: the backend's payment
-// flow doesn't attach to an existing PrintJob at all — POST
-// /api/payments/initiate takes an estimateId (+ optional listingId), and
-// paying is what CREATES a new PrintJob via the Paystack webhook (status
-// SUBMITTED), not something you do to an already-APPROVED one. There is
-// no backend field or endpoint linking a payment to a pre-existing job,
-// and PrintJobApiResponse (src/api/jobs.ts) doesn't expose an estimateId
-// to pay against even if there were. The real payment trigger is wired
-// into app/(app)/marketplace/[id].tsx instead, where a real estimateId
-// exists (the listing's auto-generated quote). See Handoff.md's Payments
-// batch entry for the full reasoning.
-//
-// What IS wired here: cross-referencing GET /api/payments/my-payments
-// against this job list by printJobId, to show a "PAID" pill on jobs that
-// resulted from a completed payment — real data, no backend changes
-// needed, since Payment.printJobId and Job.id are both already exposed.
+/**
+ * Orders — Bolt redesign Pass 2. Data paths unchanged: jobs come from
+ * JobsContext, PAID pills from GET /api/payments/my-payments (see the
+ * long note in the previous version — payment CREATES jobs via webhook,
+ * there is no pay-an-existing-job flow, which is why there's no Pay
+ * button here).
+ *
+ * Timeline mapping — the design's 5 stages vs the backend's real
+ * JobStatus values:
+ *   Submitted → SUBMITTED
+ *   Approved  → APPROVED or QUEUED
+ *   Printing  → PRINTING or IN_PROGRESS (pulsing dot)
+ *   Ready     → COMPLETED (backend has no separate READY status)
+ *   Collected → no backend status exists yet — always rendered future
+ * FAILED/REJECTED show a red badge and a dimmed timeline.
+ *
+ * Job has no image/thumbnail field on the backend response, so the
+ * thumbnail slot always renders the Box-icon placeholder.
+ */
+
+const STAGES = ['Subm', 'Appr', 'Print', 'Ready', 'Coll'] as const;
+
+type StatusVisual = {
+  label: string;
+  stage: number; // index into STAGES; -1 = terminal failure, no progress
+  fg: string;
+  bg: string;
+  pulsing?: boolean;
+};
+
+function statusVisual(status: JobStatus, colors: Colors): StatusVisual {
+  switch (status) {
+    case 'SUBMITTED':
+      return { label: 'Submitted', stage: 0, fg: colors.mutedFg, bg: colors.muted };
+    case 'APPROVED':
+      return { label: 'Approved', stage: 1, fg: '#5B8DEF', bg: 'rgba(37, 99, 235, 0.18)' };
+    case 'QUEUED':
+      return { label: 'Queued', stage: 1, fg: '#5B8DEF', bg: 'rgba(37, 99, 235, 0.18)' };
+    case 'PRINTING':
+    case 'IN_PROGRESS':
+      return { label: 'Printing', stage: 2, fg: colors.primary, bg: colors.primarySoft, pulsing: true };
+    case 'COMPLETED':
+      return { label: 'Ready for Pickup', stage: 3, fg: '#22C55E', bg: 'rgba(34, 197, 94, 0.15)' };
+    case 'FAILED':
+      return { label: 'Failed', stage: -1, fg: colors.statusFailed.text, bg: colors.statusFailed.bg };
+    case 'REJECTED':
+      return { label: 'Rejected', stage: -1, fg: colors.statusRejected.text, bg: colors.statusRejected.bg };
+    default:
+      return { label: status, stage: 0, fg: colors.mutedFg, bg: colors.muted };
+  }
+}
+
+function formatDate(submittedAt: string): string {
+  if (!submittedAt) return '';
+  const d = new Date(submittedAt);
+  return Number.isNaN(d.getTime()) ? submittedAt : d.toLocaleDateString();
+}
+
+/** Orange dot that pulses — used for the in-flight PRINTING stage. */
+function PulsingDot({ color, size }: { color: string; size: number }) {
+  const opacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.25, duration: 650, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 650, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [opacity]);
+  return (
+    <Animated.View
+      style={{ width: size, height: size, borderRadius: size / 2, backgroundColor: color, opacity }}
+    />
+  );
+}
+
 export default function JobsList() {
   const router = useRouter();
   const { colors } = useTheme();
   const { token } = useSession();
   const { jobs } = useJobs();
+  // No-ops harmlessly when this renders as the standalone /jobs stack
+  // route (outside the tabs pager) — the context default is a no-op.
+  const { goToTab } = useSwipeTabs();
   const s = makeStyles(colors);
 
   const [paidJobIds, setPaidJobIds] = useState<Set<string>>(new Set());
@@ -66,6 +132,71 @@ export default function JobsList() {
   const completedJobs = jobs.filter(job => job.status === 'COMPLETED');
   const totalSpent = jobs.reduce((sum, job) => sum + job.cost, 0);
 
+  const renderCard = ({ item }: { item: Job }) => {
+    const visual = statusVisual(item.status, colors);
+    const failed = visual.stage === -1;
+    return (
+      <View style={s.card}>
+        <View style={s.cardTopRow}>
+          <View style={s.thumb}>
+            <Box size={26} color={colors.primary} strokeWidth={1.8} />
+          </View>
+          <View style={s.cardCopy}>
+            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
+            <Text style={s.cardMeta}>
+              {item.material} · {item.quality} · Qty {item.qty}
+            </Text>
+            <Text style={s.cardDate}>{formatDate(item.submittedAt)}</Text>
+          </View>
+          <View style={s.badgeColumn}>
+            <View style={[s.statusBadge, { backgroundColor: visual.bg }]}>
+              {visual.pulsing ? <PulsingDot color={visual.fg} size={6} /> : null}
+              <Text style={[s.statusBadgeText, { color: visual.fg }]}>{visual.label}</Text>
+            </View>
+            {paidJobIds.has(item.id) ? (
+              <View style={s.paidPill}>
+                <Text style={s.paidPillText}>PAID</Text>
+              </View>
+            ) : null}
+          </View>
+        </View>
+
+        <View style={[s.timeline, failed && s.timelineFailed]}>
+          {STAGES.map((label, i) => {
+            const done = !failed && i < visual.stage;
+            const current = !failed && i === visual.stage;
+            const dotColor = done ? '#22C55E' : current ? colors.primary : colors.muted;
+            return (
+              <View key={label} style={s.stageItem}>
+                {i > 0 ? (
+                  <View style={[s.stageLine, done || current ? s.stageLineDone : null]} />
+                ) : null}
+                <View style={s.stageDotWrap}>
+                  {current && visual.pulsing ? (
+                    <PulsingDot color={colors.primary} size={10} />
+                  ) : (
+                    <View style={[s.stageDot, { backgroundColor: dotColor }]} />
+                  )}
+                  <Text style={[s.stageLabel, (done || current) && s.stageLabelActive]}>
+                    {label}
+                  </Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(`/jobs/${item.id}`)}
+          style={({ pressed }) => [s.detailsLink, pressed && s.pressed]}
+        >
+          <Text style={s.detailsLinkText}>View Details</Text>
+        </Pressable>
+      </View>
+    );
+  };
+
   return (
     <View style={s.screen}>
       <FlatList
@@ -73,14 +204,11 @@ export default function JobsList() {
         keyExtractor={item => item.id}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={s.list}
+        renderItem={renderCard}
         ListHeaderComponent={(
           <>
             <View style={s.headerRow}>
-              <View style={s.headerCopy}>
-                <Text style={s.eyebrow}>PRINT QUEUE</Text>
-                <Text style={s.title}>My orders</Text>
-                <Text style={s.subtitle}>Track every model from submission to campus pickup.</Text>
-              </View>
+              <Text style={s.title}>My Orders</Text>
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel="Open notifications"
@@ -92,56 +220,37 @@ export default function JobsList() {
             </View>
 
             <View style={s.statsRow}>
-              <Card style={s.statCard}>
-                <View style={s.statIconOrange}>
-                  <Printer size={18} color={colors.primary} />
-                </View>
+              <View style={s.statCard}>
+                <Printer size={18} color={colors.primary} />
                 <Text style={s.statValue}>{activeJobs.length}</Text>
-                <Text style={s.statLabel}>Active prints</Text>
-              </Card>
-              <Card style={s.statCard}>
-                <View style={s.statIconGreen}>
-                  <PackageCheck size={18} color={colors.success} />
-                </View>
+                <Text style={s.statLabel}>Active</Text>
+              </View>
+              <View style={s.statCard}>
+                <CheckCircle2 size={18} color="#22C55E" />
                 <Text style={s.statValue}>{completedJobs.length}</Text>
                 <Text style={s.statLabel}>Completed</Text>
-              </Card>
-              <Card style={s.statCard}>
-                <View style={s.statIconBlue}>
-                  <WalletCards size={18} color={colors.info} />
-                </View>
-                <GhsAmount amount={totalSpent} size="sm" style={s.statAmount} />
-                <Text style={s.statLabel}>Total spend</Text>
-              </Card>
-            </View>
-
-            <View style={s.sectionRow}>
-              <View>
-                <Text style={s.sectionEyebrow}>ORDER HISTORY</Text>
-                <Text style={s.sectionTitle}>All print jobs</Text>
               </View>
-              <View style={s.countPill}>
-                <ClipboardList size={14} color={colors.primary} />
-                <Text style={s.countText}>{jobs.length}</Text>
+              <View style={s.statCard}>
+                <Wallet size={18} color={colors.foreground} />
+                <GhsAmount amount={totalSpent} size="sm" style={s.statAmount} />
+                <Text style={s.statLabel}>Total spent</Text>
               </View>
             </View>
           </>
         )}
-        renderItem={({ item }) => (
-          <JobCard
-            job={item}
-            paid={paidJobIds.has(item.id)}
-            onPress={() => router.push(`/jobs/${item.id}`)}
-          />
-        )}
         ListEmptyComponent={(
-          <Card style={s.emptyCard}>
-            <View style={s.emptyIcon}>
-              <ClipboardList size={26} color={colors.primary} />
-            </View>
+          <View style={s.emptyState}>
+            <Inbox size={56} color={colors.mutedFg} strokeWidth={1.4} />
             <Text style={s.emptyTitle}>No print orders yet</Text>
-            <Text style={s.emptyBody}>Your marketplace and uploaded-model orders will appear here.</Text>
-          </Card>
+            <Text style={s.emptyBody}>Upload a design to get your first print started.</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => goToTab('submit')}
+              style={({ pressed }) => [s.emptyButton, pressed && s.pressed]}
+            >
+              <Text style={s.emptyButtonText}>Upload Now →</Text>
+            </Pressable>
+          </View>
         )}
       />
     </View>
@@ -150,172 +259,187 @@ export default function JobsList() {
 
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
-    screen: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
+    screen: { flex: 1, backgroundColor: colors.background },
     list: {
       paddingHorizontal: designTokens.spacing.lg,
-      paddingTop: designTokens.spacing.lg,
-      paddingBottom: designTokens.spacing.section,
+      paddingTop: designTokens.spacing.md,
+      paddingBottom: 48,
     },
+    pressed: { opacity: 0.72 },
     headerRow: {
       flexDirection: 'row',
-      alignItems: 'flex-start',
+      alignItems: 'center',
       justifyContent: 'space-between',
-      gap: designTokens.spacing.md,
-      marginBottom: designTokens.spacing.xl,
-    },
-    headerCopy: {
-      minWidth: 0,
-      flex: 1,
-    },
-    eyebrow: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 10,
-      letterSpacing: 1.2,
+      marginBottom: designTokens.spacing.lg,
     },
     title: {
       color: colors.foreground,
       fontFamily: designTokens.type.display,
-      fontSize: 29,
-      marginTop: 3,
-    },
-    subtitle: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 13,
-      lineHeight: 19,
-      marginTop: 5,
+      fontSize: 26,
+      letterSpacing: -0.5,
     },
     iconButton: {
-      width: 42,
-      height: 42,
-      borderRadius: designTokens.radius.md,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    pressed: {
-      opacity: 0.72,
-      transform: [{ scale: 0.98 }],
     },
     statsRow: {
       flexDirection: 'row',
-      gap: designTokens.spacing.sm,
-      marginBottom: designTokens.spacing.section,
+      gap: 9,
+      marginBottom: designTokens.spacing.xl,
     },
     statCard: {
-      minWidth: 0,
       flex: 1,
-      padding: designTokens.spacing.md,
-      alignItems: 'flex-start',
-      borderLeftWidth: 3,
-      borderLeftColor: colors.primary,
-    },
-    statIconOrange: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: colors.primarySoft,
+      minHeight: 88,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.card,
       alignItems: 'center',
       justifyContent: 'center',
-      marginBottom: 11,
-    },
-    statIconGreen: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: colors.statusCompleted.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 11,
-    },
-    statIconBlue: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: colors.statusApproved.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 11,
+      gap: 4,
+      padding: 10,
     },
     statValue: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 20,
+      fontSize: 18,
     },
-    statAmount: {
+    statAmount: { color: colors.foreground, fontSize: 14 },
+    statLabel: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 10,
+    },
+
+    card: {
+      borderRadius: 16,
+      backgroundColor: colors.card,
+      padding: designTokens.spacing.md,
+      marginBottom: designTokens.spacing.md,
+    },
+    cardTopRow: {
+      flexDirection: 'row',
+      gap: designTokens.spacing.md,
+      marginBottom: designTokens.spacing.md,
+    },
+    thumb: {
+      width: 60,
+      height: 60,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: '#0A182E',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cardCopy: { flex: 1, minWidth: 0 },
+    cardTitle: {
       color: colors.foreground,
+      fontFamily: designTokens.type.heading,
       fontSize: 15,
     },
-    statLabel: {
+    cardMeta: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 11,
+      marginTop: 3,
+    },
+    cardDate: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 10,
       marginTop: 3,
     },
-    sectionRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: designTokens.spacing.md,
-    },
-    sectionEyebrow: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 9,
-      letterSpacing: 1.1,
-    },
-    sectionTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 19,
-      marginTop: 2,
-    },
-    countPill: {
-      minHeight: 32,
-      borderRadius: designTokens.radius.pill,
-      paddingHorizontal: 11,
+    badgeColumn: { alignItems: 'flex-end', gap: 5 },
+    statusBadge: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 5,
-      backgroundColor: colors.primarySoft,
+      borderRadius: designTokens.radius.pill,
+      paddingHorizontal: 9,
+      paddingVertical: 4,
     },
-    countText: {
-      color: colors.primary,
+    statusBadgeText: {
       fontFamily: designTokens.type.heading,
-      fontSize: 12,
+      fontSize: 10,
     },
-    emptyCard: {
-      alignItems: 'center',
-      paddingVertical: 32,
+    paidPill: {
+      borderRadius: designTokens.radius.pill,
+      backgroundColor: 'rgba(34, 197, 94, 0.15)',
+      paddingHorizontal: 7,
+      paddingVertical: 3,
     },
-    emptyIcon: {
-      width: 52,
-      height: 52,
-      borderRadius: 18,
-      backgroundColor: colors.primarySoft,
-      alignItems: 'center',
+    paidPillText: {
+      color: '#22C55E',
+      fontFamily: designTokens.type.heading,
+      fontSize: 8,
+      letterSpacing: 0.6,
+    },
+
+    timeline: {
+      flexDirection: 'row',
       justifyContent: 'center',
-      marginBottom: 14,
+      paddingVertical: 6,
+    },
+    timelineFailed: { opacity: 0.35 },
+    stageItem: { flexDirection: 'row', alignItems: 'flex-start' },
+    stageLine: {
+      width: 26,
+      height: 2,
+      backgroundColor: colors.muted,
+      marginTop: 4,
+      marginHorizontal: 2,
+    },
+    stageLineDone: { backgroundColor: '#22C55E' },
+    stageDotWrap: { alignItems: 'center', gap: 4, width: 34 },
+    stageDot: { width: 10, height: 10, borderRadius: 5 },
+    stageLabel: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 9,
+    },
+    stageLabelActive: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.medium,
+    },
+
+    detailsLink: { alignSelf: 'flex-end', paddingTop: 4, paddingHorizontal: 2 },
+    detailsLinkText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.medium,
+      fontSize: 11,
+    },
+
+    emptyState: {
+      alignItems: 'center',
+      paddingTop: 48,
+      paddingHorizontal: designTokens.spacing.xl,
+      gap: 8,
     },
     emptyTitle: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
       fontSize: 17,
+      marginTop: 6,
     },
     emptyBody: {
-      maxWidth: 260,
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 12,
-      lineHeight: 18,
       textAlign: 'center',
-      marginTop: 5,
+    },
+    emptyButton: {
+      marginTop: designTokens.spacing.md,
+      minHeight: 46,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.primary,
+      paddingHorizontal: designTokens.spacing.xxl,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    emptyButtonText: {
+      color: '#FFFFFF',
+      fontFamily: designTokens.type.heading,
+      fontSize: 14,
     },
   });
 }

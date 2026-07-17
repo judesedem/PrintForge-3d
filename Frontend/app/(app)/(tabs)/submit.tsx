@@ -1,18 +1,26 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import {
   ArrowLeft,
+  ArrowRight,
   Box,
+  Check,
   CheckCircle2,
-  ChevronRight,
+  Clock3,
   CloudUpload,
   File,
-  Gauge,
-  Info,
-  Layers3,
   Minus,
   Plus,
-  ShieldCheck,
+  Scale,
+  Settings2,
   Sparkles,
   X,
 } from 'lucide-react-native';
@@ -23,8 +31,6 @@ import { useSession } from '@/SessionContext';
 import { useJobs } from '@/JobsContext';
 import { useToast } from '@/ToastContext';
 import { Colors, designTokens, makeControlStyles } from '@/theme';
-import MonoText from '@/components/MonoText';
-import Card from '@/components/Card';
 import GhsAmount from '@/components/GhsAmount';
 import PaystackWebView from '@/components/PaystackWebView';
 import { useSwipeTabs } from '@/SwipeTabsContext';
@@ -33,17 +39,29 @@ import { uploadFile } from '@/api/files';
 import { createEstimate, Estimate } from '@/api/estimates';
 import { initiatePayment, Payment } from '@/api/payments';
 
+/**
+ * Upload flow — Bolt redesign Pass 2. The three-step visual structure
+ * (Configure → Estimate → Payment) with a step indicator replaces the old
+ * two-screen layout, but EVERY data/payment path is unchanged:
+ * fetchMaterials, expo-document-picker, uploadFile (XHR), createEstimate,
+ * initiatePayment, PaystackWebView, refetchJobs. The one behavior change
+ * is deliberate UX per the redesign: payment success now shows an
+ * in-screen success state with "Track your order" instead of
+ * auto-switching to the Orders tab (refetchJobs + toast still fire).
+ */
 
-console.log('🔥🔥🔥 SUBMIT.TSX LOADED 🔥🔥🔥');
 // Slider typing workaround for this project.
 const SliderComponent: any = Slider;
 
 // Quality is a fixed backend enum (EstimateService.VALID_QUALITIES) with
 // no listing endpoint — hardcoded here on purpose, unlike material below.
-const qualities: Array<{ key: 'DRAFT' | 'STANDARD' | 'HIGH'; label: string; detail: string }> = [
-  { key: 'DRAFT', label: 'Draft', detail: 'Fastest' },
-  { key: 'STANDARD', label: 'Standard', detail: 'Balanced' },
-  { key: 'HIGH', label: 'High', detail: 'Detailed' },
+// The badge shows the speed descriptor, not a price multiplier — the
+// backend's real multipliers aren't exposed by any endpoint, so showing
+// invented ×N numbers here would be fabricated data.
+const qualities: Array<{ key: 'DRAFT' | 'STANDARD' | 'HIGH'; label: string; detail: string; badge: string }> = [
+  { key: 'DRAFT', label: 'Draft', detail: 'Fast, visible layers', badge: 'Fastest' },
+  { key: 'STANDARD', label: 'Standard', detail: 'Balanced finish', badge: 'Balanced' },
+  { key: 'HIGH', label: 'High', detail: 'Fine detail, slower', badge: 'Detailed' },
 ];
 
 // GET /api/materials returns color *names* per material, not hex values —
@@ -59,17 +77,26 @@ const COLOR_SWATCHES: Record<string, string> = {
   Blue: '#2F80ED',
   Green: '#27AE60',
   Yellow: '#F2C94C',
-  Orange: '#FF5803',
+  Orange: '#FF6A00',
   Clear: '#E5E5E5',
 };
 function colorSwatch(name: string): string {
   return COLOR_SWATCHES[name] ?? '#9CA3AF';
 }
 
+function strengthLabel(infill: number): string {
+  if (infill < 25) return 'Low';
+  if (infill < 65) return 'Medium';
+  return 'High';
+}
+
 type PickedAsset = DocumentPicker.DocumentPickerAsset;
 type Step = 'configure' | 'estimate';
 type EstimatePhase = 'idle' | 'uploading' | 'estimating';
 type PaymentPhase = 'idle' | 'initiating' | 'checkout';
+type PaymentOutcome = 'success' | 'cancelled' | null;
+
+const STEPS = ['Configure', 'Estimate', 'Payment'] as const;
 
 export default function SubmitScreen() {
   const { goToTab } = useSwipeTabs();
@@ -99,6 +126,7 @@ export default function SubmitScreen() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [paymentPhase, setPaymentPhase] = useState<PaymentPhase>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [paymentOutcome, setPaymentOutcome] = useState<PaymentOutcome>(null);
 
   const loadMaterials = () => {
     if (!token) return;
@@ -138,31 +166,17 @@ export default function SubmitScreen() {
   const isReadyForEstimate = Boolean(modelFile && materialName && !materialsLoading);
 
   const handleGetEstimate = async () => {
-    console.log('[Submit] tapped, token:', !!token, 'modelFile:', !!modelFile, 'materialName:', materialName, 'phase:', estimatePhase);
     if (!token || !modelFile || !materialName || estimatePhase !== 'idle') return;
     setEstimateError(null);
     try {
       setEstimatePhase('uploading');
-
-      // Upload has its own try/catch so a failure here is logged as an
-      // UPLOAD failure specifically (and rethrown to the outer handler for
-      // the UI error state) — distinct from an estimate-call failure below.
-      let uploaded;
-      try {
-        console.log('[Submit] Uploading file...');
-        uploaded = await uploadFile(token, {
-          uri: modelFile.uri,
-          name: modelFile.name,
-          mimeType: modelFile.mimeType,
-        });
-        console.log('[Submit] File uploaded, fileId:', uploaded.id);
-      } catch (error) {
-        console.log('[Submit] Upload failed:', error);
-        throw error;
-      }
+      const uploaded = await uploadFile(token, {
+        uri: modelFile.uri,
+        name: modelFile.name,
+        mimeType: modelFile.mimeType,
+      });
 
       setEstimatePhase('estimating');
-      console.log('[Submit] Calling estimate with fileId:', uploaded.id);
       const created = await createEstimate(token, {
         fileId: uploaded.id,
         quality,
@@ -183,6 +197,7 @@ export default function SubmitScreen() {
   const handlePay = async () => {
     if (!token || !estimate || paymentPhase !== 'idle') return;
     setPaymentError(null);
+    setPaymentOutcome(null);
     setPaymentPhase('initiating');
     try {
       // Upload flow — estimateId only, no listingId (that's the marketplace
@@ -201,21 +216,23 @@ export default function SubmitScreen() {
     setPaymentPhase('idle');
     // A new PrintJob now exists (created server-side by the Paystack
     // webhook once payment cleared) — refetch so the orders tab is
-    // current, then switch to it. This screen is itself one of the
-    // swipeable tab pages, so goToTab (not a stack navigation) is the
-    // right tool here — unlike marketplace/[id].tsx, which is a separate
-    // stack screen outside the tabs pager and has no access to this
-    // context (it uses router.replace('/jobs') instead).
+    // current. Redesign delta: instead of auto-switching to the orders
+    // tab, show the in-screen success state; its buttons use goToTab
+    // (this screen is one of the swipeable tab pages, so goToTab — not a
+    // stack navigation — is still the right tool, unlike
+    // marketplace/[id].tsx which lives outside the pager).
     refetchJobs();
     showToast('Your print job has been submitted!');
-    goToTab('orders');
+    setPaymentOutcome('success');
   };
 
   const handlePaymentCancel = () => {
     setPayment(null);
     setPaymentPhase('idle');
-    // Deliberately stay on the estimate step with the same `estimate` —
-    // it's still valid server-side, no need to re-upload or re-estimate.
+    // Deliberately keep the same `estimate` — it's still valid
+    // server-side, no need to re-upload or re-estimate. The cancelled
+    // banner on the estimate step offers Try Again / dismiss.
+    setPaymentOutcome('cancelled');
   };
 
   const handlePaymentError = (message: string) => {
@@ -225,57 +242,163 @@ export default function SubmitScreen() {
     showToast(message);
   };
 
-  const estimatingBusy = estimatePhase !== 'idle';
+  // After a successful order: clear the finished request so the flow
+  // starts fresh next time this tab is visited.
+  const resetFlow = () => {
+    setPaymentOutcome(null);
+    setEstimate(null);
+    setModelFile(null);
+    setStep('configure');
+  };
 
+  const estimatingBusy = estimatePhase !== 'idle';
+  const stepIndex = paymentOutcome === 'success' ? 3 : step === 'configure' ? 0 : paymentPhase === 'idle' ? 1 : 2;
+
+  // ── Success state ─────────────────────────────────────────────────────
+  const successScale = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    if (paymentOutcome === 'success') {
+      successScale.setValue(0);
+      Animated.spring(successScale, {
+        toValue: 1,
+        friction: 5,
+        tension: 90,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [paymentOutcome, successScale]);
+
+  if (paymentOutcome === 'success') {
+    return (
+      <View style={[styles.screen, styles.successScreen]}>
+        <Animated.View style={[styles.successBadge, { transform: [{ scale: successScale }] }]}>
+          <CheckCircle2 size={64} color="#22C55E" strokeWidth={2} />
+        </Animated.View>
+        <Text style={styles.successTitle}>Order Submitted!</Text>
+        <Text style={styles.successBody}>
+          Payment confirmed — your print job was created and is waiting for lab review.
+        </Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            resetFlow();
+            goToTab('orders');
+          }}
+          style={({ pressed }) => [
+            controls.primaryButton,
+            styles.successButton,
+            pressed && controls.primaryButtonPressed,
+          ]}
+        >
+          <Text style={controls.primaryButtonText}>Track your order</Text>
+          <ArrowRight size={19} color={colors.onPrimary} />
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => {
+            resetFlow();
+            goToTab('dashboard');
+          }}
+          style={({ pressed }) => pressed && styles.pressed}
+        >
+          <Text style={styles.successLink}>Back to feed</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // ── Shared step indicator ─────────────────────────────────────────────
+  const stepIndicator = (
+    <View style={styles.stepsRow}>
+      {STEPS.map((label, i) => {
+        const done = i < stepIndex;
+        const current = i === stepIndex;
+        return (
+          <View key={label} style={styles.stepItem}>
+            {i > 0 ? <View style={[styles.stepLine, i <= stepIndex && styles.stepLineDone]} /> : null}
+            <View
+              style={[
+                styles.stepCircle,
+                (done || current) && styles.stepCircleActive,
+              ]}
+            >
+              {done ? (
+                <Check size={14} color="#FFFFFF" strokeWidth={3} />
+              ) : (
+                <Text style={[styles.stepNumber, current && styles.stepNumberActive]}>{i + 1}</Text>
+              )}
+            </View>
+            <Text style={[styles.stepLabel, (done || current) && styles.stepLabelActive]}>{label}</Text>
+          </View>
+        );
+      })}
+    </View>
+  );
+
+  // ── Estimate step ─────────────────────────────────────────────────────
   if (step === 'estimate' && estimate) {
     return (
       <View style={styles.screen}>
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-          <View style={styles.headerRow}>
-            <Pressable
-              accessibilityLabel="Back to configuration"
-              onPress={() => setStep('configure')}
-              style={({ pressed }) => [styles.iconButton, pressed && styles.pressed]}
-            >
-              <ArrowLeft size={21} color={colors.foreground} />
-            </Pressable>
-            <View style={styles.headerCopy}>
-              <Text style={styles.headerTitle}>Your estimate</Text>
-              <Text style={styles.headerSubtitle}>Review before you pay</Text>
+          {stepIndicator}
+
+          {paymentOutcome === 'cancelled' ? (
+            <View style={styles.cancelledBanner}>
+              <Text style={styles.cancelledTitle}>Payment cancelled</Text>
+              <Text style={styles.cancelledBody}>
+                No charge was made. Your estimate is still valid — try again when you’re ready.
+              </Text>
+              <View style={styles.cancelledActions}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setPaymentOutcome(null)}
+                  style={({ pressed }) => [styles.cancelledGhostButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.cancelledGhostText}>Back</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={handlePay}
+                  style={({ pressed }) => [styles.cancelledRetryButton, pressed && styles.pressed]}
+                >
+                  <Text style={styles.cancelledRetryText}>Try again</Text>
+                </Pressable>
+              </View>
             </View>
-            <View style={styles.headerSpacer} />
+          ) : null}
+
+          <Text style={styles.totalLabel}>TOTAL COST</Text>
+          <GhsAmount amount={estimate.totalCost} size="xl" style={styles.totalAmount} />
+
+          <View style={styles.statRow}>
+            <View style={styles.statCard}>
+              <Scale size={18} color={colors.primary} />
+              <Text style={styles.statValue}>~{Math.round(estimate.estimatedGrams)}g</Text>
+              <Text style={styles.statLabel}>{estimate.materialType}</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Clock3 size={18} color={colors.primary} />
+              <Text style={styles.statValue}>~{Math.round(estimate.durationMinutes)} min</Text>
+              <Text style={styles.statLabel}>Print time</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Settings2 size={18} color={colors.primary} />
+              <Text style={styles.statValue}>{estimate.quality}</Text>
+              <Text style={styles.statLabel}>{estimate.infillPercent}% infill</Text>
+            </View>
           </View>
 
-          <Card style={styles.totalCard}>
-            <Text style={styles.totalLabel}>TOTAL COST</Text>
-            <GhsAmount amount={estimate.totalCost} size="xl" style={styles.totalAmount} />
-            <View style={styles.totalMetaRow}>
-              <Text style={styles.totalMetaText}>
-                ~{Math.round(estimate.estimatedGrams)}g of {estimate.materialType}
-              </Text>
-              <Text style={styles.totalMetaDivider}>•</Text>
-              <Text style={styles.totalMetaText}>
-                ~{Math.round(estimate.durationMinutes)} min print time
-              </Text>
-            </View>
-          </Card>
-
-          <Card style={styles.summaryCard}>
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Quality</Text>
-              <Text style={styles.summaryValue}>{estimate.quality}</Text>
-            </View>
+          <View style={styles.summaryCard}>
+            <SummaryRow label="File" value={modelFile?.name ?? '—'} styles={styles} />
             <View style={styles.summaryDivider} />
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Infill</Text>
-              <Text style={styles.summaryValue}>{estimate.infillPercent}%</Text>
-            </View>
+            <SummaryRow label="Material" value={estimate.materialType} styles={styles} />
             <View style={styles.summaryDivider} />
-            <View style={styles.summaryRow}>
-              <Text style={styles.summaryLabel}>Quantity</Text>
-              <Text style={styles.summaryValue}>{estimate.quantity}</Text>
-            </View>
-          </Card>
+            <SummaryRow label="Quality" value={estimate.quality} styles={styles} />
+            <View style={styles.summaryDivider} />
+            <SummaryRow label="Infill" value={`${estimate.infillPercent}%`} styles={styles} />
+            <View style={styles.summaryDivider} />
+            <SummaryRow label="Quantity" value={String(estimate.quantity)} styles={styles} />
+          </View>
 
           {paymentError ? (
             <View style={styles.errorBanner}>
@@ -283,13 +406,10 @@ export default function SubmitScreen() {
             </View>
           ) : null}
 
-          <View style={styles.orderNote}>
-            <ShieldCheck size={15} color={colors.success} />
-            <Text style={styles.orderNoteText}>
-              Payment is handled by Paystack. Your print job is created automatically once
-              payment is confirmed.
-            </Text>
-          </View>
+          <Text style={styles.orderNote}>
+            Payment is handled by Paystack. Your print job is created automatically once payment
+            is confirmed.
+          </Text>
         </ScrollView>
 
         <View style={styles.summaryFooter}>
@@ -303,7 +423,8 @@ export default function SubmitScreen() {
               pressed && controls.secondaryButtonPressed,
             ]}
           >
-            <Text style={controls.secondaryButtonText}>Back</Text>
+            <ArrowLeft size={17} color={colors.primary} />
+            <Text style={controls.secondaryButtonText}>Reconfigure</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"
@@ -312,17 +433,27 @@ export default function SubmitScreen() {
             style={({ pressed }) => [
               controls.primaryButton,
               styles.payButton,
-              paymentPhase !== 'idle' && styles.payButtonDisabled,
+              paymentPhase !== 'idle' && styles.buttonDisabled,
               pressed && paymentPhase === 'idle' && controls.primaryButtonPressed,
             ]}
           >
-            {paymentPhase === 'initiating' ? (
-              <ActivityIndicator color={colors.onPrimary} />
-            ) : (
-              <Text style={controls.primaryButtonText}>Pay Now</Text>
-            )}
+            <Text style={controls.primaryButtonText}>Pay Now</Text>
+            <ArrowRight size={18} color={colors.onPrimary} />
           </Pressable>
         </View>
+
+        {/* Step 3 — payment. Real Paystack opens in the WebView; while the
+            payment record is being created we show the redirect state. */}
+        {paymentPhase === 'initiating' ? (
+          <View style={styles.redirectOverlay}>
+            <View style={styles.redirectLogo}>
+              <Box size={30} color={colors.primary} strokeWidth={2.2} />
+            </View>
+            <GhsAmount amount={estimate.totalCost} size="lg" style={styles.redirectAmount} />
+            <ActivityIndicator color={colors.primary} style={styles.redirectSpinner} />
+            <Text style={styles.redirectText}>Redirecting to payment...</Text>
+          </View>
+        ) : null}
 
         {payment && paymentPhase === 'checkout' && token ? (
           <PaystackWebView
@@ -338,58 +469,28 @@ export default function SubmitScreen() {
     );
   }
 
+  // ── Configure step ────────────────────────────────────────────────────
   return (
     <View style={styles.screen}>
-      <ScrollView
-        contentContainerStyle={styles.content}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.eyebrowRow}>
-          <View style={styles.brandIcon}>
-            <Box size={22} color={colors.primary} strokeWidth={2} />
-          </View>
-          <Text style={styles.eyebrow}>NEW PRINT REQUEST</Text>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        {stepIndicator}
+
+        <View style={styles.sectionHeadingRow}>
+          <Text style={styles.title}>New Print Request</Text>
+          <Box size={22} color={colors.primary} strokeWidth={2} />
         </View>
-        <Text style={styles.title}>Upload your model</Text>
-        <Text style={styles.subtitle}>
-          Choose an STL, OBJ, or 3MF file and configure the material, quality, and infill.
-        </Text>
-
-        <Pressable onPress={() => goToTab('marketplace')} style={styles.marketplaceLink}>
-          <Text style={styles.marketplaceLinkText}>
-            Looking for a ready-made design instead? Browse the marketplace
-          </Text>
-          <ChevronRight size={15} color={colors.primary} />
-        </Pressable>
-
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Choose a 3D model file"
-          onPress={pickFile}
-          style={({ pressed }) => [styles.uploadZone, pressed && styles.uploadZonePressed]}
-        >
-          <View style={styles.uploadIconWrap}>
-            <CloudUpload size={34} color={colors.primary} strokeWidth={1.7} />
-          </View>
-          <Text style={styles.uploadTitle}>Tap to choose your 3D file</Text>
-          <Text style={styles.uploadHint}>STL, OBJ, 3MF and supported CAD files up to 100 MB</Text>
-          <View style={styles.browsePill}>
-            <Text style={styles.browsePillText}>Browse files</Text>
-          </View>
-        </Pressable>
 
         {modelFile ? (
-          <Card style={styles.fileCard}>
+          <View style={styles.fileCard}>
             <View style={styles.fileIconWrap}>
               <File size={22} color={colors.primary} />
             </View>
             <View style={styles.fileCopy}>
-              <MonoText style={styles.fileName}>{modelFile.name}</MonoText>
+              <Text style={styles.fileName} numberOfLines={1}>{modelFile.name}</Text>
               <Text style={styles.fileMeta}>
                 {Math.max(1, Math.round((modelFile.size ?? 0) / 1024))} KB · Ready to upload
               </Text>
             </View>
-            <CheckCircle2 size={20} color={colors.success} />
             <Pressable
               accessibilityLabel="Remove selected file"
               onPress={() => setModelFile(null)}
@@ -397,178 +498,150 @@ export default function SubmitScreen() {
             >
               <X size={18} color={colors.mutedFg} />
             </Pressable>
-          </Card>
-        ) : null}
-
-        <View style={styles.tipCard}>
-          <Info size={19} color={colors.info} />
-          <View style={styles.tipCopy}>
-            <Text style={styles.tipTitle}>Upload tip</Text>
-            <Text style={styles.tipText}>
-              For the best estimate, use a watertight model that is correctly scaled and ready to slice.
-            </Text>
           </View>
-        </View>
+        ) : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Choose a 3D model file"
+            onPress={pickFile}
+            style={({ pressed }) => [styles.uploadZone, pressed && styles.uploadZonePressed]}
+          >
+            <View style={styles.uploadIconWrap}>
+              <CloudUpload size={32} color={colors.primary} strokeWidth={1.7} />
+            </View>
+            <Text style={styles.uploadTitle}>Tap to choose your 3D file</Text>
+            <Text style={styles.uploadHint}>STL, OBJ, 3MF and supported CAD files up to 100 MB</Text>
+          </Pressable>
+        )}
 
-        <View style={styles.sectionHeadingRow}>
-          <View>
-            <Text style={styles.sectionTitle}>Configure your print</Text>
-            <Text style={styles.sectionSubtitle}>Choose the settings your lab should price.</Text>
+        <Text style={styles.fieldLabel}>MATERIAL</Text>
+        {materialsLoading ? (
+          <View style={styles.materialsStateRow}>
+            <ActivityIndicator color={colors.primary} />
+            <Text style={styles.materialsStateText}>Loading materials…</Text>
           </View>
-          <Sparkles size={21} color={colors.primary} />
-        </View>
-
-        <Card style={styles.estimateCard}>
-          <View style={styles.fieldHeader}>
-            <View style={styles.fieldLabelRow}>
-              <Layers3 size={18} color={colors.primary} />
-              <Text style={styles.fieldLabel}>Material</Text>
-            </View>
-            <Text style={styles.fieldValue}>{materialName || '—'}</Text>
+        ) : materialsError ? (
+          <View style={styles.materialsStateRow}>
+            <Text style={styles.materialsStateText}>{materialsError}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={loadMaterials}
+              style={({ pressed }) => [styles.materialsRetryButton, pressed && styles.pressed]}
+            >
+              <Text style={styles.materialsRetryText}>Try again</Text>
+            </Pressable>
           </View>
-
-          {materialsLoading ? (
-            <View style={styles.materialsStateRow}>
-              <ActivityIndicator color={colors.primary} />
-              <Text style={styles.materialsStateText}>Loading materials…</Text>
-            </View>
-          ) : materialsError ? (
-            <View style={styles.materialsStateRow}>
-              <Text style={styles.materialsStateText}>{materialsError}</Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={loadMaterials}
-                style={({ pressed }) => [styles.materialsRetryButton, pressed && styles.pressed]}
-              >
-                <Text style={styles.materialsRetryText}>Try again</Text>
-              </Pressable>
-            </View>
-          ) : (
-            <View style={styles.materialGrid}>
-              {materials.map(item => {
-                const active = item.name === materialName;
-                return (
-                  <Pressable
-                    key={item.id}
-                    onPress={() => setMaterialName(item.name)}
-                    style={({ pressed }) => [
-                      styles.materialCard,
-                      active && styles.materialCardActive,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <View style={styles.materialTopRow}>
-                      <MonoText style={[styles.materialName, active && styles.materialNameActive]}>
-                        {item.name}
-                      </MonoText>
-                      {active ? <CheckCircle2 size={16} color={colors.primary} /> : null}
-                    </View>
-                    <Text style={styles.materialDescription} numberOfLines={2}>
-                      {item.description}
-                    </Text>
-                    <Text style={[styles.materialRate, active && styles.materialRateActive]}>
-                      GH₵{item.costPerGram.toFixed(2)}/g
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-          )}
-
-          <View style={styles.divider} />
-
-          <View style={styles.fieldHeader}>
-            <View style={styles.fieldLabelRow}>
-              <Gauge size={18} color={colors.primary} />
-              <Text style={styles.fieldLabel}>Print quality</Text>
-            </View>
-            <Text style={styles.fieldValue}>{quality}</Text>
-          </View>
-          <View style={styles.qualityRow}>
-            {qualities.map(item => {
-              const active = item.key === quality;
+        ) : (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.materialPillsRow}
+          >
+            {materials.map(item => {
+              const active = item.name === materialName;
               return (
                 <Pressable
-                  key={item.key}
-                  onPress={() => setQuality(item.key)}
-                  style={({ pressed }) => [
-                    styles.qualityChip,
-                    active && styles.qualityChipActive,
-                    pressed && styles.pressed,
-                  ]}
+                  key={item.id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  onPress={() => setMaterialName(item.name)}
+                  style={[styles.materialPill, active && styles.materialPillActive]}
                 >
-                  <Text style={[styles.qualityLabel, active && styles.qualityLabelActive]}>{item.label}</Text>
-                  <Text style={[styles.qualityDetail, active && styles.qualityDetailActive]}>{item.detail}</Text>
+                  <Text style={[styles.materialPillText, active && styles.materialPillTextActive]}>
+                    {item.name}
+                  </Text>
+                  <Text style={[styles.materialPillRate, active && styles.materialPillRateActive]}>
+                    GH₵{item.costPerGram.toFixed(2)}/g
+                  </Text>
                 </Pressable>
               );
             })}
-          </View>
+          </ScrollView>
+        )}
 
-          <View style={styles.divider} />
-
-          <View style={styles.fieldHeader}>
-            <View style={styles.fieldLabelRow}>
-              <Box size={18} color={colors.primary} />
-              <Text style={styles.fieldLabel}>Infill density</Text>
-            </View>
-            <Text style={styles.sliderValue}>{infill}%</Text>
-          </View>
-          <SliderComponent
-            value={infill}
-            minimumValue={0}
-            maximumValue={100}
-            step={1}
-            onValueChange={(value: any) => setInfill(Array.isArray(value) ? value[0] : value)}
-            minimumTrackTintColor={colors.primary}
-            maximumTrackTintColor={colors.muted}
-            thumbTintColor={colors.primary}
-            containerStyle={styles.slider}
-            trackStyle={styles.sliderTrack}
-            thumbStyle={styles.sliderThumb}
-          />
-          <View style={styles.sliderLegend}>
-            <Text style={styles.sliderLegendText}>Lightweight</Text>
-            <Text style={styles.sliderLegendText}>Stronger</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.quantityColorRow}>
-            <View style={styles.quantityBlock}>
-              <Text style={styles.fieldLabel}>Quantity</Text>
-              <View style={styles.stepperGroup}>
-                <Pressable
-                  accessibilityLabel="Decrease quantity"
-                  disabled={qty <= 1}
-                  onPress={() => setQty(Math.max(1, qty - 1))}
-                  style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
-                >
-                  <Minus size={17} color={qty <= 1 ? colors.mutedFg : colors.foreground} />
-                </Pressable>
-                <MonoText style={styles.stepperValue}>{qty}</MonoText>
-                <Pressable
-                  accessibilityLabel="Increase quantity"
-                  onPress={() => setQty(qty + 1)}
-                  style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
-                >
-                  <Plus size={17} color={colors.foreground} />
-                </Pressable>
-              </View>
-            </View>
-
-            {selectedMaterial && selectedMaterial.colors.length > 0 ? (
-              <View style={styles.colorBlock}>
-                <View style={styles.fieldLabelRow}>
-                  <Text style={styles.fieldLabel}>Color</Text>
+        <Text style={styles.fieldLabel}>PRINT QUALITY</Text>
+        <View style={styles.qualityRow}>
+          {qualities.map(item => {
+            const active = item.key === quality;
+            return (
+              <Pressable
+                key={item.key}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => setQuality(item.key)}
+                style={[styles.qualityCard, active && styles.qualityCardActive]}
+              >
+                <Text style={[styles.qualityLabel, active && styles.qualityLabelActive]}>
+                  {item.label}
+                </Text>
+                <Text style={styles.qualityDetail}>{item.detail}</Text>
+                <View style={[styles.qualityBadge, active && styles.qualityBadgeActive]}>
+                  <Text style={[styles.qualityBadgeText, active && styles.qualityBadgeTextActive]}>
+                    {item.badge}
+                  </Text>
                 </View>
-                <View style={styles.colorRow}>
-                  {selectedMaterial.colors.map(name => (
+              </Pressable>
+            );
+          })}
+        </View>
+
+        <View style={styles.fieldHeaderRow}>
+          <Text style={styles.fieldLabel}>INFILL DENSITY</Text>
+          <Text style={styles.infillValue}>{infill}%</Text>
+        </View>
+        <SliderComponent
+          value={infill}
+          minimumValue={0}
+          maximumValue={100}
+          step={1}
+          onValueChange={(value: any) => setInfill(Array.isArray(value) ? value[0] : value)}
+          minimumTrackTintColor={colors.primary}
+          maximumTrackTintColor={colors.muted}
+          thumbTintColor={colors.primary}
+          containerStyle={styles.slider}
+          trackStyle={styles.sliderTrack}
+          thumbStyle={styles.sliderThumb}
+        />
+        <Text style={styles.strengthText}>
+          Structural strength: <Text style={styles.strengthValue}>{strengthLabel(infill)}</Text>
+        </Text>
+
+        <View style={styles.qtyColorRow}>
+          <View style={styles.qtyBlock}>
+            <Text style={styles.fieldLabel}>QUANTITY</Text>
+            <View style={styles.stepperGroup}>
+              <Pressable
+                accessibilityLabel="Decrease quantity"
+                disabled={qty <= 1}
+                onPress={() => setQty(Math.max(1, qty - 1))}
+                style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
+              >
+                <Minus size={17} color={qty <= 1 ? colors.mutedFg : colors.foreground} />
+              </Pressable>
+              <Text style={styles.stepperValue}>{qty}</Text>
+              <Pressable
+                accessibilityLabel="Increase quantity"
+                onPress={() => setQty(qty + 1)}
+                style={({ pressed }) => [styles.stepperButton, pressed && styles.pressed]}
+              >
+                <Plus size={17} color={colors.foreground} />
+              </Pressable>
+            </View>
+          </View>
+
+          {selectedMaterial && selectedMaterial.colors.length > 0 ? (
+            <View style={styles.colorBlock}>
+              <Text style={styles.fieldLabel}>COLOR</Text>
+              <View style={styles.colorRow}>
+                {selectedMaterial.colors.map(name => {
+                  const active = color === name;
+                  return (
                     <Pressable
                       key={name}
                       accessibilityLabel={name}
-                      accessibilityState={{ selected: color === name }}
+                      accessibilityState={{ selected: active }}
                       onPress={() => setColor(name)}
-                      style={[styles.colorDotOuter, color === name && styles.colorDotOuterActive]}
+                      style={[styles.colorDotOuter, active && styles.colorDotOuterActive]}
                     >
                       <View
                         style={[
@@ -576,14 +649,22 @@ export default function SubmitScreen() {
                           { backgroundColor: colorSwatch(name) },
                           colorSwatch(name).toUpperCase() === '#FFFFFF' && styles.whiteColorDot,
                         ]}
-                      />
+                      >
+                        {active ? (
+                          <Check
+                            size={13}
+                            color={colorSwatch(name).toUpperCase() === '#FFFFFF' ? '#0A182E' : '#FFFFFF'}
+                            strokeWidth={3}
+                          />
+                        ) : null}
+                      </View>
                     </Pressable>
-                  ))}
-                </View>
+                  );
+                })}
               </View>
-            ) : null}
-          </View>
-        </Card>
+            </View>
+          ) : null}
+        </View>
 
         {estimateError ? (
           <View style={styles.errorBanner}>
@@ -599,25 +680,49 @@ export default function SubmitScreen() {
           style={({ pressed }) => [
             controls.primaryButton,
             styles.estimateButton,
-            (!isReadyForEstimate || estimatingBusy) && styles.payButtonDisabled,
+            (!isReadyForEstimate || estimatingBusy) && styles.buttonDisabled,
             pressed && isReadyForEstimate && !estimatingBusy && controls.primaryButtonPressed,
           ]}
         >
           {estimatingBusy ? (
-            <>
-              <ActivityIndicator color={colors.onPrimary} />
-              <Text style={controls.primaryButtonText}>
-                {estimatePhase === 'uploading' ? 'Uploading file...' : 'Calculating estimate...'}
-              </Text>
-            </>
+            <ActivityIndicator color={colors.onPrimary} />
           ) : (
             <>
               <Sparkles size={18} color={colors.onPrimary} />
               <Text style={controls.primaryButtonText}>Get Estimate</Text>
+              <ArrowRight size={18} color={colors.onPrimary} />
             </>
           )}
         </Pressable>
       </View>
+
+      {estimatingBusy ? (
+        <View style={styles.redirectOverlay}>
+          <ActivityIndicator color={colors.primary} size="large" />
+          <Text style={styles.redirectText}>
+            {estimatePhase === 'uploading' ? 'Uploading your model...' : 'Calculating your estimate...'}
+          </Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+  styles,
+}: {
+  label: string;
+  value: string;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <View style={styles.summaryRow}>
+      <Text style={styles.summaryLabel}>{label}</Text>
+      <Text style={styles.summaryValue} numberOfLines={1}>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -630,154 +735,111 @@ function makeStyles(colors: Colors) {
     },
     content: {
       paddingHorizontal: designTokens.spacing.lg,
-      paddingTop: designTokens.spacing.xl,
-      paddingBottom: 170,
+      paddingTop: designTokens.spacing.md,
+      paddingBottom: 150,
     },
-    eyebrowRow: {
+    pressed: { opacity: 0.72 },
+
+    // Step indicator
+    stepsRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      marginBottom: designTokens.spacing.xl,
+    },
+    stepItem: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
-      marginBottom: designTokens.spacing.lg,
     },
-    brandIcon: {
-      width: 42,
-      height: 42,
-      borderRadius: designTokens.radius.md,
-      backgroundColor: colors.primarySoft,
+    stepLine: {
+      width: 34,
+      height: 2,
+      backgroundColor: colors.muted,
+      marginHorizontal: 6,
+      marginBottom: 18,
+    },
+    stepLineDone: { backgroundColor: colors.primary },
+    stepCircle: {
+      width: 30,
+      height: 30,
+      borderRadius: 15,
+      backgroundColor: colors.muted,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    eyebrow: {
-      color: colors.primary,
+    stepCircleActive: { backgroundColor: colors.primary },
+    stepNumber: {
+      color: colors.mutedFg,
       fontFamily: designTokens.type.heading,
-      fontSize: 12,
-      letterSpacing: 1.2,
+      fontSize: 13,
+    },
+    stepNumberActive: { color: '#FFFFFF' },
+    stepLabel: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.medium,
+      fontSize: 10,
+      marginLeft: 6,
+      marginRight: 2,
+    },
+    stepLabelActive: { color: colors.foreground },
+
+    sectionHeadingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: designTokens.spacing.lg,
     },
     title: {
       color: colors.foreground,
       fontFamily: designTokens.type.display,
-      fontSize: 30,
-      lineHeight: 36,
-      letterSpacing: -0.7,
-      marginBottom: designTokens.spacing.sm,
+      fontSize: 25,
+      letterSpacing: -0.5,
     },
-    subtitle: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 15,
-      lineHeight: 22,
-      marginBottom: designTokens.spacing.lg,
-    },
-    marketplaceLink: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      marginBottom: designTokens.spacing.xl,
-    },
-    marketplaceLinkText: {
-      color: colors.primary,
-      fontFamily: designTokens.type.medium,
-      fontSize: 13,
-    },
-    headerRow: {
-      minHeight: 58,
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginBottom: designTokens.spacing.lg,
-    },
-    iconButton: {
-      width: 42,
-      height: 42,
-      borderRadius: designTokens.radius.md,
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    headerCopy: {
-      flex: 1,
-      alignItems: 'center',
-      paddingHorizontal: designTokens.spacing.sm,
-    },
-    headerTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 18,
-      letterSpacing: -0.2,
-    },
-    headerSubtitle: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 12,
-      marginTop: 2,
-    },
-    headerSpacer: {
-      width: 42,
-    },
+
     uploadZone: {
-      minHeight: 220,
-      borderRadius: designTokens.radius.xl,
+      minHeight: 180,
+      borderRadius: designTokens.radius.lg,
       borderWidth: 1.5,
       borderStyle: 'dashed',
-      borderColor: colors.border,
+      borderColor: colors.primary,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: designTokens.spacing.xl,
+      marginBottom: designTokens.spacing.xl,
+    },
+    uploadZonePressed: { opacity: 0.85, transform: [{ scale: 0.995 }] },
+    uploadIconWrap: {
+      width: 60,
+      height: 60,
+      borderRadius: 30,
       backgroundColor: colors.card,
       alignItems: 'center',
       justifyContent: 'center',
-      padding: designTokens.spacing.xxl,
       marginBottom: designTokens.spacing.md,
-    },
-    uploadZonePressed: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
-      transform: [{ scale: 0.995 }],
-    },
-    uploadIconWrap: {
-      width: 66,
-      height: 66,
-      borderRadius: 33,
-      backgroundColor: colors.primarySoft,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: designTokens.spacing.lg,
     },
     uploadTitle: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 17,
-      marginBottom: 6,
+      fontSize: 16,
+      marginBottom: 5,
       textAlign: 'center',
     },
     uploadHint: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 12,
-      lineHeight: 18,
+      lineHeight: 17,
       textAlign: 'center',
-      maxWidth: 290,
-    },
-    browsePill: {
-      marginTop: designTokens.spacing.lg,
-      minHeight: 36,
-      borderRadius: designTokens.radius.pill,
-      borderWidth: 1,
-      borderColor: colors.primary,
-      paddingHorizontal: 16,
-      justifyContent: 'center',
-    },
-    browsePillText: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 13,
+      maxWidth: 280,
     },
     fileCard: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: designTokens.spacing.md,
+      borderRadius: designTokens.radius.lg,
+      backgroundColor: colors.card,
       padding: designTokens.spacing.md,
-      marginBottom: designTokens.spacing.md,
-      shadowOpacity: 0,
-      elevation: 0,
+      marginBottom: designTokens.spacing.xl,
     },
     fileIconWrap: {
       width: 42,
@@ -787,12 +849,10 @@ function makeStyles(colors: Colors) {
       alignItems: 'center',
       justifyContent: 'center',
     },
-    fileCopy: {
-      flex: 1,
-      minWidth: 0,
-    },
+    fileCopy: { flex: 1, minWidth: 0 },
     fileName: {
       color: colors.foreground,
+      fontFamily: designTokens.type.heading,
       fontSize: 13,
     },
     fileMeta: {
@@ -805,83 +865,29 @@ function makeStyles(colors: Colors) {
       width: 34,
       height: 34,
       borderRadius: 17,
-      backgroundColor: colors.secondary,
+      backgroundColor: colors.muted,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    tipCard: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: designTokens.spacing.md,
-      borderRadius: designTokens.radius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      padding: designTokens.spacing.md,
-      marginBottom: designTokens.spacing.xxl,
-    },
-    tipCopy: {
-      flex: 1,
-      gap: 3,
-    },
-    tipTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 13,
-    },
-    tipText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 12,
-      lineHeight: 17,
-    },
-    sectionHeadingRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: designTokens.spacing.md,
-    },
-    sectionTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 19,
-      letterSpacing: -0.2,
-    },
-    sectionSubtitle: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 12,
-      marginTop: 3,
-    },
-    estimateCard: {
-      marginBottom: designTokens.spacing.md,
-    },
-    fieldHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: designTokens.spacing.md,
-    },
-    fieldLabelRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 7,
-    },
+
     fieldLabel: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 14,
-    },
-    fieldValue: {
       color: colors.mutedFg,
-      fontFamily: designTokens.type.medium,
-      fontSize: 12,
+      fontFamily: designTokens.type.heading,
+      fontSize: 11,
+      letterSpacing: 0.8,
+      marginBottom: 10,
+    },
+    fieldHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
     },
     materialsStateRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: designTokens.spacing.sm,
-      minHeight: 60,
+      minHeight: 54,
+      marginBottom: designTokens.spacing.lg,
     },
     materialsStateText: {
       color: colors.mutedFg,
@@ -891,7 +897,7 @@ function makeStyles(colors: Colors) {
     },
     materialsRetryButton: {
       minHeight: 34,
-      borderRadius: designTokens.radius.md,
+      borderRadius: designTokens.radius.pill,
       borderWidth: 1,
       borderColor: colors.primary,
       paddingHorizontal: 12,
@@ -903,191 +909,156 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.heading,
       fontSize: 11,
     },
-    materialGrid: {
-      flexDirection: 'row',
+    materialPillsRow: {
       gap: 8,
+      paddingBottom: designTokens.spacing.lg,
     },
-    materialCard: {
-      flex: 1,
-      minHeight: 116,
-      borderRadius: designTokens.radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.secondary,
-      padding: 11,
-    },
-    materialCardActive: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
-    },
-    materialTopRow: {
-      flexDirection: 'row',
+    materialPill: {
+      borderRadius: designTokens.radius.pill,
+      backgroundColor: colors.muted,
+      paddingHorizontal: 15,
+      paddingVertical: 9,
       alignItems: 'center',
-      justifyContent: 'space-between',
-      marginBottom: 7,
     },
-    materialName: {
+    materialPillActive: { backgroundColor: colors.primary },
+    materialPillText: {
       color: colors.foreground,
-      fontSize: 12,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
     },
-    materialNameActive: {
-      color: colors.primary,
-    },
-    materialDescription: {
+    materialPillTextActive: { color: '#FFFFFF' },
+    materialPillRate: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 10,
-      lineHeight: 14,
-      flex: 1,
+      marginTop: 2,
     },
-    materialRate: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.heading,
-      fontSize: 10,
-      marginTop: 6,
-    },
-    materialRateActive: {
-      color: colors.primary,
-    },
-    divider: {
-      height: 1,
-      backgroundColor: colors.border,
-      marginVertical: designTokens.spacing.lg,
-    },
+    materialPillRateActive: { color: 'rgba(255,255,255,0.8)' },
+
     qualityRow: {
       flexDirection: 'row',
       gap: 8,
+      marginBottom: designTokens.spacing.xl,
     },
-    qualityChip: {
+    qualityCard: {
       flex: 1,
-      minHeight: 58,
+      minHeight: 96,
       borderRadius: designTokens.radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.secondary,
+      borderWidth: 1.5,
+      borderColor: 'transparent',
+      backgroundColor: colors.card,
       alignItems: 'center',
       justifyContent: 'center',
-      paddingHorizontal: 8,
+      paddingHorizontal: 7,
+      paddingVertical: 10,
+      gap: 4,
     },
-    qualityChipActive: {
+    qualityCardActive: {
       borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
+      backgroundColor: 'rgba(255, 107, 0, 0.1)',
     },
     qualityLabel: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 12,
+      fontSize: 14,
     },
-    qualityLabelActive: {
-      color: colors.primary,
-    },
+    qualityLabelActive: { color: colors.primary },
     qualityDetail: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 9,
-      marginTop: 3,
+      textAlign: 'center',
     },
-    qualityDetailActive: {
-      color: colors.primary,
+    qualityBadge: {
+      borderRadius: designTokens.radius.pill,
+      backgroundColor: colors.muted,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      marginTop: 2,
     },
-    sliderValue: {
+    qualityBadgeActive: { backgroundColor: colors.primary },
+    qualityBadgeText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.heading,
+      fontSize: 9,
+    },
+    qualityBadgeTextActive: { color: '#FFFFFF' },
+
+    infillValue: {
       color: colors.primary,
       fontFamily: designTokens.type.heading,
-      fontSize: 14,
+      fontSize: 15,
     },
-    slider: {
-      height: 32,
-      marginHorizontal: -2,
-    },
-    sliderTrack: {
-      height: 4,
-      borderRadius: 2,
-    },
+    slider: { height: 32, marginHorizontal: -2 },
+    sliderTrack: { height: 4, borderRadius: 2 },
     sliderThumb: {
       width: 21,
       height: 21,
       borderRadius: 11,
       borderWidth: 4,
       borderColor: colors.card,
-      shadowColor: colors.shadow,
-      shadowOpacity: 0.14,
-      shadowRadius: 4,
-      shadowOffset: { width: 0, height: 2 },
     },
-    sliderLegend: {
-      flexDirection: 'row',
-      justifyContent: 'space-between',
-      marginTop: -2,
-    },
-    sliderLegendText: {
+    strengthText: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
-      fontSize: 10,
+      fontSize: 12,
+      marginBottom: designTokens.spacing.xl,
     },
-    quantityColorRow: {
-      gap: designTokens.spacing.lg,
+    strengthValue: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
     },
-    quantityBlock: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-    },
+
+    qtyColorRow: { gap: designTokens.spacing.lg },
+    qtyBlock: {},
     stepperGroup: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 10,
+      gap: 12,
     },
     stepperButton: {
-      width: 38,
-      height: 38,
+      width: 40,
+      height: 40,
       borderRadius: designTokens.radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.secondary,
+      backgroundColor: colors.card,
       alignItems: 'center',
       justifyContent: 'center',
     },
     stepperValue: {
       color: colors.foreground,
-      fontSize: 16,
-      minWidth: 26,
+      fontFamily: designTokens.type.heading,
+      fontSize: 17,
+      minWidth: 28,
       textAlign: 'center',
     },
-    colorBlock: {
-      gap: designTokens.spacing.md,
-    },
-    colorRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-    },
+    colorBlock: {},
+    colorRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
     colorDotOuter: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+      width: 34,
+      height: 34,
+      borderRadius: 17,
       borderWidth: 2,
       borderColor: 'transparent',
       alignItems: 'center',
       justifyContent: 'center',
     },
-    colorDotOuterActive: {
-      borderColor: colors.primary,
-    },
+    colorDotOuterActive: { borderColor: colors.primary },
     colorDot: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
+      width: 24,
+      height: 24,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    whiteColorDot: {
-      borderWidth: 1,
-      borderColor: colors.border,
-    },
+    whiteColorDot: { borderWidth: 1, borderColor: colors.border },
+
     errorBanner: {
       padding: 12,
       borderRadius: designTokens.radius.md,
       backgroundColor: colors.statusFailed.bg,
       borderWidth: 1,
       borderColor: colors.statusFailed.dot,
+      marginTop: designTokens.spacing.lg,
       marginBottom: designTokens.spacing.md,
     },
     errorBannerText: {
@@ -1096,83 +1067,143 @@ function makeStyles(colors: Colors) {
       fontSize: 12,
       lineHeight: 17,
     },
-    totalCard: {
-      alignItems: 'center',
-      paddingVertical: designTokens.spacing.xl,
-      marginBottom: designTokens.spacing.md,
-    },
+
+    // Estimate step
     totalLabel: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.heading,
       fontSize: 10,
       letterSpacing: 1,
+      textAlign: 'center',
       marginBottom: 6,
     },
     totalAmount: {
-      fontSize: 34,
+      fontSize: 44,
+      color: colors.primary,
+      textAlign: 'center',
+      alignSelf: 'center',
+      marginBottom: designTokens.spacing.xl,
     },
-    totalMetaRow: {
+    statRow: {
       flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginTop: designTokens.spacing.md,
+      gap: 9,
+      marginBottom: designTokens.spacing.lg,
     },
-    totalMetaText: {
+    statCard: {
+      flex: 1,
+      minHeight: 92,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 5,
+      padding: 10,
+    },
+    statValue: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 14,
+      textAlign: 'center',
+    },
+    statLabel: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
-      fontSize: 12,
-    },
-    totalMetaDivider: {
-      color: colors.mutedFg,
       fontSize: 10,
+      textAlign: 'center',
     },
     summaryCard: {
-      marginBottom: designTokens.spacing.md,
+      borderRadius: designTokens.radius.lg,
+      backgroundColor: colors.card,
+      paddingHorizontal: designTokens.spacing.lg,
+      paddingVertical: 4,
+      marginBottom: designTokens.spacing.lg,
     },
     summaryRow: {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingVertical: 10,
+      gap: 12,
+      paddingVertical: 12,
     },
-    summaryDivider: {
-      height: 1,
-      backgroundColor: colors.border,
-    },
+    summaryDivider: { height: 1, backgroundColor: colors.border },
     summaryLabel: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 13,
     },
     summaryValue: {
+      flexShrink: 1,
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
       fontSize: 13,
+      textAlign: 'right',
     },
     orderNote: {
-      flexDirection: 'row',
-      alignItems: 'flex-start',
-      gap: 7,
-      paddingHorizontal: 5,
-      marginTop: 4,
-    },
-    orderNoteText: {
-      flex: 1,
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 11,
       lineHeight: 16,
+      paddingHorizontal: 4,
     },
-    pressed: {
-      opacity: 0.72,
+
+    cancelledBanner: {
+      borderRadius: designTokens.radius.lg,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      padding: designTokens.spacing.lg,
+      marginBottom: designTokens.spacing.xl,
     },
+    cancelledTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 15,
+      marginBottom: 4,
+    },
+    cancelledBody: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+      lineHeight: 17,
+      marginBottom: designTokens.spacing.md,
+    },
+    cancelledActions: { flexDirection: 'row', gap: 10 },
+    cancelledGhostButton: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: designTokens.radius.md,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cancelledGhostText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+    },
+    cancelledRetryButton: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    cancelledRetryText: {
+      color: '#FFFFFF',
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+    },
+
+    // Footer + overlays
     summaryFooter: {
       position: 'absolute',
       left: 0,
       right: 0,
       bottom: 0,
-      minHeight: 92,
-      backgroundColor: colors.card,
+      minHeight: 88,
+      backgroundColor: colors.sidebar,
       borderTopWidth: 1,
       borderTopColor: colors.border,
       paddingHorizontal: designTokens.spacing.lg,
@@ -1180,27 +1211,77 @@ function makeStyles(colors: Colors) {
       flexDirection: 'row',
       alignItems: 'center',
       gap: designTokens.spacing.md,
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: -5 },
-      shadowOpacity: 0.07,
-      shadowRadius: 16,
-      elevation: 10,
     },
-    estimateButton: {
-      flex: 1,
-      minHeight: 50,
-      paddingHorizontal: designTokens.spacing.lg,
+    estimateButton: { flex: 1, minHeight: 50 },
+    backButton: { flex: 0.9, minHeight: 50 },
+    payButton: { flex: 1.1, minHeight: 50 },
+    buttonDisabled: { opacity: 0.5 },
+
+    redirectOverlay: {
+      position: 'absolute',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0,
+      backgroundColor: colors.overlay,
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      zIndex: 10,
     },
-    backButton: {
-      flex: 0.8,
-      minHeight: 50,
+    redirectLogo: {
+      width: 64,
+      height: 64,
+      borderRadius: 20,
+      backgroundColor: colors.card,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    payButton: {
-      flex: 1.2,
-      minHeight: 50,
+    redirectAmount: { color: '#FFFFFF' },
+    redirectSpinner: { marginTop: 4 },
+    redirectText: {
+      color: '#FFFFFF',
+      fontFamily: designTokens.type.medium,
+      fontSize: 14,
     },
-    payButtonDisabled: {
-      opacity: 0.5,
+
+    // Success state
+    successScreen: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      paddingHorizontal: designTokens.spacing.section,
+      gap: designTokens.spacing.md,
+    },
+    successBadge: {
+      width: 110,
+      height: 110,
+      borderRadius: 55,
+      backgroundColor: 'rgba(34, 197, 94, 0.15)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: designTokens.spacing.sm,
+    },
+    successTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.display,
+      fontSize: 28,
+      letterSpacing: -0.5,
+    },
+    successBody: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 13,
+      lineHeight: 19,
+      textAlign: 'center',
+      maxWidth: 280,
+      marginBottom: designTokens.spacing.md,
+    },
+    successButton: { alignSelf: 'stretch' },
+    successLink: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+      padding: 10,
     },
   });
 }

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
+  Image,
   Linking,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -11,53 +13,91 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import {
-  ArrowLeft,
   Bell,
-  CalendarDays,
   ChevronRight,
   CircleHelp,
-  CreditCard,
+  CloudUpload,
+  DollarSign,
   FileText,
+  Grid3x3,
   Headphones,
   LogOut,
-  Mail,
   Moon,
-  PackageCheck,
-  Receipt,
+  Printer,
   Scale,
-  ShieldCheck,
+  Settings,
+  ShoppingBag,
   Sparkles,
+  Star,
   Sun,
-  UserRound,
-  WalletCards,
+  Users,
+  X,
 } from 'lucide-react-native';
 import { useTheme } from '../../../src/ThemeContext';
 import { useJobs } from '../../../src/JobsContext';
 import { useSession } from '../../../src/SessionContext';
+import { useToast } from '../../../src/ToastContext';
 import { fetchMyPayments, Payment } from '../../../src/api/payments';
 import { Colors, designTokens } from '../../../src/theme';
-import Card from '../../../src/components/Card';
 import GhsAmount from '../../../src/components/GhsAmount';
 
-const user = {
-  name: 'Kwame Mensah',
-  initials: 'KM',
-  role: 'STUDENT',
-  email: 'kwame@knust.edu.gh',
-  studentId: '20910034',
-  joined: 'January 2024',
-};
+/**
+ * Profile — Bolt redesign Pass 2.
+ *
+ * Real data kept: appUser (name/email/role) from SessionContext instead of
+ * the old hardcoded mock user, jobs from JobsContext, payment history via
+ * fetchMyPayments (same fetch/loading/error/retry trio as before), theme
+ * toggle, and sign-out. The previous version's settings/support content
+ * lives behind the Settings gear (collapsed by default) rather than being
+ * deleted — hiding working functionality ≠ removing it.
+ *
+ * Mock-only (no backend yet): Designs/Followers/Following counts, the
+ * designer "My Designs" grid images, Edit Profile, and the designer
+ * upgrade (no endpoint exists — the modal confirms with a toast only).
+ * Designer "Earnings" sums COMPLETED payments from fetchMyPayments as the
+ * spec requested — note that's money the user PAID, not earned; real
+ * earnings need the marketplace listings' totalEarnings in a later pass.
+ */
 
 const APP_VERSION = '1.0.0';
+
+// Same Pexels set as the Discover mock grid.
+const MOCK_DESIGN_IMAGES = [
+  'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=300',
+  'https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=300',
+  'https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=300',
+  'https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=300',
+  'https://images.pexels.com/photos/4488626/pexels-photo-4488626.jpeg?auto=compress&cs=tinysrgb&w=300',
+  'https://images.pexels.com/photos/4488637/pexels-photo-4488637.jpeg?auto=compress&cs=tinysrgb&w=300',
+];
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
+}
+
+function roleBio(role: string): string {
+  switch (role) {
+    case 'designer':
+      return 'Designer · sells 3D models on PrintForge';
+    case 'lab_staff':
+      return 'Lab staff · runs the campus print queue';
+    case 'admin':
+      return 'Administrator account';
+    default:
+      return 'University print account';
+  }
+}
 
 function paymentStatusVisual(status: Payment['status'], colors: Colors) {
   switch (status) {
     case 'COMPLETED':
-      return { bg: colors.statusApproved.bg, text: colors.statusApproved.text, label: 'Paid' };
+      return { bg: 'rgba(34, 197, 94, 0.15)', text: '#22C55E', label: 'Printed' };
     case 'FAILED':
       return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: 'Failed' };
     default:
-      return { bg: colors.statusSubmitted.bg, text: colors.statusSubmitted.text, label: 'Pending' };
+      return { bg: colors.primarySoft, text: colors.primary, label: 'Printing' };
   }
 }
 
@@ -65,8 +105,12 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
   const router = useRouter();
   const { colors, isDark, toggleTheme } = useTheme();
   const { jobs } = useJobs();
-  const { signOut, token, authLoading } = useSession();
+  const { appUser, role, signOut, token, authLoading } = useSession();
+  const { showToast } = useToast();
+
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [upgradeOpen, setUpgradeOpen] = useState(false);
 
   const [payments, setPayments] = useState<Payment[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(true);
@@ -102,14 +146,12 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
     loadPayments();
   }, [authLoading, token, loadPayments]);
 
-  const totalJobs = jobs.length;
-  const activeJobs = jobs.filter(job =>
-    ['IN_PROGRESS', 'PRINTING', 'QUEUED', 'APPROVED', 'SUBMITTED'].includes(job.status),
-  ).length;
-  const completedJobs = jobs.filter(job => job.status === 'COMPLETED').length;
-  const totalSpent = jobs.reduce((sum, job) => sum + job.cost, 0);
-
   const s = makeStyles(colors);
+
+  const name = appUser?.full_name ?? 'PrintForge user';
+  const completedTotal = payments
+    .filter(p => p.status === 'COMPLETED')
+    .reduce((sum, p) => sum + p.amount, 0);
 
   const handleSignOut = async () => {
     await signOut();
@@ -118,771 +160,628 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
 
   return (
     <SafeAreaView style={s.screen} edges={embedded ? [] : ['top']}>
-      <View style={s.header}>
-        {embedded ? (
-          <View style={s.headerMark}>
-            <UserRound size={20} color={colors.primary} />
-          </View>
-        ) : (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Go back"
-            onPress={() => router.back()}
-            style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
-          >
-            <ArrowLeft size={21} color={colors.foreground} />
-          </Pressable>
-        )}
-        <View style={s.headerCopy}>
-          <Text style={s.eyebrow}>ACCOUNT</Text>
-          <Text style={s.headerTitle}>Profile & settings</Text>
-        </View>
-        {embedded ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Open notifications"
-            onPress={() => router.push('/notifications')}
-            style={({ pressed }) => [s.iconButton, pressed && s.iconButtonPressed]}
-          >
-            <Bell size={20} color={colors.foreground} />
-          </Pressable>
-        ) : (
-          <View style={s.headerMark}>
-            <UserRound size={20} color={colors.primary} />
-          </View>
-        )}
+      <View style={s.topBar}>
+        <View style={s.topBarSpacer} />
+        <Text style={s.topBarTitle}>My Profile</Text>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={settingsOpen ? 'Hide settings' : 'Show settings'}
+          onPress={() => setSettingsOpen(v => !v)}
+          style={({ pressed }) => [s.topBarButton, pressed && s.pressed]}
+        >
+          <Settings size={21} color={settingsOpen ? colors.primary : colors.foreground} />
+        </Pressable>
       </View>
 
-      <ScrollView
-        showsVerticalScrollIndicator={false}
-        contentContainerStyle={s.content}
-      >
-        <Card style={s.profileCard}>
-          <View style={s.profileTop}>
-            <View style={s.avatarWrap}>
-              <View style={s.avatar}>
-                <Text style={s.avatarText}>{user.initials}</Text>
-              </View>
-              <View style={s.verifiedDot}>
-                <ShieldCheck size={13} color={colors.white} />
-              </View>
-            </View>
-
-            <View style={s.profileCopy}>
-              <Text style={s.userName}>{user.name}</Text>
-              <View style={s.roleRow}>
-                <View style={s.roleBadge}>
-                  <Text style={s.roleText}>{user.role}</Text>
-                </View>
-                <Text style={s.campusText}>University print account</Text>
-              </View>
-            </View>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
+        <View style={s.headerRow}>
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{initialsOf(name)}</Text>
           </View>
-
-          <View style={s.profileDivider} />
-
-          <View style={s.profileMetaRow}>
-            <View style={s.profileMetaItem}>
-              <Mail size={15} color={colors.mutedFg} />
-              <Text style={s.profileMetaText} numberOfLines={1}>{user.email}</Text>
+          <View style={s.statsRow}>
+            <View style={s.statItem}>
+              <Text style={s.statValue}>0</Text>
+              <Text style={s.statLabel}>Designs</Text>
             </View>
-            <View style={s.profileMetaItemRight}>
-              <CalendarDays size={15} color={colors.mutedFg} />
-              <Text style={s.profileMetaText}>Since {user.joined}</Text>
+            <View style={s.statItem}>
+              <Text style={s.statValue}>0</Text>
+              <Text style={s.statLabel}>Followers</Text>
             </View>
+            <View style={s.statItem}>
+              <Text style={s.statValue}>0</Text>
+              <Text style={s.statLabel}>Following</Text>
+            </View>
+            {role === 'designer' ? (
+              <View style={s.statItem}>
+                <GhsAmount amount={completedTotal} size="sm" style={s.earningsValue} />
+                <Text style={s.statLabel}>Earnings</Text>
+              </View>
+            ) : null}
           </View>
-        </Card>
-
-        <View style={s.statsRow}>
-          <Card style={s.statCard}>
-            <View style={s.statIconOrange}>
-              <PackageCheck size={18} color={colors.primary} />
-            </View>
-            <Text style={s.statValue}>{totalJobs}</Text>
-            <Text style={s.statLabel}>Total orders</Text>
-          </Card>
-          <Card style={s.statCard}>
-            <View style={s.statIconBlue}>
-              <Sparkles size={18} color={colors.info} />
-            </View>
-            <Text style={s.statValue}>{activeJobs}</Text>
-            <Text style={s.statLabel}>Active prints</Text>
-          </Card>
-          <Card style={s.statCard}>
-            <View style={s.statIconGreen}>
-              <ShieldCheck size={18} color={colors.success} />
-            </View>
-            <Text style={s.statValue}>{completedJobs}</Text>
-            <Text style={s.statLabel}>Completed</Text>
-          </Card>
         </View>
 
-        <Card style={s.spendCard}>
-          <View style={s.spendIcon}>
-            <WalletCards size={21} color={colors.primary} />
-          </View>
-          <View style={s.spendCopy}>
-            <Text style={s.spendLabel}>TOTAL PRINT SPEND</Text>
-            <GhsAmount amount={totalSpent} size="lg" style={s.spendAmount} />
-          </View>
-          <View style={s.spendPill}>
-            <Text style={s.spendPillText}>{totalJobs} orders</Text>
-          </View>
-        </Card>
+        <Text style={s.userName}>{name}</Text>
+        <Text style={s.userBio}>{roleBio(role)}</Text>
+        {appUser?.email ? <Text style={s.userEmail}>{appUser.email}</Text> : null}
 
-        <SectionTitle label="PAYMENT HISTORY" title="Past payments" styles={s} />
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => showToast('Profile editing is coming soon.')}
+          style={({ pressed }) => [s.editButton, pressed && s.pressed]}
+        >
+          <Text style={s.editButtonText}>Edit Profile</Text>
+        </Pressable>
+
+        {role === 'lab_staff' ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push('/staff/queue')}
+            style={({ pressed }) => [s.queueRow, pressed && s.pressed]}
+          >
+            <View style={s.queueIcon}>
+              <Printer size={19} color={colors.primary} />
+            </View>
+            <View style={s.queueCopy}>
+              <Text style={s.queueTitle}>Lab Queue</Text>
+              <Text style={s.queueSubtitle}>Review and approve student print jobs</Text>
+            </View>
+            <ChevronRight size={19} color={colors.mutedFg} />
+          </Pressable>
+        ) : null}
+
+        {/* My Orders — real payment history (same fetch as before). */}
+        <View style={s.sectionHeader}>
+          <ShoppingBag size={17} color={colors.primary} />
+          <Text style={s.sectionTitle}>My Orders</Text>
+        </View>
         {paymentsLoading ? (
-          <Card style={s.paymentsStateCard}>
-            <Text style={s.paymentsStateText}>Loading payment history…</Text>
-          </Card>
+          <View style={s.stateCard}>
+            <Text style={s.stateText}>Loading payment history…</Text>
+          </View>
         ) : paymentsError ? (
-          <Card style={s.paymentsStateCard}>
-            <Text style={s.paymentsStateText}>{paymentsError}</Text>
+          <View style={s.stateCard}>
+            <Text style={s.stateText}>{paymentsError}</Text>
             <Pressable
               accessibilityRole="button"
               onPress={loadPayments}
-              style={({ pressed }) => [s.paymentsRetryButton, pressed && s.iconButtonPressed]}
+              style={({ pressed }) => [s.retryButton, pressed && s.pressed]}
             >
-              <Text style={s.paymentsRetryText}>Try again</Text>
+              <Text style={s.retryText}>Try again</Text>
             </Pressable>
-          </Card>
+          </View>
         ) : payments.length === 0 ? (
-          <Card style={s.paymentsStateCard}>
-            <View style={s.rowIconOrange}>
-              <Receipt size={18} color={colors.primary} />
-            </View>
-            <Text style={s.paymentsEmptyTitle}>No payments yet</Text>
-            <Text style={s.paymentsStateText}>
-              Payments for marketplace orders will show up here once you check out.
+          <View style={s.stateCard}>
+            <Text style={s.stateTitle}>No orders yet</Text>
+            <Text style={s.stateText}>
+              Payments for your print orders will show up here once you check out.
             </Text>
-          </Card>
+          </View>
         ) : (
-          <View style={s.settingsCard}>
+          <View style={s.ordersCard}>
             {payments.map((payment, index) => {
               const visual = paymentStatusVisual(payment.status, colors);
               const date = payment.completedAt ?? payment.initiatedAt;
               return (
-                <View
+                <Pressable
                   key={payment.id}
-                  style={[s.settingRow, index > 0 && s.settingBorder]}
+                  accessibilityRole={payment.printJobId ? 'button' : undefined}
+                  disabled={!payment.printJobId}
+                  onPress={() =>
+                    payment.printJobId && router.push(`/jobs/${payment.printJobId}`)
+                  }
+                  style={({ pressed }) => [
+                    s.orderRow,
+                    index > 0 && s.orderRowBorder,
+                    pressed && s.orderRowPressed,
+                  ]}
                 >
-                  <View style={[s.rowIconOrange, { backgroundColor: visual.bg }]}>
-                    <Receipt size={18} color={visual.text} />
-                  </View>
-                  <View style={s.settingCopy}>
-                    <Text style={s.settingLabel}>
-                      {date ? new Date(date).toLocaleDateString() : 'Payment'}
+                  <View style={s.orderCopy}>
+                    <Text style={s.orderTitle}>
+                      {date ? new Date(date).toLocaleDateString() : 'Print order'}
                     </Text>
-                    <Text style={s.settingDescription}>{visual.label}</Text>
+                    <View style={[s.orderBadge, { backgroundColor: visual.bg }]}>
+                      <Text style={[s.orderBadgeText, { color: visual.text }]}>{visual.label}</Text>
+                    </View>
                   </View>
-                  <GhsAmount amount={payment.amount} size="sm" />
-                </View>
+                  <GhsAmount amount={payment.amount} size="sm" style={s.orderAmount} />
+                  <ChevronRight size={17} color={colors.mutedFg} />
+                </Pressable>
               );
             })}
           </View>
         )}
 
-        <SectionTitle label="ACCOUNT DETAILS" title="Your information" styles={s} />
-        <View style={s.settingsCard}>
-          <SettingsRow
-            icon={<Mail size={18} color={colors.primary} />}
-            iconStyle={s.rowIconOrange}
-            label="Email address"
-            value={user.email}
-            styles={s}
-          />
-          <SettingsRow
-            icon={<CreditCard size={18} color={colors.info} />}
-            iconStyle={s.rowIconBlue}
-            label="Student ID"
-            value={user.studentId}
-            styles={s}
-            bordered
-          />
-          <SettingsRow
-            icon={<CalendarDays size={18} color={colors.success} />}
-            iconStyle={s.rowIconGreen}
-            label="Member since"
-            value={user.joined}
-            styles={s}
-            bordered
-          />
-        </View>
-
-        <SectionTitle label="PREFERENCES" title="App experience" styles={s} />
-        <View style={s.settingsCard}>
-          <View style={s.settingRow}>
-            <View style={s.rowIconOrange}>
-              <Bell size={18} color={colors.primary} />
+        {role === 'designer' ? (
+          <>
+            <View style={s.sectionHeader}>
+              <Grid3x3 size={17} color={colors.primary} />
+              <Text style={s.sectionTitle}>My Designs</Text>
             </View>
-            <View style={s.settingCopy}>
-              <Text style={s.settingLabel}>Order notifications</Text>
-              <Text style={s.settingDescription}>Lab updates and pickup alerts</Text>
+            <View style={s.designGrid}>
+              {MOCK_DESIGN_IMAGES.map(uri => (
+                <Image key={uri} source={{ uri }} style={s.designThumb} />
+              ))}
             </View>
-            <Switch
-              accessibilityLabel="Toggle order notifications"
-              value={notificationsEnabled}
-              onValueChange={setNotificationsEnabled}
-              trackColor={{ false: colors.muted, true: colors.primary }}
-              thumbColor={colors.white}
-              ios_backgroundColor={colors.muted}
-            />
-          </View>
-          <View style={[s.settingRow, s.settingBorder]}>
-            <View style={s.rowIconPurple}>
-              {isDark ? (
-                <Moon size={18} color={colors.chart4} />
-              ) : (
-                <Sun size={18} color={colors.chart4} />
-              )}
+          </>
+        ) : null}
+
+        {role === 'student' ? (
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => setUpgradeOpen(true)}
+            style={({ pressed }) => [s.upgradeButton, pressed && s.pressed]}
+          >
+            <Star size={18} color="#FFFFFF" />
+            <Text style={s.upgradeButtonText}>Become a Designer</Text>
+          </Pressable>
+        ) : null}
+
+        {settingsOpen ? (
+          <>
+            <View style={s.sectionHeader}>
+              <Settings size={17} color={colors.primary} />
+              <Text style={s.sectionTitle}>Settings</Text>
             </View>
-            <View style={s.settingCopy}>
-              <Text style={s.settingLabel}>Dark mode</Text>
-              <Text style={s.settingDescription}>{isDark ? 'Dark appearance enabled' : 'Light appearance enabled'}</Text>
+            <View style={s.settingsCard}>
+              <View style={s.settingRow}>
+                <Bell size={18} color={colors.primary} />
+                <View style={s.settingCopy}>
+                  <Text style={s.settingLabel}>Order notifications</Text>
+                  <Text style={s.settingDescription}>Lab updates and pickup alerts</Text>
+                </View>
+                <Switch
+                  accessibilityLabel="Toggle order notifications"
+                  value={notificationsEnabled}
+                  onValueChange={setNotificationsEnabled}
+                  trackColor={{ false: colors.muted, true: colors.primary }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor={colors.muted}
+                />
+              </View>
+              <View style={[s.settingRow, s.settingBorder]}>
+                {isDark ? (
+                  <Moon size={18} color={colors.primary} />
+                ) : (
+                  <Sun size={18} color={colors.primary} />
+                )}
+                <View style={s.settingCopy}>
+                  <Text style={s.settingLabel}>Dark mode</Text>
+                  <Text style={s.settingDescription}>
+                    {isDark ? 'Dark appearance enabled' : 'Light appearance enabled'}
+                  </Text>
+                </View>
+                <Switch
+                  accessibilityLabel="Toggle dark mode"
+                  value={isDark}
+                  onValueChange={toggleTheme}
+                  trackColor={{ false: colors.muted, true: colors.primary }}
+                  thumbColor={colors.white}
+                  ios_backgroundColor={colors.muted}
+                />
+              </View>
+              <SupportRow
+                icon={<CircleHelp size={18} color={colors.primary} />}
+                label="Contact PrintForge"
+                onPress={() => Linking.openURL('mailto:support@printforge.app')}
+                s={s}
+                colors={colors}
+              />
+              <SupportRow
+                icon={<Headphones size={18} color={colors.primary} />}
+                label="Support center"
+                onPress={() => Linking.openURL('https://printforge.app/support')}
+                s={s}
+                colors={colors}
+              />
+              <SupportRow
+                icon={<FileText size={18} color={colors.primary} />}
+                label="Terms and conditions"
+                onPress={() => Linking.openURL('https://printforge.app/terms')}
+                s={s}
+                colors={colors}
+              />
+              <SupportRow
+                icon={<Scale size={18} color={colors.primary} />}
+                label="Privacy policy"
+                onPress={() => Linking.openURL('https://printforge.app/privacy')}
+                s={s}
+                colors={colors}
+              />
             </View>
-            <Switch
-              accessibilityLabel="Toggle dark mode"
-              value={isDark}
-              onValueChange={toggleTheme}
-              trackColor={{ false: colors.muted, true: colors.primary }}
-              thumbColor={colors.white}
-              ios_backgroundColor={colors.muted}
-            />
-          </View>
-        </View>
 
-        <SectionTitle label="HELP" title="Support & legal" styles={s} />
-        <View style={s.settingsCard}>
-          <LinkRow
-            icon={<CircleHelp size={18} color={colors.primary} />}
-            iconStyle={s.rowIconOrange}
-            label="Contact PrintForge"
-            description="Email our support team"
-            onPress={() => Linking.openURL('mailto:support@printforge.app')}
-            styles={s}
-            colors={colors}
-          />
-          <LinkRow
-            icon={<Headphones size={18} color={colors.info} />}
-            iconStyle={s.rowIconBlue}
-            label="Support center"
-            description="Answers for orders and lab access"
-            onPress={() => Linking.openURL('https://printforge.app/support')}
-            styles={s}
-            colors={colors}
-            bordered
-          />
-          <LinkRow
-            icon={<FileText size={18} color={colors.success} />}
-            iconStyle={s.rowIconGreen}
-            label="Terms and conditions"
-            description="Review the service terms"
-            onPress={() => Linking.openURL('https://printforge.app/terms')}
-            styles={s}
-            colors={colors}
-            bordered
-          />
-          <LinkRow
-            icon={<Scale size={18} color={colors.chart4} />}
-            iconStyle={s.rowIconPurple}
-            label="Privacy policy"
-            description="How your account data is handled"
-            onPress={() => Linking.openURL('https://printforge.app/privacy')}
-            styles={s}
-            colors={colors}
-            bordered
-          />
-        </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={handleSignOut}
+              style={({ pressed }) => [s.signOutButton, pressed && s.pressed]}
+            >
+              <LogOut size={19} color={colors.destructive} />
+              <Text style={s.signOutText}>Sign out</Text>
+            </Pressable>
+          </>
+        ) : null}
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={handleSignOut}
-          style={({ pressed }) => [s.signOutButton, pressed && s.signOutButtonPressed]}
-        >
-          <LogOut size={19} color={colors.destructive} />
-          <Text style={s.signOutText}>Sign out</Text>
-        </Pressable>
-
-        <View style={s.footerBrand}>
-          <View style={s.footerLogo}>
-            <Sparkles size={14} color={colors.primary} />
-          </View>
-          <Text style={s.versionText}>PrintForge 3D � v{APP_VERSION}</Text>
-        </View>
+        <Text style={s.versionText}>PrintForge 3D · v{APP_VERSION}</Text>
       </ScrollView>
+
+      {/* Upgrade modal — mock confirm only; there is no designer-upgrade
+          endpoint on the backend yet. */}
+      <Modal
+        visible={upgradeOpen}
+        transparent
+        animationType="slide"
+        presentationStyle="overFullScreen"
+        onRequestClose={() => setUpgradeOpen(false)}
+      >
+        <View style={s.modalOverlay}>
+          <Pressable style={s.modalDismiss} onPress={() => setUpgradeOpen(false)} />
+          <View style={s.modalSheet}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Close"
+              onPress={() => setUpgradeOpen(false)}
+              style={s.modalClose}
+            >
+              <X size={20} color={colors.foreground} />
+            </Pressable>
+            <View style={s.modalIcon}>
+              <Sparkles size={30} color={colors.primary} />
+            </View>
+            <Text style={s.modalTitle}>Become a Designer</Text>
+            <View style={s.benefitList}>
+              <BenefitRow
+                icon={<CloudUpload size={20} color={colors.primary} />}
+                title="Upload & sell designs"
+                subtitle="Publish your models to the marketplace"
+                s={s}
+              />
+              <BenefitRow
+                icon={<DollarSign size={20} color={colors.primary} />}
+                title="Earn from every download"
+                subtitle="Set your price, get paid per order"
+                s={s}
+              />
+              <BenefitRow
+                icon={<Users size={20} color={colors.primary} />}
+                title="Build your following"
+                subtitle="Grow an audience around your work"
+                s={s}
+              />
+            </View>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => {
+                setUpgradeOpen(false);
+                showToast('Designer upgrade is coming soon — the backend endpoint isn’t live yet.');
+              }}
+              style={({ pressed }) => [s.modalCta, pressed && s.pressed]}
+            >
+              <Text style={s.modalCtaText}>Start Uploading →</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => setUpgradeOpen(false)}
+              style={({ pressed }) => pressed && s.pressed}
+            >
+              <Text style={s.modalLater}>Maybe later</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
-
 
 export default function ProfileScreen() {
   return <ProfileContent />;
 }
 
-type ScreenStyles = ReturnType<typeof makeStyles>;
-
-function SectionTitle({
-  label,
-  title,
-  styles,
-}: {
-  label: string;
-  title: string;
-  styles: ScreenStyles;
-}) {
-  return (
-    <View style={styles.sectionHeading}>
-      <Text style={styles.sectionEyebrow}>{label}</Text>
-      <Text style={styles.sectionTitle}>{title}</Text>
-    </View>
-  );
-}
-
-function SettingsRow({
+function SupportRow({
   icon,
-  iconStyle,
   label,
-  value,
-  styles,
-  bordered = false,
-}: {
-  icon: React.ReactNode;
-  iconStyle: object;
-  label: string;
-  value: string;
-  styles: ScreenStyles;
-  bordered?: boolean;
-}) {
-  return (
-    <View style={[styles.settingRow, bordered && styles.settingBorder]}>
-      <View style={iconStyle}>{icon}</View>
-      <View style={styles.settingCopy}>
-        <Text style={styles.settingLabel}>{label}</Text>
-        <Text style={styles.settingDescription} numberOfLines={1}>{value}</Text>
-      </View>
-    </View>
-  );
-}
-
-function LinkRow({
-  icon,
-  iconStyle,
-  label,
-  description,
   onPress,
-  styles,
+  s,
   colors,
-  bordered = false,
 }: {
   icon: React.ReactNode;
-  iconStyle: object;
   label: string;
-  description: string;
   onPress: () => void;
-  styles: ScreenStyles;
+  s: ReturnType<typeof makeStyles>;
   colors: Colors;
-  bordered?: boolean;
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       onPress={onPress}
-      style={({ pressed }) => [
-        styles.settingRow,
-        bordered && styles.settingBorder,
-        pressed && styles.linkRowPressed,
-      ]}
+      style={({ pressed }) => [s.settingRow, s.settingBorder, pressed && s.orderRowPressed]}
     >
-      <View style={iconStyle}>{icon}</View>
-      <View style={styles.settingCopy}>
-        <Text style={styles.settingLabel}>{label}</Text>
-        <Text style={styles.settingDescription}>{description}</Text>
+      {icon}
+      <View style={s.settingCopy}>
+        <Text style={s.settingLabel}>{label}</Text>
       </View>
-      <ChevronRight size={18} color={colors.mutedFg} />
+      <ChevronRight size={17} color={colors.mutedFg} />
     </Pressable>
+  );
+}
+
+function BenefitRow({
+  icon,
+  title,
+  subtitle,
+  s,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  subtitle: string;
+  s: ReturnType<typeof makeStyles>;
+}) {
+  return (
+    <View style={s.benefitRow}>
+      <View style={s.benefitIcon}>{icon}</View>
+      <View style={s.benefitCopy}>
+        <Text style={s.benefitTitle}>{title}</Text>
+        <Text style={s.benefitSubtitle}>{subtitle}</Text>
+      </View>
+    </View>
   );
 }
 
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
-    screen: {
-      flex: 1,
-      backgroundColor: colors.background,
-    },
-    header: {
-      minHeight: 70,
-      paddingHorizontal: designTokens.spacing.lg,
+    screen: { flex: 1, backgroundColor: colors.background },
+    pressed: { opacity: 0.72 },
+    topBar: {
+      minHeight: 56,
       flexDirection: 'row',
       alignItems: 'center',
-      backgroundColor: colors.sidebar,
-      borderBottomWidth: 1,
-      borderBottomColor: colors.sidebarBorder,
+      justifyContent: 'space-between',
+      paddingHorizontal: designTokens.spacing.lg,
     },
-    iconButton: {
-      width: 42,
-      height: 42,
-      borderRadius: designTokens.radius.md,
-      borderWidth: 1,
-      borderColor: colors.border,
-      backgroundColor: colors.card,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    iconButtonPressed: {
-      backgroundColor: colors.secondary,
-      transform: [{ scale: 0.98 }],
-    },
-    headerCopy: {
-      flex: 1,
-      marginHorizontal: designTokens.spacing.md,
-    },
-    eyebrow: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 9,
-      letterSpacing: 1.3,
-    },
-    headerTitle: {
+    topBarSpacer: { width: 40 },
+    topBarTitle: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 19,
-      marginTop: 2,
+      fontSize: 18,
     },
-    headerMark: {
-      width: 42,
-      height: 42,
-      borderRadius: 21,
-      backgroundColor: colors.primarySoft,
+    topBarButton: {
+      width: 40,
+      height: 40,
+      borderRadius: 20,
       alignItems: 'center',
       justifyContent: 'center',
     },
     content: {
-      padding: designTokens.spacing.lg,
-      paddingBottom: 46,
+      paddingHorizontal: designTokens.spacing.lg,
+      paddingBottom: 56,
     },
-    profileCard: {
-      padding: designTokens.spacing.xl,
-      borderColor: colors.primary,
-      borderWidth: 1.25,
-      marginBottom: designTokens.spacing.md,
-    },
-    profileTop: {
+    headerRow: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: designTokens.spacing.lg,
-    },
-    avatarWrap: {
-      position: 'relative',
+      gap: designTokens.spacing.xl,
+      marginBottom: designTokens.spacing.md,
     },
     avatar: {
-      width: 72,
-      height: 72,
-      borderRadius: 24,
-      backgroundColor: colors.navy,
-      borderWidth: 3,
-      borderColor: colors.primarySoft,
+      width: 80,
+      height: 80,
+      borderRadius: 40,
+      backgroundColor: colors.primarySoft,
+      borderWidth: 2,
+      borderColor: 'rgba(255, 106, 0, 0.3)',
       alignItems: 'center',
       justifyContent: 'center',
     },
     avatarText: {
-      color: colors.white,
-      fontFamily: designTokens.type.display,
-      fontSize: 24,
-    },
-    verifiedDot: {
-      position: 'absolute',
-      right: -5,
-      bottom: -4,
-      width: 26,
-      height: 26,
-      borderRadius: 13,
-      backgroundColor: colors.success,
-      borderWidth: 3,
-      borderColor: colors.card,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    profileCopy: {
-      minWidth: 0,
-      flex: 1,
-    },
-    userName: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.display,
-      fontSize: 23,
-      lineHeight: 27,
-    },
-    roleRow: {
-      marginTop: 8,
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: 8,
-    },
-    roleBadge: {
-      backgroundColor: colors.primarySoft,
-      borderRadius: designTokens.radius.pill,
-      paddingHorizontal: 10,
-      paddingVertical: 5,
-    },
-    roleText: {
       color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 9,
-      letterSpacing: 0.8,
-    },
-    campusText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
-    },
-    profileDivider: {
-      height: 1,
-      backgroundColor: colors.border,
-      marginVertical: designTokens.spacing.lg,
-    },
-    profileMetaRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-      justifyContent: 'space-between',
-    },
-    profileMetaItem: {
-      minWidth: 0,
-      flex: 1,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    profileMetaItemRight: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 6,
-    },
-    profileMetaText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
+      fontFamily: designTokens.type.display,
+      fontSize: 26,
     },
     statsRow: {
-      flexDirection: 'row',
-      gap: designTokens.spacing.sm,
-      marginBottom: designTokens.spacing.md,
-    },
-    statCard: {
-      minWidth: 0,
       flex: 1,
-      padding: designTokens.spacing.md,
-      alignItems: 'flex-start',
-    },
-    statIconOrange: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: colors.primarySoft,
+      flexDirection: 'row',
+      justifyContent: 'space-around',
       alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 12,
     },
-    statIconBlue: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: colors.statusApproved.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 12,
-    },
-    statIconGreen: {
-      width: 34,
-      height: 34,
-      borderRadius: 11,
-      backgroundColor: colors.statusCompleted.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: 12,
-    },
+    statItem: { alignItems: 'center', gap: 2 },
     statValue: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 20,
+      fontSize: 18,
     },
+    earningsValue: { color: colors.primary, fontSize: 15 },
     statLabel: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 10,
+    },
+    userName: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 19,
+    },
+    userBio: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
       marginTop: 3,
     },
-    spendCard: {
+    userEmail: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    editButton: {
+      minHeight: 44,
+      borderRadius: 12,
+      backgroundColor: colors.muted,
+      borderWidth: 1,
+      borderColor: colors.border,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: designTokens.spacing.md,
+      marginBottom: designTokens.spacing.lg,
+    },
+    editButtonText: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+    },
+    queueRow: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: designTokens.spacing.md,
-      backgroundColor: colors.navy,
-      borderColor: colors.navy,
-      marginBottom: designTokens.spacing.xl,
+      borderRadius: designTokens.radius.lg,
+      backgroundColor: colors.card,
+      padding: designTokens.spacing.md,
+      marginBottom: designTokens.spacing.md,
     },
-    spendIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 15,
+    queueIcon: {
+      width: 40,
+      height: 40,
+      borderRadius: 13,
       backgroundColor: colors.primarySoft,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    spendCopy: {
-      flex: 1,
-    },
-    // spendCard's background is a fixed colors.navy regardless of theme
-    // (see above), so its text needs fixed off-white tones rather than
-    // colors.mutedFg/foreground — those flip to dark navy text in light
-    // mode and would be nearly invisible here.
-    spendLabel: {
-      color: 'rgba(229, 229, 229, 0.6)',
+    queueCopy: { flex: 1 },
+    queueTitle: {
+      color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 9,
-      letterSpacing: 1,
-      marginBottom: 4,
+      fontSize: 14,
     },
-    spendAmount: {
-      color: colors.offWhite,
+    queueSubtitle: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 11,
+      marginTop: 2,
     },
-    spendPill: {
-      paddingHorizontal: 9,
-      paddingVertical: 6,
-      borderRadius: designTokens.radius.pill,
-      backgroundColor: 'rgba(229, 229, 229, 0.10)',
-    },
-    spendPillText: {
-      color: colors.offWhite,
-      fontFamily: designTokens.type.medium,
-      fontSize: 10,
-    },
-    sectionHeading: {
-      marginTop: designTokens.spacing.sm,
-      marginBottom: designTokens.spacing.md,
-    },
-    sectionEyebrow: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 9,
-      letterSpacing: 1.2,
+    sectionHeader: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: designTokens.spacing.md,
+      marginBottom: designTokens.spacing.sm,
     },
     sectionTitle: {
       color: colors.foreground,
       fontFamily: designTokens.type.heading,
-      fontSize: 20,
-      marginTop: 3,
+      fontSize: 16,
     },
-    settingsCard: {
-      overflow: 'hidden',
+    stateCard: {
       borderRadius: designTokens.radius.lg,
-      borderWidth: 1,
-      borderColor: colors.border,
       backgroundColor: colors.card,
-      marginBottom: designTokens.spacing.xl,
-      shadowColor: colors.shadow,
-      shadowOffset: { width: 0, height: 4 },
-      shadowOpacity: 0.04,
-      shadowRadius: 12,
-      elevation: 1,
-    },
-    paymentsStateCard: {
       alignItems: 'center',
-      paddingVertical: designTokens.spacing.xl,
-      marginBottom: designTokens.spacing.xl,
+      padding: designTokens.spacing.xl,
       gap: 6,
     },
-    paymentsStateText: {
+    stateTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 14,
+    },
+    stateText: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 12,
       textAlign: 'center',
     },
-    paymentsEmptyTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 15,
-      marginTop: 4,
-    },
-    paymentsRetryButton: {
-      marginTop: designTokens.spacing.sm,
-      minHeight: 38,
-      borderRadius: designTokens.radius.md,
+    retryButton: {
+      marginTop: 6,
+      minHeight: 36,
+      borderRadius: designTokens.radius.pill,
       borderWidth: 1,
       borderColor: colors.primary,
       paddingHorizontal: designTokens.spacing.lg,
       alignItems: 'center',
       justifyContent: 'center',
     },
-    paymentsRetryText: {
+    retryText: {
       color: colors.primary,
       fontFamily: designTokens.type.heading,
       fontSize: 12,
     },
-    settingRow: {
-      minHeight: 72,
-      paddingHorizontal: designTokens.spacing.lg,
+    ordersCard: {
+      borderRadius: designTokens.radius.lg,
+      backgroundColor: colors.card,
+      overflow: 'hidden',
+    },
+    orderRow: {
+      minHeight: 60,
       flexDirection: 'row',
       alignItems: 'center',
       gap: designTokens.spacing.md,
+      paddingHorizontal: designTokens.spacing.md,
+    },
+    orderRowBorder: { borderTopWidth: 1, borderTopColor: colors.border },
+    orderRowPressed: { backgroundColor: colors.secondary },
+    orderCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 },
+    orderTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.medium,
+      fontSize: 13,
+    },
+    orderBadge: {
+      borderRadius: designTokens.radius.pill,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    orderBadgeText: {
+      fontFamily: designTokens.type.heading,
+      fontSize: 9,
+    },
+    orderAmount: { color: colors.mutedFg },
+    designGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    designThumb: {
+      width: '32%',
+      aspectRatio: 1,
+      borderRadius: 10,
+      backgroundColor: colors.cardElevated,
+    },
+    upgradeButton: {
+      minHeight: 50,
+      borderRadius: 12,
+      backgroundColor: colors.primary,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 9,
+      marginTop: designTokens.spacing.xl,
+    },
+    upgradeButtonText: {
+      color: '#FFFFFF',
+      fontFamily: designTokens.type.heading,
+      fontSize: 15,
+    },
+    settingsCard: {
+      borderRadius: designTokens.radius.lg,
       backgroundColor: colors.card,
+      overflow: 'hidden',
     },
-    settingBorder: {
-      borderTopWidth: 1,
-      borderTopColor: colors.border,
-    },
-    linkRowPressed: {
-      backgroundColor: colors.secondary,
-    },
-    rowIconOrange: {
-      width: 38,
-      height: 38,
-      borderRadius: 13,
-      backgroundColor: colors.primarySoft,
+    settingRow: {
+      minHeight: 62,
+      flexDirection: 'row',
       alignItems: 'center',
-      justifyContent: 'center',
+      gap: designTokens.spacing.md,
+      paddingHorizontal: designTokens.spacing.md,
     },
-    rowIconBlue: {
-      width: 38,
-      height: 38,
-      borderRadius: 13,
-      backgroundColor: colors.statusApproved.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    rowIconGreen: {
-      width: 38,
-      height: 38,
-      borderRadius: 13,
-      backgroundColor: colors.statusCompleted.bg,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    rowIconPurple: {
-      width: 38,
-      height: 38,
-      borderRadius: 13,
-      backgroundColor: colors.materialTpu,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    settingCopy: {
-      minWidth: 0,
-      flex: 1,
-    },
+    settingBorder: { borderTopWidth: 1, borderTopColor: colors.border },
+    settingCopy: { flex: 1, minWidth: 0 },
     settingLabel: {
       color: colors.foreground,
       fontFamily: designTokens.type.medium,
-      fontSize: 14,
+      fontSize: 13,
     },
     settingDescription: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 11,
-      marginTop: 3,
+      marginTop: 2,
     },
     signOutButton: {
-      minHeight: 52,
+      minHeight: 50,
       borderRadius: designTokens.radius.md,
       borderWidth: 1,
       borderColor: colors.statusFailed.dot,
@@ -891,35 +790,103 @@ function makeStyles(colors: Colors) {
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-    },
-    signOutButtonPressed: {
-      opacity: 0.82,
-      transform: [{ scale: 0.99 }],
+      marginTop: designTokens.spacing.lg,
     },
     signOutText: {
       color: colors.destructive,
       fontFamily: designTokens.type.heading,
-      fontSize: 15,
-    },
-    footerBrand: {
-      marginTop: designTokens.spacing.xl,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 7,
-    },
-    footerLogo: {
-      width: 24,
-      height: 24,
-      borderRadius: 8,
-      backgroundColor: colors.primarySoft,
-      alignItems: 'center',
-      justifyContent: 'center',
+      fontSize: 14,
     },
     versionText: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 11,
+      textAlign: 'center',
+      marginTop: designTokens.spacing.xl,
+    },
+
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.overlay,
+      justifyContent: 'flex-end',
+    },
+    modalDismiss: { flex: 1 },
+    modalSheet: {
+      backgroundColor: colors.card,
+      borderTopLeftRadius: 28,
+      borderTopRightRadius: 28,
+      padding: designTokens.spacing.xxl,
+      paddingBottom: 40,
+      alignItems: 'center',
+    },
+    modalClose: {
+      position: 'absolute',
+      top: 14,
+      right: 14,
+      width: 36,
+      height: 36,
+      borderRadius: 18,
+      backgroundColor: colors.muted,
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 1,
+    },
+    modalIcon: {
+      width: 64,
+      height: 64,
+      borderRadius: 20,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: designTokens.spacing.md,
+    },
+    modalTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.display,
+      fontSize: 23,
+      marginBottom: designTokens.spacing.lg,
+    },
+    benefitList: { alignSelf: 'stretch', gap: designTokens.spacing.md, marginBottom: designTokens.spacing.xl },
+    benefitRow: { flexDirection: 'row', alignItems: 'center', gap: designTokens.spacing.md },
+    benefitIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 14,
+      backgroundColor: colors.primarySoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    benefitCopy: { flex: 1 },
+    benefitTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 14,
+    },
+    benefitSubtitle: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    modalCta: {
+      alignSelf: 'stretch',
+      minHeight: 50,
+      borderRadius: 12,
+      backgroundColor: colors.primary,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginBottom: designTokens.spacing.sm,
+    },
+    modalCtaText: {
+      color: '#FFFFFF',
+      fontFamily: designTokens.type.heading,
+      fontSize: 15,
+    },
+    modalLater: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+      padding: 8,
     },
   });
 }

@@ -49,14 +49,11 @@ export default function SplashScreen() {
       // '/(app)/(tabs)/dashboard' (a concrete leaf), not '/(app)/(tabs)':
       // the bare group href has an empty concrete pathname and can resolve
       // to Unmatched Route — see register.tsx's handleCreateAccount comment.
-      const dest = token ? '/(app)/(tabs)/dashboard' : '/(auth)/login';
-      console.log('[Index] destination set to:', dest);
-      setDestination(dest);
+      setDestination(token ? '/(app)/(tabs)/dashboard' : '/(auth)/login');
     }
   }, [authLoading, token, destination]);
 
   if (destination) {
-    console.log('[Index] Redirecting to:', destination);
     return <Redirect href={destination} />;
   }
 

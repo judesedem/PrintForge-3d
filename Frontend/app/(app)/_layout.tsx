@@ -12,6 +12,10 @@ export default function AppLayout() {
         options={{ headerShown: false }}
       />
       <Stack.Screen
+        name="marketplace/designer/[id]"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="marketplace/[id]"
         options={{
           headerShown: true,

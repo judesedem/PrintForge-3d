@@ -95,10 +95,6 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     // credentials, and that case must NOT force-navigate away from the
     // login screen the user is already looking at (auth.ts's login()/
     // register() never pass a token, so they can't trigger this).
-    if (response.status === 401) {
-      console.log('[Client] 401 received, token present:', !!token, 'redirecting:', redirectingToLogin);
-    }
-
     if (response.status === 401 && token && !redirectingToLogin) {
       redirectingToLogin = true;
       await clearStoredToken();

@@ -164,14 +164,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   };
 
   const register = async (payload: RegisterPayload) => {
-    console.log('[Session] register() called');
     setSession(prev => ({ ...prev, authLoading: true }));
     try {
       const authResponse = await apiRegister(payload);
       await setStoredToken(authResponse.token);
       setSession({ token: authResponse.token, appUser: authResponse.user, authLoading: false });
-      console.log('[Session] token set:', !!authResponse.token);
-      console.log('[Session] authLoading set to false');
       return authResponse.user;
     } catch (err) {
       setSession(prev => ({ ...prev, authLoading: false }));

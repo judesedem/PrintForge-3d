@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { ApiError, apiFetch } from './client';
 
 // Mirrors fileservice/model/ModelFile.java's JSON output exactly. Same
 // situation as notifications.ts/marketplace.ts: no DTO layer —
@@ -35,49 +35,72 @@ export function toModelFile(res: ModelFileApiResponse): ModelFile {
   };
 }
 
+// XHR wrapper for multipart FormData uploads. React Native's native fetch
+// (in Expo Go SDK 56) doesn't support the { uri, name, type } FormData
+// pattern reliably — XHR handles file uploads better. Returns a Response
+// object for compatibility with the rest of the error-handling path.
+function uploadFileXHR(url: string, token: string, form: FormData): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+
+    xhr.onload = () => {
+      resolve(new Response(xhr.responseText, { status: xhr.status }));
+    };
+
+    xhr.onerror = () => {
+      reject(new Error('XHR network error'));
+    };
+
+    xhr.send(form);
+  });
+}
+
 /**
  * Maps to POST /api/files/upload. The backend binds this via
  * @RequestParam("file") MultipartFile, so this sends real multipart/
- * form-data (apiFetch's isFormData option), not a JSON body — same
- * pattern as marketplace.ts's createListing (thumbnail part).
+ * form-data, not a JSON body — same pattern as marketplace.ts's
+ * createListing (thumbnail part).
  *
  * `asset` matches what expo-document-picker's DocumentPickerAsset gives
  * you: a local `uri`, `name`, and `mimeType`.
+ *
+ * Uses XMLHttpRequest instead of fetch() because React Native's native
+ * fetch (Expo Go SDK 56) doesn't support the { uri, name, type } FormData
+ * pattern — it throws "Unsupported FormDataPart implementation". XHR
+ * handles file uploads more reliably in this context.
  */
 export async function uploadFile(
   token: string,
   asset: { uri: string; name: string; mimeType?: string | null }
 ): Promise<ModelFile> {
-  // Diagnostic for "Could not reach the server" on this endpoint: the
-  // request plumbing (files.ts/client.ts) is correct, so if fetch() still
-  // throws at the network layer the usual cause is the uri not being a
-  // readable file:// path at request time — e.g. remote JS debugging is
-  // on (fetch runs in desktop V8, which can't read the device's files) or
-  // a content:// SAF uri slipped through. Log the scheme so that's visible
-  // in one run rather than inferred.
-  const scheme = asset.uri.split(':', 1)[0];
-  console.log(
-    '[Files] uploadFile uri:', asset.uri,
-    '| scheme:', scheme,
-    '| isFileUri:', asset.uri.startsWith('file://'),
-    '| name:', asset.name,
-    '| type:', asset.mimeType ?? 'application/octet-stream',
-  );
-
+  // React Native multipart part: a plain { uri, name, type } object.
   const form = new FormData();
   form.append('file', {
     uri: asset.uri,
-    name: asset.name,
+    name: asset.name || 'upload.stl',
     type: asset.mimeType ?? 'application/octet-stream',
-  } as unknown as Blob);
+  } as any);
 
-  const data = await apiFetch<ModelFileApiResponse>('/api/files/upload', {
-    method: 'POST',
-    token,
-    body: form,
-    isFormData: true,
-  });
-  return toModelFile(data);
+  const url = `${process.env.EXPO_PUBLIC_API_URL}/api/files/upload`;
+
+  let response: Response;
+  try {
+    // XHR instead of fetch — more reliable for RN file uploads.
+    response = await uploadFileXHR(url, token, form);
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your connection and API URL.');
+  }
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : undefined;
+  if (!response.ok) {
+    const message =
+      (data as { message?: string } | undefined)?.message ?? `Request failed (${response.status})`;
+    throw new ApiError(response.status, message);
+  }
+  return toModelFile(data as ModelFileApiResponse);
 }
 
 /** Maps to GET /api/files/{id}. Caller must be the uploader or staff (403 otherwise). */

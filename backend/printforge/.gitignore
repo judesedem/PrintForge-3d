@@ -38,3 +38,7 @@ build/
 
 ###cloudinary keys
 .env
+
+### Local secrets profile (jwt.secret, paystack.secret-key, cloudinary.*) ###
+### Was untracked but NOT actually covered by any pattern before this line ###
+application-local.properties

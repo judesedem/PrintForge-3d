@@ -3,22 +3,23 @@ import { StyleSheet } from 'react-native';
 export type Theme = 'dark' | 'light';
 
 /**
- * PrintForge 3D visual identity — rebuilt to match the brand identity doc
- * exactly. The four core brand colors are used for nothing but their named
- * roles below:
- *   Warm Orange #FF5803  → primary accent
- *   Off Black   #222222  → dark-mode surfaces/cards
- *   Off White   #E5E5E5  → light-mode background, dark-mode text
- *   Navy        #16182B  → dark-mode background, light-mode text
+ * PrintForge "forge" visual identity — Bolt redesign Pass 1 (2026-07-16).
+ * Core tokens follow the forge palette:
+ *   Forge Orange #FF6A00 → primary accent (light variant #FF8533)
+ *   Forge Navy   #0A182E → dark-mode background / light-mode text
+ *   Navy Light   #152544 → dark-mode cards
+ *   Navy Elevated #1E3460 → dark-mode elevated surfaces
  *
- * Everything else (destructive/success/warning/info, printer/material/
- * chart colors) is supplementary and intentionally untouched — the brand
- * doc doesn't cover them, and they're already proper theme tokens rather
- * than hardcoded literals in component files.
+ * offBlack/offWhite are legacy keys from the previous brand doc, kept only
+ * so screens not yet migrated in this pass keep compiling — don't use them
+ * in new code. Supplementary colors (destructive/success/warning/info,
+ * printer/material/chart) are untouched except where they referenced the
+ * old orange.
  */
 const brand = {
-  primary: '#FF5803',
-  navy: '#16182B',
+  primary: '#FF6A00',
+  primaryLight: '#FF8533',
+  navy: '#0A182E',
   offBlack: '#222222',
   offWhite: '#E5E5E5',
 };
@@ -30,16 +31,14 @@ const shared = {
   warning: '#D97706',
   info: '#2563EB',
 
-  primaryPressed: '#E04E00',
-  // Both onPrimary (text/icons on top of a primary-colored surface) and
-  // white (text/icons on top of dark/colored surfaces elsewhere — avatar
-  // initials, checkmarks on badges, etc.) are repointed to the brand's Off
-  // White rather than pure #FFFFFF, so nothing renders an unlisted white.
-  onPrimary: '#E5E5E5',
-  white: '#E5E5E5',
+  primaryPressed: '#E05F00',
+  // The forge palette uses pure white for text/icons on primary and dark
+  // surfaces (previous brand doc used Off White #E5E5E5).
+  onPrimary: '#FFFFFF',
+  white: '#FFFFFF',
 
   printerAvailable: '#22A06B',
-  printerBusy: '#FF5803',
+  printerBusy: '#FF6A00',
   printerOffline: '#98A2B3',
   printerMaintenance: '#D97706',
 
@@ -49,7 +48,7 @@ const shared = {
   materialPetg: '#EAF8FF',
   materialTpu: '#F4EBFF',
 
-  chart1: '#FF5803',
+  chart1: '#FF6A00',
   chart2: '#2563EB',
   chart3: '#22A06B',
   chart4: '#7F56D9',
@@ -83,53 +82,53 @@ function statusColors(approved: StatusColor, pending: StatusColor, failed: Statu
 
 const dark = {
   ...shared,
-  background: '#16182B',
-  foreground: '#E5E5E5',
-  card: '#222222',
-  cardElevated: '#2A2A2A',
-  secondary: '#2A2A2A',
-  muted: 'rgba(229, 229, 229, 0.08)',
-  mutedFg: 'rgba(229, 229, 229, 0.55)',
-  border: 'rgba(229, 229, 229, 0.10)',
-  sidebar: '#16182B',
-  sidebarFg: 'rgba(229, 229, 229, 0.7)',
-  sidebarBorder: 'rgba(229, 229, 229, 0.08)',
+  background: '#0A182E',
+  foreground: '#FFFFFF',
+  card: '#152544',
+  cardElevated: '#1E3460',
+  secondary: '#1E3460',
+  muted: 'rgba(255, 255, 255, 0.10)',
+  mutedFg: 'rgba(255, 255, 255, 0.5)',
+  border: 'rgba(255, 255, 255, 0.08)',
+  sidebar: '#0A182E',
+  sidebarFg: 'rgba(255, 255, 255, 0.7)',
+  sidebarBorder: 'rgba(255, 255, 255, 0.08)',
   // Login mockup calls for input fields on colors.card — reused here so
   // every text input in the app (not just login) picks up the same
   // dark-mode surface treatment.
-  inputBg: '#222222',
-  overlay: 'rgba(22, 24, 43, 0.72)',
+  inputBg: '#152544',
+  overlay: 'rgba(4, 10, 20, 0.72)',
   shadow: '#000000',
-  primarySoft: 'rgba(255, 88, 3, 0.15)',
+  primarySoft: 'rgba(255, 106, 0, 0.15)',
 
   ...statusColors(
     { bg: 'rgba(34,197,94,0.15)', text: '#22C55E' },
-    { bg: 'rgba(255,88,3,0.15)', text: '#FF5803' },
+    { bg: 'rgba(255,106,0,0.15)', text: '#FF6A00' },
     { bg: 'rgba(239,68,68,0.15)', text: '#EF4444' },
   ),
 };
 
 const light = {
   ...shared,
-  background: '#E5E5E5',
-  foreground: '#16182B',
+  background: '#F0F2F5',
+  foreground: '#0A182E',
   card: '#FFFFFF',
-  cardElevated: '#F5F5F5',
-  secondary: '#F5F5F5',
-  muted: 'rgba(22, 24, 43, 0.06)',
-  mutedFg: 'rgba(22, 24, 43, 0.55)',
-  border: 'rgba(22, 24, 43, 0.10)',
+  cardElevated: '#F8F9FB',
+  secondary: '#F8F9FB',
+  muted: 'rgba(10, 24, 46, 0.06)',
+  mutedFg: 'rgba(10, 24, 46, 0.55)',
+  border: 'rgba(10, 24, 46, 0.08)',
   sidebar: '#FFFFFF',
-  sidebarFg: 'rgba(22, 24, 43, 0.7)',
-  sidebarBorder: 'rgba(22, 24, 43, 0.08)',
+  sidebarFg: 'rgba(10, 24, 46, 0.7)',
+  sidebarBorder: 'rgba(10, 24, 46, 0.08)',
   inputBg: '#FFFFFF',
-  overlay: 'rgba(22, 24, 43, 0.52)',
-  shadow: '#16182B',
-  primarySoft: 'rgba(255, 88, 3, 0.12)',
+  overlay: 'rgba(10, 24, 46, 0.52)',
+  shadow: '#0A182E',
+  primarySoft: 'rgba(255, 106, 0, 0.12)',
 
   ...statusColors(
     { bg: 'rgba(34,197,94,0.12)', text: '#16A34A' },
-    { bg: 'rgba(255,88,3,0.12)', text: '#EA4500' },
+    { bg: 'rgba(255,106,0,0.12)', text: '#E85D00' },
     { bg: 'rgba(239,68,68,0.12)', text: '#DC2626' },
   ),
 };

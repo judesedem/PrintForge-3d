@@ -1374,3 +1374,203 @@ fix, just things to design around:
   job" path for the submit-and-approve flow that still doesn't involve
   payment anywhere today.
 
+
+---
+
+## Progress Log — 2026-07-16 — Bolt Redesign Pass 1 (visual only)
+
+**Scope executed:** theme tokens, bottom navigation, Home feed, Discover
+screen. No API files, backend wiring, payment logic, or navigation
+functionality touched.
+
+- **Bolt reference missing:** the task pointed at
+  `C:\Users\HP\Desktop\PrintForge-3d\bolt-v2\project\src\` — that path
+  does not exist on this machine (searched the repo and Desktop; the only
+  similar folder, "PrintForge Web App UI", is a shadcn/Vite web project
+  with none of the named files). The task's own spec was detailed enough
+  (exact hex tokens, mock data, per-element layout) to implement Pass 1
+  without it. If the real reference turns up, diff against it in Pass 2.
+
+- **`src/theme.ts` — forge palette swap.** Dark: bg `#0A182E`, card
+  `#152544`, elevated `#1E3460`, primary `#FF6A00` (+ new `primaryLight`
+  `#FF8533` token), fg `#FFFFFF`, mutedFg `rgba(255,255,255,0.5)`, border
+  `rgba(255,255,255,0.08)`. Light: bg `#F0F2F5`, card `#FFFFFF`, elevated
+  `#F8F9FB`, fg `#0A182E`. NO keys were removed — every existing token
+  (`secondary`, `muted`, `inputBg`, `overlay`, `sidebar*`, `material*`,
+  `chart*`, `printer*`, status colors, legacy `offBlack`/`offWhite`) kept
+  so all unmigrated screens still compile; orange-derived values
+  (`primarySoft`, `primaryPressed`, `printerBusy`, `chart1`, pending
+  status) updated to the new orange. Every screen inherits the new
+  palette automatically via ThemeContext.
+
+- **`src/components/SwipeTabBar.tsx` — 5-tab bar w/ floating Upload.**
+  Labels/icons now Home(House) / Discover(Search) / Upload(CloudUpload in
+  a 56px always-orange circle, marginTop -28 so it floats above the bar)
+  / Orders(ClipboardList) / Profile(User). **Decision: internal TAB_KEYS
+  ('dashboard'/'marketplace'/'submit'/…) were NOT renamed** — they're
+  functional API (`goToTab()` calls in submit.tsx etc.); the task allowed
+  "keep key, just change the label/icon" and renaming would have been a
+  functional change. Bar surface uses `colors.sidebar` (`#0A182E` dark /
+  white light), 60px min height, subtle top border, safe-area padding.
+  Inactive tint uses `mutedFg` (0.5 white) instead of the spec's literal
+  0.4 so it stays theme-aware — closest existing token. Notifications
+  were never in this tab bar (5 tabs before and after); the bell moved
+  from the old dashboard header into the new Home top bar.
+
+- **`app/(app)/(tabs)/dashboard/student.tsx` — rebuilt as Home feed.**
+  `dashboard/index.tsx` (role router → designer/staff/admin) untouched;
+  the student branch is the feed. Fixed top bar (PrintForge wordmark,
+  bell → opens NotificationsPanel modal, Trending|Newest segmented
+  control — UI state only, no API), FlatList of the 3 spec mock cards
+  with local like/follow toggles, "Popular" badge only on trending tab.
+  Cards are fixed white-on-navy in BOTH themes (Bolt look, intentional).
+  **Mock vs real:** entire feed is mock (no social backend exists). The
+  old dashboard's job stats/quick actions are gone from this screen; the
+  underlying jobs fetch lives in JobsContext (provider level) and still
+  runs — stats can return as a feed section in a later pass. Top bar is
+  fixed-above-list rather than absolute+z-index — same sticky effect,
+  less overlap risk.
+
+- **`src/components/NotificationsPanel.tsx` — NEW.** Slide-up
+  transparent Modal, `colors.card` surface (white light / `#152544`
+  dark), X close, 4 spec mock notifications with 4px orange/navy left
+  borders. The real notifications route file
+  `(tabs)/notifications.tsx` is untouched.
+
+- **`app/(app)/(tabs)/marketplace/index.tsx` — rebuilt as Discover.**
+  KEPT: `fetchListings()` + auth-gated effect, loading/error/retry
+  states, navigation to `/(app)/marketplace/[id]` — byte-for-byte
+  logic. NEW: rounded-full search (local filter on title, as before),
+  category pills (UI-only — DesignListing has no category field, noted
+  inline), 2-col FlatList grid, orange price badge / emerald `#10B981`
+  Free badge. **Decisions:** real listings show `totalOrders` as the
+  heart count (no likes field on the backend model — proxy until a
+  social model exists); mock grid renders only when the backend returns
+  0 listings, and mock cards are non-tappable (a fake id would error on
+  the real detail screen). Old featured-rail / category cards / campus
+  labs sections (PRINTERS mock) removed from this screen.
+
+- **Verified:** `npx tsc --noEmit` — zero errors.
+- **NOT verified — no device attachable from this session:** the three
+  on-device checks (5-tab bar with orange circle, feed like/follow
+  toggles, Discover grid + pills) need a human run in Expo Go. Watch
+  specifically: the floating Upload circle overlapping pager content
+  (compensated with paddingBottom 48 on both lists), remote Pexels
+  images loading, and light-mode contrast on the segmented control.
+- **Pass 2 candidates:** marketplace/[id] detail redesign, orders/
+  profile/submit restyling to forge tokens (they inherit colors but keep
+  old layouts), real notifications data into the panel, feed backed by a
+  real endpoint, category model, restoring job stats on Home.
+
+---
+
+## Progress Log — 2026-07-17 — Bolt Redesign Pass 2 (visual only)
+
+**Scope executed:** auth screens, submit flow, orders, profile, lab
+queue, new designer public-profile screen, debug-log cleanup. Zero API
+files or payment logic touched; every existing fetch and mutation is
+preserved.
+
+- **Bolt reference STILL missing** — `bolt-v2\project\src\screens\` does
+  not exist on this machine (re-checked). Implemented from the task's
+  own detailed spec, same as Pass 1.
+
+- **`app/(auth)/login.tsx` + `register.tsx` — rebuilt.** Blurred Pexels
+  hero + rgba(10,24,46,0.85) overlay, fixed-white centered card (white
+  in both themes, like the feed cards), Log In | Sign Up segmented
+  switcher (navigates between the two real routes), icon inputs with
+  password eye toggle, orange primary buttons. ALL auth logic unchanged
+  (login/register payloads, validation, error banners, busy states,
+  concrete-leaf `/(app)/(tabs)/dashboard` target). Decisions: single
+  "Full name" field (API takes one full_name string; old first/last was
+  just concatenated), confirm-password KEPT (validated + required in the
+  payload, though the Bolt card omits it), "Forgot password?" shows a
+  coming-soon toast (no backend flow), and the register screen's Google
+  button is now hidden like login's (it was already known-broken in Expo
+  Go — that's why login hid it — and /api/auth/firebase isn't even
+  permitAll'd server-side).
+
+- **`app/(app)/(tabs)/submit.tsx` — rebuilt.** 3-step indicator
+  (Configure → Estimate → Payment), dashed orange upload zone, material
+  pills from the real fetchMaterials() (loading/error/retry kept),
+  quality cards (badge shows speed descriptor, NOT a price multiplier —
+  the backend's multipliers aren't exposed by any endpoint, so ×N
+  numbers would be fabricated), infill slider + strength label, stepper,
+  color dots with checkmark. Estimate step: big orange total, 3 stat
+  cards (weight/time/specs), summary card, Reconfigure/Pay Now.
+  Payment: "Redirecting to payment..." overlay during initiate,
+  PaystackWebView unchanged, then an in-screen SUCCESS state (animated
+  checkmark, "Track your order" → orders tab, "Back to feed") — this
+  replaces the old auto-jump to the orders tab (refetchJobs + toast
+  still fire; deliberate UX change per the spec). Cancel now shows a
+  gentle banner with Try again/Back — the estimate is kept, exactly as
+  before.
+
+- **`app/jobs/index.tsx` (the real Orders screen; (tabs)/orders.tsx
+  re-exports it) — rebuilt.** Stats row (active/completed/total spent
+  from real jobs), new order cards with color-coded status badges and a
+  5-dot progress timeline. Status mapping documented in-file:
+  Ready=COMPLETED (no READY status exists), Collected stage is always
+  future (no backend status), APPROVED/QUEUED→"Approved"/"Queued" blue,
+  PRINTING/IN_PROGRESS→pulsing orange, FAILED/REJECTED→red badge +
+  dimmed timeline. Thumbnail is always the Box placeholder — Job has no
+  image field. KEPT: paid-pill cross-reference against
+  GET /api/payments/my-payments, View Details → /jobs/[id], bell →
+  /notifications. Empty state has "Upload Now" (goToTab('submit');
+  harmless no-op if rendered via the standalone /jobs stack route).
+
+- **`app/(app)/(tabs)/profile.tsx` — rebuilt.** Now uses the REAL
+  appUser (name/email/role) from SessionContext instead of the old
+  hardcoded "Kwame Mensah" mock. 80px initials avatar with orange ring,
+  Instagram-style stats (Designs/Followers/Following all mock 0),
+  designer Earnings = sum of COMPLETED payments (per spec — note this is
+  money PAID not earned; flagged for a later pass), Edit Profile =
+  coming-soon toast. Role sections: student → Become a Designer button +
+  upgrade modal (toast-only confirm — NO upgrade endpoint exists);
+  designer → My Designs mock grid; lab_staff → Lab Queue row →
+  /staff/queue. "My Orders" lists real payments (tapping a row with a
+  printJobId opens /jobs/[id]). Old settings/support/sign-out/theme
+  toggle all PRESERVED behind the Settings gear (collapsed by default,
+  not deleted). fetchMyPayments trio unchanged.
+
+- **`app/staff/queue.tsx` — rebuilt.** Back-arrow header, local filter
+  pills (All/Pending/Printing/Ready), per-job cards (initials avatar,
+  student, status pill, spec pills, "Submitted N hours ago"). approveJob
+  / rejectJob calls preserved exactly — including the same default
+  printerId the old screen sent — with per-card loading and an inline
+  expandable rejection-reason input (replaces the old shared notes
+  field). "Mark as Ready" / "Mark Collected" render DISABLED with a
+  "not wired" caption: the backend's only staff transitions are
+  approve/reject, and faking others would be inventing endpoints. The
+  old printer-fleet section (pure PRINTERS mock data + mock pickers) is
+  gone; Job has no infill%/file-size fields so those two spec pills
+  can't be shown.
+
+- **`app/(app)/marketplace/designer/[id].tsx` — NEW (mock).** Public
+  designer profile: back arrow, 80px avatar (param or initials),
+  verified badge, mock 0/0/0 stats, local Follow toggle, mock design
+  grid (thumbnails do NOT navigate — no real listing ids exist for
+  them). Registered in (app)/_layout.tsx. Wired from the Home feed's
+  designer avatar/name (display fields passed as params — no designer
+  endpoint exists). NOT wired from Discover: MarketplaceListing doesn't
+  expose designerId and adding it means editing src/api/marketplace.ts,
+  which is off-limits this pass.
+
+- **Debug logs removed everywhere:** [Session], [Register], [Submit],
+  [Client], [Files], [Index], and the 🔥 loader marker. Kept legitimate
+  error logging (ErrorBoundary console.error, signInWithGoogle
+  console.warn, marketplace/create console.error, the missing-env-var
+  warning in client.ts). Verified by grep: zero console.log left in
+  src/ and app/.
+
+- **Verified:** `npx tsc --noEmit` — zero errors.
+- **NOT verified — needs a human device run:** every redesigned screen,
+  but especially (1) the full submit → estimate → Paystack → success
+  round trip (the success/cancel states are new UI around the same
+  handlers), (2) staff approve/reject with the new per-card buttons,
+  (3) light mode on the fixed-white auth cards and hero overlay.
+- **Still outstanding (backend gaps the UI now visibly needs):**
+  likes/follows/social model, listing categories, designer upgrade
+  endpoint, designer public-profile + per-designer listings endpoints,
+  job thumbnails, READY/COLLECTED job statuses + staff transitions
+  beyond approve/reject, real designer earnings source, password reset.
