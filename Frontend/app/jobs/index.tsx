@@ -39,6 +39,7 @@ import type { Job, JobStatus } from '../../src/data/mockData';
  */
 
 const STAGES = ['Subm', 'Appr', 'Print', 'Ready', 'Coll'] as const;
+const STATUS_ORDER = ['SUBMITTED', 'APPROVED', 'PRINTING', 'READY', 'COLLECTED'] as const;
 
 type StatusVisual = {
   label: string;
@@ -74,6 +75,14 @@ function formatDate(submittedAt: string): string {
   if (!submittedAt) return '';
   const d = new Date(submittedAt);
   return Number.isNaN(d.getTime()) ? submittedAt : d.toLocaleDateString();
+}
+
+function decodeName(name: string): string {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
 }
 
 /** Orange dot that pulses — used for the in-flight PRINTING stage. */
@@ -142,7 +151,7 @@ export default function JobsList() {
             <Box size={26} color={colors.primary} strokeWidth={1.8} />
           </View>
           <View style={s.cardCopy}>
-            <Text style={s.cardTitle} numberOfLines={1}>{item.title}</Text>
+            <Text style={s.cardTitle} numberOfLines={1}>{decodeName(item.title)}</Text>
             <Text style={s.cardMeta}>
               {item.material} · {item.quality} · Qty {item.qty}
             </Text>
@@ -161,26 +170,21 @@ export default function JobsList() {
           </View>
         </View>
 
-        <View style={[s.timeline, failed && s.timelineFailed]}>
-          {STAGES.map((label, i) => {
-            const done = !failed && i < visual.stage;
-            const current = !failed && i === visual.stage;
-            const dotColor = done ? '#22C55E' : current ? colors.primary : colors.muted;
+        <View style={s.timeline}>
+          {STAGES.map((stage, i) => {
+            const stageIndex = STATUS_ORDER.indexOf(item.status as any);
+            const done = i < stageIndex;
+            const current = i === stageIndex;
             return (
-              <View key={label} style={s.stageItem}>
-                {i > 0 ? (
-                  <View style={[s.stageLine, done || current ? s.stageLineDone : null]} />
-                ) : null}
-                <View style={s.stageDotWrap}>
-                  {current && visual.pulsing ? (
-                    <PulsingDot color={colors.primary} size={10} />
-                  ) : (
-                    <View style={[s.stageDot, { backgroundColor: dotColor }]} />
-                  )}
-                  <Text style={[s.stageLabel, (done || current) && s.stageLabelActive]}>
-                    {label}
-                  </Text>
-                </View>
+              <View key={stage} style={s.timelineItem}>
+                <View
+                  style={[
+                    s.timelinePill,
+                    done && s.timelinePillDone,
+                    current && s.timelinePillCurrent,
+                  ]}
+                />
+                <Text style={s.timelineLabel}>{stage}</Text>
               </View>
             );
           })}
@@ -377,29 +381,31 @@ function makeStyles(colors: Colors) {
 
     timeline: {
       flexDirection: 'row',
-      justifyContent: 'center',
-      paddingVertical: 6,
+      gap: 4,
+      marginTop: 12,
+      marginBottom: 4,
     },
-    timelineFailed: { opacity: 0.35 },
-    stageItem: { flexDirection: 'row', alignItems: 'flex-start' },
-    stageLine: {
-      width: 26,
-      height: 2,
-      backgroundColor: colors.muted,
-      marginTop: 4,
-      marginHorizontal: 2,
+    timelineItem: {
+      flex: 1,
+      alignItems: 'center',
+      gap: 4,
     },
-    stageLineDone: { backgroundColor: '#22C55E' },
-    stageDotWrap: { alignItems: 'center', gap: 4, width: 34 },
-    stageDot: { width: 10, height: 10, borderRadius: 5 },
-    stageLabel: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
+    timelinePill: {
+      height: 4,
+      width: '100%',
+      borderRadius: 99,
+      backgroundColor: 'rgba(255,255,255,0.15)',
+    },
+    timelinePillDone: {
+      backgroundColor: '#22C55E',
+    },
+    timelinePillCurrent: {
+      backgroundColor: '#FF6A00',
+    },
+    timelineLabel: {
+      color: 'rgba(255,255,255,0.4)',
       fontSize: 9,
-    },
-    stageLabelActive: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.medium,
+      fontFamily: designTokens.type.body,
     },
 
     detailsLink: { alignSelf: 'flex-end', paddingTop: 4, paddingHorizontal: 2 },

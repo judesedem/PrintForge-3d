@@ -7,6 +7,7 @@ export default function AppLayout() {
     <Stack>
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen name="notifications" options={{ headerShown: false }} />
+      <Stack.Screen name="following" options={{ headerShown: false }} />
       <Stack.Screen
         name="marketplace/create"
         options={{ headerShown: false }}

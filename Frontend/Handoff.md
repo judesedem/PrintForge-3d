@@ -1574,3 +1574,86 @@ preserved.
   endpoint, designer public-profile + per-designer listings endpoints,
   job thumbnails, READY/COLLECTED job statuses + staff transitions
   beyond approve/reject, real designer earnings source, password reset.
+
+## Progress Log — 2026-07-18 — Profile pixel-perfect rebuild + new Following screen (visual only)
+
+**Scope executed:** full rebuild of `app/(app)/(tabs)/profile.tsx` to a
+literal pixel spec (hardcoded hex/rgba tokens, not theme-reactive), plus
+a new `app/(app)/following.tsx` mock screen. Zero API files, auth logic,
+payment logic, or JobsContext touched; `useSession()`, `fetchMyPayments()`,
+sign-out, and the ThemeContext dark-mode toggle are all still the same
+calls, just restyled around.
+
+- **`profile.tsx` — rebuilt again**, replacing the previous card-based
+  pass with the new flat-list/divider aesthetic per spec: single-line
+  centered top bar (no gear icon), 72px avatar with orange ring showing
+  a single initial, role-gated stats (student = one "Following" stat
+  that navigates to the new screen; designer = 4 stats row with real
+  Earnings; lab_staff = no stats row), full-width outlined Edit Profile
+  button, flat My Orders list with per-row dividers (no card
+  background), role-gated Become-a-Designer button with orange shadow,
+  and a Settings block with a custom `Animated`-driven dark-mode toggle
+  (44×24 track, 20×20 knob, 200ms `Easing.out(Easing.ease)`) wired to
+  the existing `toggleTheme`/`isDark` from ThemeContext, Help & Support
+  (opens `printforge.com/help` via `Linking`, toast fallback), and Sign
+  Out (unchanged `signOut()` → `router.replace('/(auth)/login')`).
+  Lab Queue row re-added above Settings for `lab_staff` role, linking to
+  `/staff/queue` as before.
+
+- **Order row naming decision:** `Payment` (`src/api/payments.ts`) has
+  no name/title field — only `estimateId`, `listingId`, `printJobId`,
+  `amount`, `status`, timestamps. Falls back to `"Estimate #{id}"`,
+  still run through a `decodeURIComponent` try/catch per spec in case
+  that ever becomes a real encoded string. Real job/design names need a
+  join the current Payment response doesn't carry.
+
+- **FAILED status badge color — deviation, documented:** spec only
+  defined PRINTING/READY/COLLECTED badge colors. Went with the same
+  neutral `WHITE_10`/`WHITE_50` treatment as "Collected" rather than a
+  red-tinted badge, since RED is already reserved for the destructive
+  Sign Out action on the same screen and a red badge next to "your
+  payment failed" read as more alarming than warranted. Labeled
+  "Failed".
+
+- **Become-Designer modal — built as a custom `Animated` overlay**, not
+  RN's `Modal` component: a `View` with `zIndex: 50` +
+  `rgba(0,0,0,0.5)` backdrop `Pressable`, and a bottom sheet
+  `Animated.View` translating from `Dimensions.get('window').height` to
+  `0` on mount/unmount (300ms `Easing.out(Easing.ease)`,
+  `useNativeDriver: true`). Matches the spec's slide-up description
+  exactly; chosen over `Modal` because the spec described manual
+  Animated.Value control over the open/close transition rather than
+  `Modal`'s built-in `animationType`.
+
+- **`app/(app)/following.tsx` — new screen**, Stack-registered in
+  `(app)/_layout.tsx` (`headerShown: false`, matches the pattern of the
+  other Stack.Screen entries there). Back-arrow + centered title +
+  "Designers you follow" subtitle header, flat divider-free row list
+  (each row has its own `marginBottom`, not a shared border, since the
+  spec used a different rhythm than My Orders) with 40px avatar
+  (`rgba(255,106,0,0.3)` ring), verified `BadgeCheck`, "{designs} ·
+  {followers}" stat line, and a nested Follow/Following pill. Confirmed
+  RN's `Pressable`-in-`Pressable` does NOT bubble presses to the parent
+  the way DOM does — tapping the follow pill toggles local state only
+  and does not also fire the row's `router.push` to the designer
+  profile. Backed by 4 hardcoded mock designers (no follow API exists
+  yet); tapping a row navigates to the existing
+  `/(app)/marketplace/designer/[id]` route passing
+  `id`/`name`/`avatar`/`verified` as params — same shape that screen's
+  `useLocalSearchParams` already expects (verified by reading that
+  file), so no changes were needed there.
+
+- **Verified:** `npx tsc --noEmit` — zero errors. Grepped both new/changed
+  files for `console.log` — none found. Confirmed via `git status` that
+  no file under `src/api/`, `SessionContext`, or `JobsContext` was
+  touched.
+- **NOT verified — needs a human device run:** the animated dark-mode
+  toggle's visual interpolation, the bottom-sheet slide animation
+  timing/feel, and whether `printforge.com/help` is a real reachable
+  URL (falls back to a toast if `Linking.openURL` rejects, so it fails
+  soft either way).
+- **Still outstanding:** real Following/Followers/Designs counts (all
+  still mock `0` on profile.tsx), a real follow-toggle API for
+  following.tsx (currently local state only, resets on remount), and a
+  job/design name field on the Payment response so My Orders can show
+  something better than `Estimate #{id}`.

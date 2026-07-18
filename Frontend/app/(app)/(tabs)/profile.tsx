@@ -1,117 +1,228 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import {
-  Image,
-  Linking,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
   View,
+  Text,
+  ScrollView,
+  Pressable,
+  TouchableOpacity,
+  StyleSheet,
+  Animated,
+  Easing,
+  Dimensions,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
 import {
-  Bell,
-  ChevronRight,
-  CircleHelp,
-  CloudUpload,
-  DollarSign,
-  FileText,
-  Grid3x3,
-  Headphones,
-  LogOut,
-  Moon,
-  Printer,
-  Scale,
-  Settings,
   ShoppingBag,
-  Sparkles,
+  Moon,
+  HelpCircle,
+  LogOut,
+  ChevronRight,
   Star,
-  Sun,
-  Users,
   X,
+  Sparkles,
+  UploadCloud,
+  DollarSign,
+  Users,
 } from 'lucide-react-native';
-import { useTheme } from '../../../src/ThemeContext';
-import { useJobs } from '../../../src/JobsContext';
+import { useRouter } from 'expo-router';
 import { useSession } from '../../../src/SessionContext';
+import { useTheme } from '../../../src/ThemeContext';
 import { useToast } from '../../../src/ToastContext';
 import { fetchMyPayments, Payment } from '../../../src/api/payments';
-import { Colors, designTokens } from '../../../src/theme';
-import GhsAmount from '../../../src/components/GhsAmount';
 
-/**
- * Profile — Bolt redesign Pass 2.
- *
- * Real data kept: appUser (name/email/role) from SessionContext instead of
- * the old hardcoded mock user, jobs from JobsContext, payment history via
- * fetchMyPayments (same fetch/loading/error/retry trio as before), theme
- * toggle, and sign-out. The previous version's settings/support content
- * lives behind the Settings gear (collapsed by default) rather than being
- * deleted — hiding working functionality ≠ removing it.
- *
- * Mock-only (no backend yet): Designs/Followers/Following counts, the
- * designer "My Designs" grid images, Edit Profile, and the designer
- * upgrade (no endpoint exists — the modal confirms with a toast only).
- * Designer "Earnings" sums COMPLETED payments from fetchMyPayments as the
- * spec requested — note that's money the user PAID, not earned; real
- * earnings need the marketplace listings' totalEarnings in a later pass.
- */
+const NAVY = '#0A182E';
+const NAVY_LIGHT = '#152544';
+const ORANGE = '#FF6A00';
+const WHITE = '#FFFFFF';
+const WHITE_50 = 'rgba(255,255,255,0.5)';
+const WHITE_30 = 'rgba(255,255,255,0.3)';
+const WHITE_15 = 'rgba(255,255,255,0.15)';
+const WHITE_10 = 'rgba(255,255,255,0.1)';
+const WHITE_8 = 'rgba(255,255,255,0.08)';
+const EMERALD = '#34D399';
+const EMERALD_BG = 'rgba(16,185,129,0.2)';
+const RED = '#EF4444';
+const GRAY = '#6B7280';
+const GRAY_LIGHT = '#D1D5DB';
+const ORANGE_10 = 'rgba(255,106,0,0.1)';
+const ORANGE_20 = 'rgba(255,106,0,0.2)';
 
-const APP_VERSION = '1.0.0';
+// Following count has no backend model yet — always 0 until a follow API
+// exists.
+const FOLLOWING_COUNT = 0;
 
-// Same Pexels set as the Discover mock grid.
-const MOCK_DESIGN_IMAGES = [
-  'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/4488626/pexels-photo-4488626.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/4488637/pexels-photo-4488637.jpeg?auto=compress&cs=tinysrgb&w=300',
-];
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '?';
-  return (parts[0][0] + (parts[1]?.[0] ?? '')).toUpperCase();
+function getInitial(fullName: string): string {
+  const trimmed = fullName.trim();
+  return trimmed.length > 0 ? trimmed[0].toUpperCase() : '?';
 }
 
-function roleBio(role: string): string {
-  switch (role) {
-    case 'designer':
-      return 'Designer · sells 3D models on PrintForge';
-    case 'lab_staff':
-      return 'Lab staff · runs the campus print queue';
-    case 'admin':
-      return 'Administrator account';
-    default:
-      return 'University print account';
+function formatShortDate(iso: string | null): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function orderDisplayName(payment: Payment): string {
+  // Payment has no dedicated name field (src/api/payments.ts) — the
+  // closest identifier is the estimate it was paid against. Decoded in
+  // case it's ever a URI-encoded string; falls back to a friendly label.
+  const raw = payment.estimateId ? `Estimate #${payment.estimateId}` : 'Print order';
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return raw;
   }
 }
 
-function paymentStatusVisual(status: Payment['status'], colors: Colors) {
+type BadgeVisual = { bg: string; text: string; label: string };
+
+function paymentStatusVisual(status: Payment['status']): BadgeVisual {
   switch (status) {
     case 'COMPLETED':
-      return { bg: 'rgba(34, 197, 94, 0.15)', text: '#22C55E', label: 'Printed' };
+      return { bg: EMERALD_BG, text: EMERALD, label: 'Ready for Pickup' };
     case 'FAILED':
-      return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: 'Failed' };
+      return { bg: WHITE_10, text: WHITE_50, label: 'Failed' };
+    case 'PENDING':
     default:
-      return { bg: colors.primarySoft, text: colors.primary, label: 'Printing' };
+      return { bg: ORANGE_20, text: ORANGE, label: 'Printing' };
   }
 }
 
-export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
+const BENEFITS = [
+  {
+    icon: UploadCloud,
+    title: 'Upload & sell designs',
+    desc: 'Share your 3D prints with the university community',
+  },
+  {
+    icon: DollarSign,
+    title: 'Earn from every download',
+    desc: 'Set your prices and collect earnings directly',
+  },
+  {
+    icon: Users,
+    title: 'Build your following',
+    desc: 'Students can follow you and get notified of new drops',
+  },
+];
+
+function DarkModeToggle({ isDark, onToggle }: { isDark: boolean; onToggle: () => void }) {
+  const translateX = useRef(new Animated.Value(isDark ? 20 : 0)).current;
+
+  const toggle = () => {
+    Animated.timing(translateX, {
+      toValue: isDark ? 0 : 20,
+      duration: 200,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start();
+    onToggle();
+  };
+
+  return (
+    <TouchableOpacity
+      activeOpacity={1}
+      onPress={toggle}
+      style={[styles.toggleTrack, { backgroundColor: isDark ? ORANGE : WHITE_15 }]}
+    >
+      <Animated.View style={[styles.toggleKnob, { transform: [{ translateX }] }]} />
+    </TouchableOpacity>
+  );
+}
+
+function BecomeDesignerModal({
+  visible,
+  onClose,
+  onStartUploading,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onStartUploading: () => void;
+}) {
+  const slide = useRef(new Animated.Value(Dimensions.get('window').height)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(slide, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.ease),
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible, slide]);
+
+  const close = () => {
+    Animated.timing(slide, {
+      toValue: Dimensions.get('window').height,
+      duration: 300,
+      easing: Easing.out(Easing.ease),
+      useNativeDriver: true,
+    }).start(() => onClose());
+  };
+
+  if (!visible) return null;
+
+  return (
+    <View style={styles.modalOverlay}>
+      <Pressable style={styles.modalBackdrop} onPress={close} />
+      <Animated.View style={[styles.modalSheet, { transform: [{ translateY: slide }] }]}>
+        <View style={styles.dragHandle} />
+        <TouchableOpacity style={styles.modalCloseBtn} onPress={close}>
+          <X size={16} color={GRAY} />
+        </TouchableOpacity>
+
+        <View style={styles.modalIconCircle}>
+          <Sparkles size={32} color={ORANGE} />
+        </View>
+
+        <Text style={styles.modalTitle}>Become a Designer!</Text>
+        <Text style={styles.modalSubtitle}>Unlock the full PrintForge experience.</Text>
+
+        <View style={styles.benefitsContainer}>
+          {BENEFITS.map((b, i) => {
+            const Icon = b.icon;
+            return (
+              <View key={i} style={styles.benefitRow}>
+                <View style={styles.benefitIconCircle}>
+                  <Icon size={18} color={ORANGE} />
+                </View>
+                <View style={styles.benefitTextCol}>
+                  <Text style={styles.benefitTitle}>{b.title}</Text>
+                  <Text style={styles.benefitDesc}>{b.desc}</Text>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+
+        <Pressable
+          style={({ pressed }) => [styles.modalCta, pressed && styles.pressedScale]}
+          onPress={() => {
+            onStartUploading();
+            close();
+          }}
+        >
+          <Text style={styles.modalCtaText}>Start Uploading</Text>
+          <ChevronRight size={18} strokeWidth={2.5} color={WHITE} />
+        </Pressable>
+
+        <Pressable onPress={close} style={styles.maybeLaterBtn}>
+          <Text style={styles.maybeLaterText}>Maybe later</Text>
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+}
+
+export default function ProfileScreen() {
   const router = useRouter();
-  const { colors, isDark, toggleTheme } = useTheme();
-  const { jobs } = useJobs();
   const { appUser, role, signOut, token, authLoading } = useSession();
+  const { isDark, toggleTheme } = useTheme();
   const { showToast } = useToast();
 
-  const [notificationsEnabled, setNotificationsEnabled] = useState(true);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [upgradeOpen, setUpgradeOpen] = useState(false);
-
+  const [showModal, setShowModal] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
@@ -136,8 +247,6 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
 
   useEffect(() => {
     if (authLoading) return;
-    // Explicit guard (loadPayments() already checks this internally) so
-    // fetchMyPayments can never go out with a null token.
     if (!token) {
       setPayments([]);
       setPaymentsLoading(false);
@@ -146,12 +255,7 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
     loadPayments();
   }, [authLoading, token, loadPayments]);
 
-  const s = makeStyles(colors);
-
   const name = appUser?.full_name ?? 'PrintForge user';
-  const completedTotal = payments
-    .filter(p => p.status === 'COMPLETED')
-    .reduce((sum, p) => sum + p.amount, 0);
 
   const handleSignOut = async () => {
     await signOut();
@@ -159,734 +263,468 @@ export function ProfileContent({ embedded = false }: { embedded?: boolean }) {
   };
 
   return (
-    <SafeAreaView style={s.screen} edges={embedded ? [] : ['top']}>
-      <View style={s.topBar}>
-        <View style={s.topBarSpacer} />
-        <Text style={s.topBarTitle}>My Profile</Text>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={settingsOpen ? 'Hide settings' : 'Show settings'}
-          onPress={() => setSettingsOpen(v => !v)}
-          style={({ pressed }) => [s.topBarButton, pressed && s.pressed]}
-        >
-          <Settings size={21} color={settingsOpen ? colors.primary : colors.foreground} />
-        </Pressable>
-      </View>
-
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
-        <View style={s.headerRow}>
-          <View style={s.avatar}>
-            <Text style={s.avatarText}>{initialsOf(name)}</Text>
-          </View>
-          <View style={s.statsRow}>
-            <View style={s.statItem}>
-              <Text style={s.statValue}>0</Text>
-              <Text style={s.statLabel}>Designs</Text>
-            </View>
-            <View style={s.statItem}>
-              <Text style={s.statValue}>0</Text>
-              <Text style={s.statLabel}>Followers</Text>
-            </View>
-            <View style={s.statItem}>
-              <Text style={s.statValue}>0</Text>
-              <Text style={s.statLabel}>Following</Text>
-            </View>
-            {role === 'designer' ? (
-              <View style={s.statItem}>
-                <GhsAmount amount={completedTotal} size="sm" style={s.earningsValue} />
-                <Text style={s.statLabel}>Earnings</Text>
-              </View>
-            ) : null}
-          </View>
+    <View style={styles.screen}>
+      <SafeAreaView edges={['top']} style={styles.safeTop}>
+        <View style={styles.topBar}>
+          <Text style={styles.topBarTitle}>My Profile</Text>
         </View>
+      </SafeAreaView>
 
-        <Text style={s.userName}>{name}</Text>
-        <Text style={s.userBio}>{roleBio(role)}</Text>
-        {appUser?.email ? <Text style={s.userEmail}>{appUser.email}</Text> : null}
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => showToast('Profile editing is coming soon.')}
-          style={({ pressed }) => [s.editButton, pressed && s.pressed]}
-        >
-          <Text style={s.editButtonText}>Edit Profile</Text>
-        </Pressable>
-
-        {role === 'lab_staff' ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.push('/staff/queue')}
-            style={({ pressed }) => [s.queueRow, pressed && s.pressed]}
-          >
-            <View style={s.queueIcon}>
-              <Printer size={19} color={colors.primary} />
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.profileHeader}>
+          <View style={styles.avatarRow}>
+            <View style={styles.avatar}>
+              <Text style={styles.avatarInitials}>{getInitial(name)}</Text>
             </View>
-            <View style={s.queueCopy}>
-              <Text style={s.queueTitle}>Lab Queue</Text>
-              <Text style={s.queueSubtitle}>Review and approve student print jobs</Text>
-            </View>
-            <ChevronRight size={19} color={colors.mutedFg} />
-          </Pressable>
-        ) : null}
-
-        {/* My Orders — real payment history (same fetch as before). */}
-        <View style={s.sectionHeader}>
-          <ShoppingBag size={17} color={colors.primary} />
-          <Text style={s.sectionTitle}>My Orders</Text>
-        </View>
-        {paymentsLoading ? (
-          <View style={s.stateCard}>
-            <Text style={s.stateText}>Loading payment history…</Text>
-          </View>
-        ) : paymentsError ? (
-          <View style={s.stateCard}>
-            <Text style={s.stateText}>{paymentsError}</Text>
-            <Pressable
-              accessibilityRole="button"
-              onPress={loadPayments}
-              style={({ pressed }) => [s.retryButton, pressed && s.pressed]}
+            <TouchableOpacity
+              onPress={() => router.push('/(app)/following')}
+              style={styles.followingStat}
             >
-              <Text style={s.retryText}>Try again</Text>
-            </Pressable>
+              <Text style={styles.followingNumber}>{FOLLOWING_COUNT}</Text>
+              <Text style={styles.followingLabel}>Following</Text>
+            </TouchableOpacity>
           </View>
-        ) : payments.length === 0 ? (
-          <View style={s.stateCard}>
-            <Text style={s.stateTitle}>No orders yet</Text>
-            <Text style={s.stateText}>
-              Payments for your print orders will show up here once you check out.
-            </Text>
+
+          <Text style={styles.displayName}>{name}</Text>
+          <Text style={styles.subtitle}>University print account</Text>
+
+          <Pressable
+            style={({ pressed }) => [styles.editProfileBtn, pressed && styles.pressedScale]}
+            onPress={() => showToast('Profile editing is coming soon.')}
+          >
+            <Text style={styles.editProfileText}>Edit Profile</Text>
+          </Pressable>
+        </View>
+
+        <View style={styles.ordersSection}>
+          <View style={styles.ordersHeading}>
+            <ShoppingBag size={16} color={ORANGE} />
+            <Text style={styles.ordersHeadingText}>My Orders</Text>
           </View>
-        ) : (
-          <View style={s.ordersCard}>
-            {payments.map((payment, index) => {
-              const visual = paymentStatusVisual(payment.status, colors);
-              const date = payment.completedAt ?? payment.initiatedAt;
-              return (
-                <Pressable
-                  key={payment.id}
-                  accessibilityRole={payment.printJobId ? 'button' : undefined}
-                  disabled={!payment.printJobId}
-                  onPress={() =>
-                    payment.printJobId && router.push(`/jobs/${payment.printJobId}`)
-                  }
-                  style={({ pressed }) => [
-                    s.orderRow,
-                    index > 0 && s.orderRowBorder,
-                    pressed && s.orderRowPressed,
-                  ]}
-                >
-                  <View style={s.orderCopy}>
-                    <Text style={s.orderTitle}>
-                      {date ? new Date(date).toLocaleDateString() : 'Print order'}
-                    </Text>
-                    <View style={[s.orderBadge, { backgroundColor: visual.bg }]}>
-                      <Text style={[s.orderBadgeText, { color: visual.text }]}>{visual.label}</Text>
+
+          {paymentsLoading ? (
+            <Text style={styles.orderMeta}>Loading orders...</Text>
+          ) : paymentsError ? (
+            <Text style={styles.orderMeta}>{paymentsError}</Text>
+          ) : payments.length === 0 ? (
+            <Text style={styles.orderMeta}>No orders yet</Text>
+          ) : (
+            <View>
+              {payments.map((payment, idx) => {
+                const badge = paymentStatusVisual(payment.status);
+                const isLast = idx === payments.length - 1;
+                return (
+                  <TouchableOpacity
+                    key={payment.id}
+                    style={[styles.orderRow, !isLast && styles.orderRowBorder]}
+                  >
+                    <View style={styles.orderLeft}>
+                      <Text style={styles.orderName}>{orderDisplayName(payment)}</Text>
+                      <Text style={styles.orderMeta}>
+                        {formatShortDate(payment.initiatedAt)} · GH₵ {payment.amount.toFixed(2)}
+                      </Text>
                     </View>
-                  </View>
-                  <GhsAmount amount={payment.amount} size="sm" style={s.orderAmount} />
-                  <ChevronRight size={17} color={colors.mutedFg} />
-                </Pressable>
-              );
-            })}
+                    <View style={[styles.badge, { backgroundColor: badge.bg }]}>
+                      <Text style={[styles.badgeText, { color: badge.text }]}>
+                        {badge.label}
+                      </Text>
+                    </View>
+                    <ChevronRight size={16} color={WHITE_30} style={styles.orderChevron} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
+        </View>
+
+        {role === 'student' && (
+          <View style={styles.designerSection}>
+            <Pressable
+              style={({ pressed }) => [styles.designerBtn, pressed && styles.pressedScale]}
+              onPress={() => setShowModal(true)}
+            >
+              <Star size={18} color={WHITE} fill={WHITE} />
+              <Text style={styles.designerBtnText}>Become a Designer</Text>
+            </Pressable>
           </View>
         )}
 
-        {role === 'designer' ? (
-          <>
-            <View style={s.sectionHeader}>
-              <Grid3x3 size={17} color={colors.primary} />
-              <Text style={s.sectionTitle}>My Designs</Text>
-            </View>
-            <View style={s.designGrid}>
-              {MOCK_DESIGN_IMAGES.map(uri => (
-                <Image key={uri} source={{ uri }} style={s.designThumb} />
-              ))}
-            </View>
-          </>
-        ) : null}
+        <View style={styles.settingsSection}>
+          <View style={styles.settingsDivider} />
 
-        {role === 'student' ? (
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => setUpgradeOpen(true)}
-            style={({ pressed }) => [s.upgradeButton, pressed && s.pressed]}
+          <View style={styles.settingsRow}>
+            <View style={styles.settingsRowLeft}>
+              <Moon size={18} color="rgba(255,255,255,0.6)" />
+              <Text style={styles.settingsRowText}>Dark Mode</Text>
+            </View>
+            <DarkModeToggle isDark={isDark} onToggle={toggleTheme} />
+          </View>
+
+          <TouchableOpacity
+            style={styles.settingsRow}
+            onPress={() => showToast('Help center coming soon.')}
           >
-            <Star size={18} color="#FFFFFF" />
-            <Text style={s.upgradeButtonText}>Become a Designer</Text>
-          </Pressable>
-        ) : null}
-
-        {settingsOpen ? (
-          <>
-            <View style={s.sectionHeader}>
-              <Settings size={17} color={colors.primary} />
-              <Text style={s.sectionTitle}>Settings</Text>
+            <View style={styles.settingsRowLeft}>
+              <HelpCircle size={18} color="rgba(255,255,255,0.6)" />
+              <Text style={styles.settingsRowText}>Help & Support</Text>
             </View>
-            <View style={s.settingsCard}>
-              <View style={s.settingRow}>
-                <Bell size={18} color={colors.primary} />
-                <View style={s.settingCopy}>
-                  <Text style={s.settingLabel}>Order notifications</Text>
-                  <Text style={s.settingDescription}>Lab updates and pickup alerts</Text>
-                </View>
-                <Switch
-                  accessibilityLabel="Toggle order notifications"
-                  value={notificationsEnabled}
-                  onValueChange={setNotificationsEnabled}
-                  trackColor={{ false: colors.muted, true: colors.primary }}
-                  thumbColor={colors.white}
-                  ios_backgroundColor={colors.muted}
-                />
-              </View>
-              <View style={[s.settingRow, s.settingBorder]}>
-                {isDark ? (
-                  <Moon size={18} color={colors.primary} />
-                ) : (
-                  <Sun size={18} color={colors.primary} />
-                )}
-                <View style={s.settingCopy}>
-                  <Text style={s.settingLabel}>Dark mode</Text>
-                  <Text style={s.settingDescription}>
-                    {isDark ? 'Dark appearance enabled' : 'Light appearance enabled'}
-                  </Text>
-                </View>
-                <Switch
-                  accessibilityLabel="Toggle dark mode"
-                  value={isDark}
-                  onValueChange={toggleTheme}
-                  trackColor={{ false: colors.muted, true: colors.primary }}
-                  thumbColor={colors.white}
-                  ios_backgroundColor={colors.muted}
-                />
-              </View>
-              <SupportRow
-                icon={<CircleHelp size={18} color={colors.primary} />}
-                label="Contact PrintForge"
-                onPress={() => Linking.openURL('mailto:support@printforge.app')}
-                s={s}
-                colors={colors}
-              />
-              <SupportRow
-                icon={<Headphones size={18} color={colors.primary} />}
-                label="Support center"
-                onPress={() => Linking.openURL('https://printforge.app/support')}
-                s={s}
-                colors={colors}
-              />
-              <SupportRow
-                icon={<FileText size={18} color={colors.primary} />}
-                label="Terms and conditions"
-                onPress={() => Linking.openURL('https://printforge.app/terms')}
-                s={s}
-                colors={colors}
-              />
-              <SupportRow
-                icon={<Scale size={18} color={colors.primary} />}
-                label="Privacy policy"
-                onPress={() => Linking.openURL('https://printforge.app/privacy')}
-                s={s}
-                colors={colors}
-              />
+            <ChevronRight size={18} color={WHITE_30} />
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.settingsRow} onPress={handleSignOut}>
+            <View style={styles.settingsRowLeft}>
+              <LogOut size={18} color={RED} />
+              <Text style={[styles.settingsRowText, { color: RED }]}>Sign Out</Text>
             </View>
+          </TouchableOpacity>
 
-            <Pressable
-              accessibilityRole="button"
-              onPress={handleSignOut}
-              style={({ pressed }) => [s.signOutButton, pressed && s.pressed]}
-            >
-              <LogOut size={19} color={colors.destructive} />
-              <Text style={s.signOutText}>Sign out</Text>
-            </Pressable>
-          </>
-        ) : null}
-
-        <Text style={s.versionText}>PrintForge 3D · v{APP_VERSION}</Text>
+          <Text style={styles.versionText}>PrintForge 3D · v1.0.0</Text>
+        </View>
       </ScrollView>
 
-      {/* Upgrade modal — mock confirm only; there is no designer-upgrade
-          endpoint on the backend yet. */}
-      <Modal
-        visible={upgradeOpen}
-        transparent
-        animationType="slide"
-        presentationStyle="overFullScreen"
-        onRequestClose={() => setUpgradeOpen(false)}
-      >
-        <View style={s.modalOverlay}>
-          <Pressable style={s.modalDismiss} onPress={() => setUpgradeOpen(false)} />
-          <View style={s.modalSheet}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close"
-              onPress={() => setUpgradeOpen(false)}
-              style={s.modalClose}
-            >
-              <X size={20} color={colors.foreground} />
-            </Pressable>
-            <View style={s.modalIcon}>
-              <Sparkles size={30} color={colors.primary} />
-            </View>
-            <Text style={s.modalTitle}>Become a Designer</Text>
-            <View style={s.benefitList}>
-              <BenefitRow
-                icon={<CloudUpload size={20} color={colors.primary} />}
-                title="Upload & sell designs"
-                subtitle="Publish your models to the marketplace"
-                s={s}
-              />
-              <BenefitRow
-                icon={<DollarSign size={20} color={colors.primary} />}
-                title="Earn from every download"
-                subtitle="Set your price, get paid per order"
-                s={s}
-              />
-              <BenefitRow
-                icon={<Users size={20} color={colors.primary} />}
-                title="Build your following"
-                subtitle="Grow an audience around your work"
-                s={s}
-              />
-            </View>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => {
-                setUpgradeOpen(false);
-                showToast('Designer upgrade is coming soon — the backend endpoint isn’t live yet.');
-              }}
-              style={({ pressed }) => [s.modalCta, pressed && s.pressed]}
-            >
-              <Text style={s.modalCtaText}>Start Uploading →</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              onPress={() => setUpgradeOpen(false)}
-              style={({ pressed }) => pressed && s.pressed}
-            >
-              <Text style={s.modalLater}>Maybe later</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    </SafeAreaView>
-  );
-}
-
-export default function ProfileScreen() {
-  return <ProfileContent />;
-}
-
-function SupportRow({
-  icon,
-  label,
-  onPress,
-  s,
-  colors,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  onPress: () => void;
-  s: ReturnType<typeof makeStyles>;
-  colors: Colors;
-}) {
-  return (
-    <Pressable
-      accessibilityRole="button"
-      onPress={onPress}
-      style={({ pressed }) => [s.settingRow, s.settingBorder, pressed && s.orderRowPressed]}
-    >
-      {icon}
-      <View style={s.settingCopy}>
-        <Text style={s.settingLabel}>{label}</Text>
-      </View>
-      <ChevronRight size={17} color={colors.mutedFg} />
-    </Pressable>
-  );
-}
-
-function BenefitRow({
-  icon,
-  title,
-  subtitle,
-  s,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-  s: ReturnType<typeof makeStyles>;
-}) {
-  return (
-    <View style={s.benefitRow}>
-      <View style={s.benefitIcon}>{icon}</View>
-      <View style={s.benefitCopy}>
-        <Text style={s.benefitTitle}>{title}</Text>
-        <Text style={s.benefitSubtitle}>{subtitle}</Text>
-      </View>
+      <BecomeDesignerModal
+        visible={showModal}
+        onClose={() => setShowModal(false)}
+        onStartUploading={() => showToast('Designer upgrade coming soon')}
+      />
     </View>
   );
 }
 
-function makeStyles(colors: Colors) {
-  return StyleSheet.create({
-    screen: { flex: 1, backgroundColor: colors.background },
-    pressed: { opacity: 0.72 },
-    topBar: {
-      minHeight: 56,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      paddingHorizontal: designTokens.spacing.lg,
-    },
-    topBarSpacer: { width: 40 },
-    topBarTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 18,
-    },
-    topBarButton: {
-      width: 40,
-      height: 40,
-      borderRadius: 20,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    content: {
-      paddingHorizontal: designTokens.spacing.lg,
-      paddingBottom: 56,
-    },
-    headerRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: designTokens.spacing.xl,
-      marginBottom: designTokens.spacing.md,
-    },
-    avatar: {
-      width: 80,
-      height: 80,
-      borderRadius: 40,
-      backgroundColor: colors.primarySoft,
-      borderWidth: 2,
-      borderColor: 'rgba(255, 106, 0, 0.3)',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    avatarText: {
-      color: colors.primary,
-      fontFamily: designTokens.type.display,
-      fontSize: 26,
-    },
-    statsRow: {
-      flex: 1,
-      flexDirection: 'row',
-      justifyContent: 'space-around',
-      alignItems: 'center',
-    },
-    statItem: { alignItems: 'center', gap: 2 },
-    statValue: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 18,
-    },
-    earningsValue: { color: '#FF6A00', fontSize: 15, fontFamily: designTokens.type.heading },
-    statLabel: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 10,
-    },
-    userName: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 19,
-    },
-    userBio: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 12,
-      marginTop: 3,
-    },
-    userEmail: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
-      marginTop: 2,
-    },
-    editButton: {
-      minHeight: 44,
-      borderRadius: 14,
-      backgroundColor: 'transparent',
-      borderWidth: 1.5,
-      borderColor: colors.foreground,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginTop: designTokens.spacing.md,
-      marginBottom: designTokens.spacing.lg,
-    },
-    editButtonText: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 13,
-    },
-    queueRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: designTokens.spacing.md,
-      borderRadius: designTokens.radius.lg,
-      backgroundColor: colors.card,
-      padding: designTokens.spacing.md,
-      marginBottom: designTokens.spacing.md,
-    },
-    queueIcon: {
-      width: 40,
-      height: 40,
-      borderRadius: 13,
-      backgroundColor: colors.primarySoft,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    queueCopy: { flex: 1 },
-    queueTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 14,
-    },
-    queueSubtitle: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
-      marginTop: 2,
-    },
-    sectionHeader: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-      marginTop: designTokens.spacing.md,
-      marginBottom: designTokens.spacing.sm,
-    },
-    sectionTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 16,
-    },
-    stateCard: {
-      borderRadius: designTokens.radius.lg,
-      backgroundColor: colors.card,
-      alignItems: 'center',
-      padding: designTokens.spacing.xl,
-      gap: 6,
-    },
-    stateTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 14,
-    },
-    stateText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 12,
-      textAlign: 'center',
-    },
-    retryButton: {
-      marginTop: 6,
-      minHeight: 36,
-      borderRadius: designTokens.radius.pill,
-      borderWidth: 1,
-      borderColor: colors.primary,
-      paddingHorizontal: designTokens.spacing.lg,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    retryText: {
-      color: colors.primary,
-      fontFamily: designTokens.type.heading,
-      fontSize: 12,
-    },
-    ordersCard: {
-      borderRadius: designTokens.radius.lg,
-      backgroundColor: colors.card,
-      overflow: 'hidden',
-    },
-    orderRow: {
-      minHeight: 60,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: designTokens.spacing.md,
-      paddingHorizontal: designTokens.spacing.md,
-    },
-    orderRowBorder: { borderTopWidth: 1, borderTopColor: colors.border },
-    orderRowPressed: { backgroundColor: colors.secondary },
-    orderCopy: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 9 },
-    orderTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.medium,
-      fontSize: 13,
-    },
-    orderBadge: {
-      borderRadius: designTokens.radius.pill,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-    },
-    orderBadgeText: {
-      fontFamily: designTokens.type.heading,
-      fontSize: 9,
-    },
-    orderAmount: { color: colors.mutedFg },
-    designGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 6,
-    },
-    designThumb: {
-      width: '32%',
-      aspectRatio: 1,
-      borderRadius: 14,
-      backgroundColor: colors.cardElevated,
-    },
-    upgradeButton: {
-      minHeight: 50,
-      borderRadius: 12,
-      backgroundColor: colors.primary,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 9,
-      marginTop: designTokens.spacing.xl,
-    },
-    upgradeButtonText: {
-      color: '#FFFFFF',
-      fontFamily: designTokens.type.heading,
-      fontSize: 15,
-    },
-    settingsCard: {
-      borderRadius: designTokens.radius.lg,
-      backgroundColor: colors.card,
-      overflow: 'hidden',
-    },
-    settingRow: {
-      minHeight: 62,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: designTokens.spacing.md,
-      paddingHorizontal: designTokens.spacing.md,
-    },
-    settingBorder: { borderTopWidth: 1, borderTopColor: colors.border },
-    settingCopy: { flex: 1, minWidth: 0 },
-    settingLabel: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.medium,
-      fontSize: 13,
-    },
-    settingDescription: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
-      marginTop: 2,
-    },
-    signOutButton: {
-      minHeight: 50,
-      borderRadius: designTokens.radius.md,
-      borderWidth: 1,
-      borderColor: colors.statusFailed.dot,
-      backgroundColor: colors.statusFailed.bg,
-      flexDirection: 'row',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 8,
-      marginTop: designTokens.spacing.lg,
-    },
-    signOutText: {
-      color: colors.destructive,
-      fontFamily: designTokens.type.heading,
-      fontSize: 14,
-    },
-    versionText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
-      textAlign: 'center',
-      marginTop: designTokens.spacing.xl,
-    },
-
-    modalOverlay: {
-      flex: 1,
-      backgroundColor: colors.overlay,
-      justifyContent: 'flex-end',
-    },
-    modalDismiss: { flex: 1 },
-    modalSheet: {
-      backgroundColor: colors.card,
-      borderTopLeftRadius: 28,
-      borderTopRightRadius: 28,
-      padding: designTokens.spacing.xxl,
-      paddingBottom: 40,
-      alignItems: 'center',
-    },
-    modalClose: {
-      position: 'absolute',
-      top: 14,
-      right: 14,
-      width: 36,
-      height: 36,
-      borderRadius: 18,
-      backgroundColor: colors.muted,
-      alignItems: 'center',
-      justifyContent: 'center',
-      zIndex: 1,
-    },
-    modalIcon: {
-      width: 64,
-      height: 64,
-      borderRadius: 20,
-      backgroundColor: colors.primarySoft,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: designTokens.spacing.md,
-    },
-    modalTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.display,
-      fontSize: 23,
-      marginBottom: designTokens.spacing.lg,
-    },
-    benefitList: { alignSelf: 'stretch', gap: designTokens.spacing.md, marginBottom: designTokens.spacing.xl },
-    benefitRow: { flexDirection: 'row', alignItems: 'center', gap: designTokens.spacing.md },
-    benefitIcon: {
-      width: 44,
-      height: 44,
-      borderRadius: 14,
-      backgroundColor: colors.primarySoft,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    benefitCopy: { flex: 1 },
-    benefitTitle: {
-      color: colors.foreground,
-      fontFamily: designTokens.type.heading,
-      fontSize: 14,
-    },
-    benefitSubtitle: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 11,
-      marginTop: 2,
-    },
-    modalCta: {
-      alignSelf: 'stretch',
-      minHeight: 50,
-      borderRadius: 12,
-      backgroundColor: colors.primary,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginBottom: designTokens.spacing.sm,
-    },
-    modalCtaText: {
-      color: '#FFFFFF',
-      fontFamily: designTokens.type.heading,
-      fontSize: 15,
-    },
-    modalLater: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.heading,
-      fontSize: 13,
-      padding: 8,
-    },
-  });
-}
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: NAVY,
+  },
+  safeTop: {
+    backgroundColor: NAVY,
+  },
+  topBar: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  topBarTitle: {
+    textAlign: 'center',
+    fontSize: 16,
+    fontWeight: '800',
+    color: WHITE,
+  },
+  scrollContent: {
+    paddingBottom: 96,
+  },
+  profileHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 16,
+  },
+  avatarRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    backgroundColor: NAVY_LIGHT,
+    borderWidth: 2,
+    borderColor: ORANGE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  avatarInitials: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: ORANGE,
+  },
+  followingStat: {},
+  followingNumber: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: WHITE,
+    lineHeight: 28,
+  },
+  followingLabel: {
+    fontSize: 11,
+    color: WHITE_50,
+    marginTop: 4,
+  },
+  displayName: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: WHITE,
+    marginTop: 16,
+    marginBottom: 2,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: WHITE_50,
+    marginBottom: 16,
+  },
+  editProfileBtn: {
+    alignSelf: 'center',
+    width: '60%',
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  editProfileText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: WHITE,
+  },
+  ordersSection: {
+    marginTop: 24,
+    paddingHorizontal: 20,
+  },
+  ordersHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  ordersHeadingText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: WHITE,
+    marginLeft: 8,
+  },
+  orderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 14,
+  },
+  orderRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: WHITE_8,
+  },
+  orderLeft: {
+    flex: 1,
+  },
+  orderName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: WHITE,
+  },
+  orderMeta: {
+    fontSize: 11,
+    color: WHITE_50,
+    marginTop: 2,
+  },
+  badge: {
+    borderRadius: 9999,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  orderChevron: {
+    marginLeft: 8,
+  },
+  designerSection: {
+    marginTop: 32,
+    paddingHorizontal: 20,
+  },
+  designerBtn: {
+    alignSelf: 'center',
+    width: '80%',
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: ORANGE,
+    shadowColor: ORANGE,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  designerBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: WHITE,
+  },
+  settingsSection: {
+    marginTop: 24,
+    paddingHorizontal: 20,
+  },
+  settingsDivider: {
+    height: 1,
+    backgroundColor: WHITE_10,
+    marginBottom: 16,
+  },
+  settingsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  settingsRowLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  settingsRowText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: WHITE,
+    marginLeft: 12,
+  },
+  toggleTrack: {
+    width: 44,
+    height: 24,
+    borderRadius: 9999,
+    padding: 2,
+    justifyContent: 'center',
+  },
+  toggleKnob: {
+    width: 20,
+    height: 20,
+    borderRadius: 9999,
+    backgroundColor: WHITE,
+  },
+  versionText: {
+    fontSize: 11,
+    color: WHITE_30,
+    textAlign: 'center',
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  pressedScale: {
+    transform: [{ scale: 0.98 }],
+  },
+  modalOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
+    justifyContent: 'flex-end',
+  },
+  modalBackdrop: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  modalSheet: {
+    backgroundColor: WHITE,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 24,
+    paddingTop: 16,
+    paddingBottom: 32,
+  },
+  dragHandle: {
+    width: 40,
+    height: 4,
+    borderRadius: 9999,
+    backgroundColor: GRAY_LIGHT,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalCloseBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 9999,
+    backgroundColor: 'rgba(10,24,46,0.05)',
+    alignSelf: 'flex-end',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalIconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 9999,
+    backgroundColor: ORANGE_10,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    color: NAVY,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  modalSubtitle: {
+    fontSize: 14,
+    color: GRAY,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  benefitsContainer: {
+    gap: 12,
+  },
+  benefitRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  benefitIconCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: ORANGE_10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  benefitTextCol: {
+    flex: 1,
+  },
+  benefitTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: NAVY,
+  },
+  benefitDesc: {
+    fontSize: 12,
+    color: GRAY,
+    lineHeight: 18,
+    marginTop: 2,
+  },
+  modalCta: {
+    width: '100%',
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: ORANGE,
+    shadowColor: ORANGE,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 24,
+    marginBottom: 8,
+  },
+  modalCtaText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: WHITE,
+  },
+  maybeLaterBtn: {
+    paddingVertical: 8,
+  },
+  maybeLaterText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: GRAY,
+    textAlign: 'center',
+  },
+});
