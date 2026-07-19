@@ -1,9 +1,8 @@
 [phases.setup]
-cmds = ["apt-get update && apt-get install -y maven"]
+nixPkgs = ["jdk21"]
 
 [phases.build]
-dependsOn = ["setup"]
-cmds = ["./mvnw clean package -DskipTests"]
+cmds = ["mvn clean package -DskipTests"]
 
-[phases.start]
-cmd = "java -Xmx400m -Xss512k -XX:+UseContainerSupport -Dserver.port=$PORT -jar target/*.jar"
+[start]
+cmd = "java -Xmx400m -Dserver.port=$PORT -jar target/printforge-0.0.1-SNAPSHOT.jar"
