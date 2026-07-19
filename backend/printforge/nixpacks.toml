@@ -2,7 +2,7 @@
 nixPkgs = ["jdk21"]
 
 [phases.build]
-cmds = ["mvn clean package -DskipTests"]
+cmds = ["./mvnw clean package -DskipTests"]
 
 [start]
-cmd = "java -Xmx400m -Dserver.port=$PORT -jar target/printforge-0.0.1-SNAPSHOT.jar"
+cmd = "java -Xmx400m -Xss512k -XX:+UseContainerSupport -Dserver.port=$PORT -jar target/*.jar"
