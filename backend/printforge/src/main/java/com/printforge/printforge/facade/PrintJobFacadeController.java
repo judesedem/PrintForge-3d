@@ -7,6 +7,9 @@ import com.printforge.printforge.estimateservice.service.EstimateService;
 import com.printforge.printforge.facade.dto.PrintJobResponse;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.service.FileService;
+import com.printforge.printforge.labservice.dto.LabLocationSummary;
+import com.printforge.printforge.labservice.model.LabLocation;
+import com.printforge.printforge.labservice.service.LabLocationService;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
@@ -26,6 +29,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -54,6 +60,7 @@ public class PrintJobFacadeController {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final DesignListingRepository designListingRepository;
+    private final LabLocationService labLocationService;
 
     public PrintJobFacadeController(
             FileService fileService,
@@ -63,7 +70,8 @@ public class PrintJobFacadeController {
             EstimateRepository estimateRepository,
             UserRepository userRepository,
             NotificationService notificationService,
-            DesignListingRepository designListingRepository) {
+            DesignListingRepository designListingRepository,
+            LabLocationService labLocationService) {
         this.fileService = fileService;
         this.estimateService = estimateService;
         this.printQueueService = printQueueService;
@@ -72,6 +80,7 @@ public class PrintJobFacadeController {
         this.userRepository = userRepository;
         this.notificationService = notificationService;
         this.designListingRepository = designListingRepository;
+        this.labLocationService = labLocationService;
     }
 
     // ── Marketplace Order (JSON body with listing_id) ─────────────────────────
@@ -217,6 +226,40 @@ public class PrintJobFacadeController {
         return ResponseEntity.ok(responses);
     }
 
+    // ── Staff Queue View (grouped by status) ─────────────────────────────────
+
+    private static final List<String> QUEUE_STATUSES =
+            List.of("SUBMITTED", "APPROVED", "PRINTING", "READY", "COLLECTED");
+
+    @PreAuthorize("hasAnyRole('LAB_STAFF', 'ADMIN')")
+    @GetMapping("/queue")
+    public ResponseEntity<Map<String, List<PrintJobResponse>>> getQueueView() {
+        // Pre-seed every group so an empty status still comes back as [],
+        // not a missing key — the frontend can render all 5 columns
+        // unconditionally.
+        Map<String, List<PrintJobResponse>> grouped = new LinkedHashMap<>();
+        for (String status : QUEUE_STATUSES) {
+            grouped.put(status, new ArrayList<>());
+        }
+
+        printJobRepository.findAll().stream()
+                .filter(job -> QUEUE_STATUSES.contains(job.getStatus()))
+                // Sorting the flat list first (rather than sorting each group
+                // separately) and then appending into buckets preserves FIFO
+                // order within each group just the same, with one pass.
+                .sorted(Comparator.comparing(
+                        PrintJob::getSubmittedAt,
+                        Comparator.nullsLast(Comparator.naturalOrder())))
+                .forEach(job -> {
+                    ModelFile file = safeGetFile(job.getFileId());
+                    User owner = safeGetUser(job.getUserId());
+                    Estimate estimate = safeGetEstimate(job.getEstimateId());
+                    grouped.get(job.getStatus()).add(toResponse(job, file, owner, estimate));
+                });
+
+        return ResponseEntity.ok(grouped);
+    }
+
     // ── Get Single Job ───────────────────────────────────────────────────────
 
     @GetMapping("/{jobId}")
@@ -267,6 +310,9 @@ public class PrintJobFacadeController {
 
         PrintJob updatedJob = printQueueService.updateJobStatus(
                 jobId, "APPROVED", printerId, null, null);
+
+        labLocationService.getActiveLab().map(LabLocation::getId).ifPresent(updatedJob::setLabLocationId);
+        updatedJob = printJobRepository.save(updatedJob);
 
         notificationService.createNotification(
                 job.getUserId(),
@@ -362,6 +408,12 @@ public class PrintJobFacadeController {
                 r.setEstimatedTime(estimate.getDurationMinutes().intValue());
             }
         }
+
+        if (job.getLabLocationId() != null) {
+            labLocationService.findById(job.getLabLocationId())
+                    .ifPresent(lab -> r.setPickupLocation(LabLocationSummary.from(lab)));
+        }
+
         return r;
     }
 

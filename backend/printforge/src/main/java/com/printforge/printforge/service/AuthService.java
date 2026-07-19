@@ -3,11 +3,13 @@ package com.printforge.printforge.service;
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.dto.UpdateProfileRequest;
 import com.printforge.printforge.dto.UserDto;
 import com.printforge.printforge.entity.Role;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.exception.EmailAlreadyExistsException;
 import com.printforge.printforge.exception.InvalidCredentialsException;
+import com.printforge.printforge.exception.InvalidProfileInputException;
 import com.printforge.printforge.exception.InvalidRoleException;
 import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.security.JwtService;
@@ -139,12 +141,79 @@ public class AuthService {
         return toUserDto(user);
     }
 
+    /**
+     * Self-service upgrade for POST /api/auth/upgrade-to-designer. Only
+     * valid from STUDENT — designers/staff/admins calling this again is
+     * treated as a client error rather than a silent no-op, so the frontend
+     * gets a clear signal instead of a misleadingly-"successful" response
+     * that changed nothing.
+     */
+    public UserDto upgradeToDesigner(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        if (user.getRole() != Role.STUDENT) {
+            throw new InvalidRoleException(
+                    "Only student accounts can be upgraded to designer. Current role: "
+                            + user.getRole().name().toLowerCase());
+        }
+
+        user.setRole(Role.DESIGNER);
+        User saved = userRepository.save(user);
+        return toUserDto(saved);
+    }
+
+    /**
+     * PATCH /api/auth/profile. Always returns a fresh AuthResponse (token +
+     * user) rather than conditionally shaping the response on whether email
+     * changed — a harmless re-issued token when only fullName changes, but
+     * a consistent response shape for the frontend either way. The email
+     * itself IS the JWT subject (see JwtService/JwtAuthFilter), so a changed
+     * email requires a new token — the old one would resolve to a user that
+     * no longer exists under that email.
+     */
+    public AuthResponse updateProfile(String currentEmail, UpdateProfileRequest request) {
+        User user = userRepository.findByEmail(currentEmail)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        if (request.getFullName() != null) {
+            String trimmed = request.getFullName().trim();
+            if (trimmed.isEmpty()) {
+                throw new InvalidProfileInputException("Full name cannot be blank");
+            }
+            if (trimmed.length() > 100) {
+                throw new InvalidProfileInputException("Full name cannot exceed 100 characters");
+            }
+            user.setFullName(trimmed);
+        }
+
+        if (request.getEmail() != null) {
+            String normalized = request.getEmail().trim().toLowerCase();
+            if (normalized.isEmpty()) {
+                throw new InvalidProfileInputException("Email cannot be blank");
+            }
+            if (!normalized.equals(user.getEmail()) && userRepository.existsByEmail(normalized)) {
+                throw new EmailAlreadyExistsException("Email already registered");
+            }
+            user.setEmail(normalized);
+        }
+
+        User saved = userRepository.save(user);
+        String token = jwtService.generateToken(saved.getEmail());
+
+        return AuthResponse.builder()
+                .token(token)
+                .user(toUserDto(saved))
+                .build();
+    }
+
     private UserDto toUserDto(User user) {
         return UserDto.builder()
                 .user_id(user.getUserId())
                 .full_name(user.getFullName())
                 .email(user.getEmail())
                 .role(user.getRole().name().toLowerCase())
+                .profile_picture_url(user.getProfilePictureUrl())
                 .build();
     }
 }

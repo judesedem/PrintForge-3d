@@ -28,6 +28,16 @@ public class DesignListing {
 
     private String thumbnailUrl;
 
+    // Links the thumbnail back to its ModelFile/image record (the id
+    // returned by POST /api/files/upload/image). Nullable — older listings
+    // and listings created with just a raw thumbnailUrl won't have this.
+    private String thumbnailFileId;
+
+    // One of GEARS, DRONES, ENCLOSURES, MINIATURES, ARTICULATED, OTHER —
+    // validated in MarketplaceController. Nullable for listings created
+    // before this field existed.
+    private String category;
+
     // "DRAFT" or "PUBLISHED"
     private String status;
 
@@ -40,12 +50,31 @@ public class DesignListing {
     @Column(precision = 10, scale = 2)
     private BigDecimal totalEarnings = BigDecimal.ZERO;
 
+    private Integer favoriteCount = 0;
+
+    // Populated by the controller/service from the User referenced by
+    // designerId, right before serialization — not persisted. Lets every
+    // listing response include who made it without turning designerId into
+    // a full JPA relationship.
+    @Transient
+    private String designerName;
+
+    @Transient
+    private String designerAvatar;
+
+    // Per-caller: whether the currently authenticated user has favorited
+    // this listing. Computed by the controller, not persisted — same
+    // pattern as designerName/designerAvatar above.
+    @Transient
+    private Boolean isFavorited;
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
         if (this.status == null) this.status = "DRAFT";
         if (this.totalOrders == null) this.totalOrders = 0;
         if (this.totalEarnings == null) this.totalEarnings = BigDecimal.ZERO;
+        if (this.favoriteCount == null) this.favoriteCount = 0;
     }
 
     // Getters and setters
@@ -70,6 +99,18 @@ public class DesignListing {
     public String getThumbnailUrl() { return thumbnailUrl; }
     public void setThumbnailUrl(String thumbnailUrl) { this.thumbnailUrl = thumbnailUrl; }
 
+    public String getThumbnailFileId() { return thumbnailFileId; }
+    public void setThumbnailFileId(String thumbnailFileId) { this.thumbnailFileId = thumbnailFileId; }
+
+    public String getCategory() { return category; }
+    public void setCategory(String category) { this.category = category; }
+
+    public String getDesignerName() { return designerName; }
+    public void setDesignerName(String designerName) { this.designerName = designerName; }
+
+    public String getDesignerAvatar() { return designerAvatar; }
+    public void setDesignerAvatar(String designerAvatar) { this.designerAvatar = designerAvatar; }
+
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
 
@@ -84,4 +125,10 @@ public class DesignListing {
 
     public BigDecimal getTotalEarnings() { return totalEarnings; }
     public void setTotalEarnings(BigDecimal totalEarnings) { this.totalEarnings = totalEarnings; }
+
+    public Integer getFavoriteCount() { return favoriteCount; }
+    public void setFavoriteCount(Integer favoriteCount) { this.favoriteCount = favoriteCount; }
+
+    public Boolean getIsFavorited() { return isFavorited; }
+    public void setIsFavorited(Boolean isFavorited) { this.isFavorited = isFavorited; }
 }

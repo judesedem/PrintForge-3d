@@ -33,6 +33,9 @@ public class PrintJob {
     private String operatorNotes;
     private String shippingTrackingNumber;
 
+    // Set when the job is approved, from the currently active LabLocation.
+    private Long labLocationId;
+
     // Timeline
     private LocalDateTime submittedAt;
     private LocalDateTime startedAt;
@@ -87,6 +90,9 @@ public class PrintJob {
 
     public String getShippingTrackingNumber() { return shippingTrackingNumber; }
     public void setShippingTrackingNumber(String shippingTrackingNumber) { this.shippingTrackingNumber = shippingTrackingNumber; }
+
+    public Long getLabLocationId() { return labLocationId; }
+    public void setLabLocationId(Long labLocationId) { this.labLocationId = labLocationId; }
 
     public LocalDateTime getSubmittedAt() { return submittedAt; }
     public void setSubmittedAt(LocalDateTime submittedAt) { this.submittedAt = submittedAt; }

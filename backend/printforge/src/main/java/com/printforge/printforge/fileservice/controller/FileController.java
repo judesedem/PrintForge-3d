@@ -1,6 +1,7 @@
 package com.printforge.printforge.fileservice.controller;
 
 import com.printforge.printforge.entity.User;
+import com.printforge.printforge.fileservice.dto.ImageUploadResponse;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.service.FileService;
 import com.printforge.printforge.repository.UserRepository;
@@ -47,6 +48,21 @@ public class FileController {
         Long uploaderId = currentUser(authentication).getUserId();
         ModelFile savedFile = fileService.saveFileMetadata(file, uploaderId);
         return ResponseEntity.ok(savedFile);
+    }
+
+    // POST /api/files/upload/image — multipart/form-data with a "file" part.
+    // Images only (jpeg/png/webp); stored under printforge/images in
+    // Cloudinary, separate from the general model-file folder. Any
+    // authenticated user may call this (profile pictures, listing
+    // thumbnails, etc. all share this endpoint).
+    @PostMapping(value = "/upload/image", consumes = "multipart/form-data")
+    public ResponseEntity<ImageUploadResponse> uploadImage(
+            @RequestParam("file") MultipartFile file,
+            Authentication authentication) {
+
+        Long uploaderId = currentUser(authentication).getUserId();
+        ModelFile savedFile = fileService.saveImageMetadata(file, uploaderId);
+        return ResponseEntity.ok(ImageUploadResponse.from(savedFile));
     }
 
     // GET /api/files/{id} — metadata only. Requires the caller to be the

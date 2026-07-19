@@ -29,4 +29,16 @@ public class User {
     @Enumerated(EnumType.STRING)
     @Column(name = "role", nullable = false)
     private Role role;
+
+    // Cloudinary URL of the user's avatar/profile picture, set via
+    // POST /api/users/profile-picture. Nullable — most users won't have
+    // one, and existing rows predate this column.
+    @Column(name = "profile_picture_url")
+    private String profilePictureUrl;
+
+    // Cloudinary public_id for the current profile picture asset — needed
+    // to destroy() the old asset when a new one is uploaded, so orphaned
+    // images don't pile up in the Cloudinary account.
+    @Column(name = "profile_picture_public_id")
+    private String profilePicturePublicId;
 }

@@ -1,6 +1,8 @@
 package com.printforge.printforge.facade.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.printforge.printforge.labservice.dto.LabLocationSummary;
 
 /**
  * Maps PrintJob + enrichment data to the exact shape the frontend's
@@ -45,6 +47,10 @@ public class PrintJobResponse {
 
     private String notes;
 
+    @JsonProperty("pickup_location")
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private LabLocationSummary pickupLocation;
+
     // ── Getters and setters ──────────────────────────────────────────────
 
     public String getJobId() { return jobId; }
@@ -88,4 +94,7 @@ public class PrintJobResponse {
 
     public String getNotes() { return notes; }
     public void setNotes(String notes) { this.notes = notes; }
+
+    public LabLocationSummary getPickupLocation() { return pickupLocation; }
+    public void setPickupLocation(LabLocationSummary pickupLocation) { this.pickupLocation = pickupLocation; }
 }

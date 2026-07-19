@@ -3,6 +3,7 @@ package com.printforge.printforge.controller;
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.dto.UpdateProfileRequest;
 import com.printforge.printforge.dto.UserDto;
 import com.printforge.printforge.service.AuthService;
 import jakarta.validation.Valid;
@@ -44,11 +45,32 @@ public class AuthController {
         return ResponseEntity.ok(response);
     }
 
+    @PatchMapping("/profile")
+    public ResponseEntity<AuthResponse> updateProfile(
+            @Valid @RequestBody UpdateProfileRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        AuthResponse response = authService.updateProfile(userDetails.getUsername(), request);
+        return ResponseEntity.ok(response);
+    }
+
     @PostMapping("/logout")
     public ResponseEntity<Void> logout() {
         // Stateless JWT — nothing to invalidate server-side.
         // Client deletes its stored token; this endpoint just exists
         // so the frontend's logout call doesn't 404.
         return ResponseEntity.ok().build();
+    }
+
+    // Self-service STUDENT → DESIGNER upgrade. The JWT itself doesn't carry
+    // the role (JwtAuthFilter re-resolves authorities from the DB on every
+    // request via UserDetailsService), so the caller's very next request
+    // is already authorized as DESIGNER — no re-login needed.
+    @PostMapping("/upgrade-to-designer")
+    public ResponseEntity<UserDto> upgradeToDesigner(
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        UserDto response = authService.upgradeToDesigner(userDetails.getUsername());
+        return ResponseEntity.ok(response);
     }
 }

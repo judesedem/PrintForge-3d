@@ -4,6 +4,7 @@ import java.util.List;
 
 import org.springframework.stereotype.Service;
 
+import com.printforge.printforge.dto.UpdateJobRequest;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.repository.JobServicePrintJobRepository;
 
@@ -27,64 +28,27 @@ public class PrintJobService {
         return printJobRepository.findAll();
     }
 
+    public List<PrintJob> getJobsForUser(Long userId) {
+        return printJobRepository.findByUserId(userId);
+    }
+
     public PrintJob getPrintJobById(Long id) {
         return printJobRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Print job not found with id: " + id));
     }
 
-    public PrintJob updatePrintJob(Long id, PrintJob updatedJob) {
+    // Caller-editable fields only — see UpdateJobRequest for why status,
+    // assignedPrinter, operatorNotes, trackingNumber, estimateId, and userId
+    // are excluded from this allowlist.
+    public PrintJob updateJobFields(Long id, UpdateJobRequest request) {
         PrintJob existingJob = getPrintJobById(id);
 
-        if (updatedJob.getFileId() != null) {
-            existingJob.setFileId(updatedJob.getFileId());
+        if (request.getNotes() != null) {
+            existingJob.setNotes(request.getNotes());
         }
 
-        if (updatedJob.getEstimateId() != null) {
-            existingJob.setEstimateId(updatedJob.getEstimateId());
-        }
-
-        if (updatedJob.getUserId() != null) {
-            existingJob.setUserId(updatedJob.getUserId());
-        }
-
-        if (updatedJob.getMaterial() != null) {
-            existingJob.setMaterial(updatedJob.getMaterial());
-        }
-
-        if (updatedJob.getColor() != null) {
-            existingJob.setColor(updatedJob.getColor());
-        }
-
-        if (updatedJob.getQuantity() != null) {
-            existingJob.setQuantity(updatedJob.getQuantity());
-        }
-
-        if (updatedJob.getInfill() != null) {
-            existingJob.setInfill(updatedJob.getInfill());
-        }
-
-        if (updatedJob.getQuality() != null) {
-            existingJob.setQuality(updatedJob.getQuality());
-        }
-
-        if (updatedJob.getNotes() != null) {
-            existingJob.setNotes(updatedJob.getNotes());
-        }
-
-        if (updatedJob.getStatus() != null) {
-            existingJob.setStatus(updatedJob.getStatus());
-        }
-
-        if (updatedJob.getAssignedPrinter() != null) {
-            existingJob.setAssignedPrinter(updatedJob.getAssignedPrinter());
-        }
-
-        if (updatedJob.getOperatorNotes() != null) {
-            existingJob.setOperatorNotes(updatedJob.getOperatorNotes());
-        }
-
-        if (updatedJob.getShippingTrackingNumber() != null) {
-            existingJob.setShippingTrackingNumber(updatedJob.getShippingTrackingNumber());
+        if (request.getColor() != null) {
+            existingJob.setColor(request.getColor());
         }
 
         return printJobRepository.save(existingJob);

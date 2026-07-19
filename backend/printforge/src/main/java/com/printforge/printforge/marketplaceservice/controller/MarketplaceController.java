@@ -4,9 +4,14 @@ import com.printforge.printforge.entity.User;
 import com.printforge.printforge.estimateservice.model.Estimate;
 import com.printforge.printforge.estimateservice.service.EstimateService;
 import com.printforge.printforge.fileservice.storage.FileStorageService;
+import com.printforge.printforge.marketplaceservice.exception.AlreadyFavoritedException;
+import com.printforge.printforge.marketplaceservice.exception.FavoriteNotFoundException;
+import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
+import com.printforge.printforge.marketplaceservice.model.Favorite;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
+import com.printforge.printforge.marketplaceservice.repository.FavoriteRepository;
 import com.printforge.printforge.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -21,6 +26,8 @@ import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Marketplace storefront — designers list models, customers browse and get quotes.
@@ -42,22 +49,36 @@ public class MarketplaceController {
     private final EstimateService estimateService;
     private final FileStorageService fileStorageService;
     private final UserRepository userRepository;
+    private final FavoriteRepository favoriteRepository;
 
     public MarketplaceController(DesignListingRepository listingRepository,
                                   EstimateService estimateService,
                                   FileStorageService fileStorageService,
-                                  UserRepository userRepository) {
+                                  UserRepository userRepository,
+                                  FavoriteRepository favoriteRepository) {
         this.listingRepository = listingRepository;
         this.estimateService = estimateService;
         this.fileStorageService = fileStorageService;
         this.userRepository = userRepository;
+        this.favoriteRepository = favoriteRepository;
     }
 
     // ── Public Storefront ────────────────────────────────────────────────────
 
     @GetMapping
-    public ResponseEntity<List<DesignListing>> getStorefront() {
-        return ResponseEntity.ok(listingRepository.findByStatus("PUBLISHED"));
+    public ResponseEntity<List<DesignListing>> getStorefront(
+            @RequestParam(required = false) String category,
+            Authentication authentication) {
+
+        List<DesignListing> listings = listingRepository.findByStatus("PUBLISHED");
+        if (category != null && !category.isBlank()) {
+            listings = listings.stream()
+                    .filter(l -> category.equalsIgnoreCase(l.getCategory()))
+                    .toList();
+        }
+        enrichWithDesigner(listings);
+        enrichWithFavoriteStatus(listings, safeCurrentUserId(authentication));
+        return ResponseEntity.ok(listings);
     }
 
     // ── Single Listing + Auto Quote ──────────────────────────────────────────
@@ -77,6 +98,9 @@ public class MarketplaceController {
         if (!"PUBLISHED".equals(listing.getStatus()) && !isOwner) {
             throw new ListingNotFoundException(id);
         }
+
+        enrichWithDesigner(listing);
+        enrichWithFavoriteStatus(listing, safeCurrentUserId(authentication));
 
         // Auto-generate a quote with default params (Standard, 20% infill, qty 1)
         Map<String, Object> response = new LinkedHashMap<>();
@@ -108,6 +132,92 @@ public class MarketplaceController {
         return ResponseEntity.ok(response);
     }
 
+    // ── Favorites ─────────────────────────────────────────────────────────────
+
+    @PostMapping("/{id}/favorite")
+    public ResponseEntity<DesignListing> favoriteListing(
+            @PathVariable Long id,
+            Authentication authentication) {
+
+        DesignListing listing = listingRepository.findById(id)
+                .orElseThrow(() -> new ListingNotFoundException(id));
+        User caller = currentUser(authentication);
+
+        if (favoriteRepository.existsByUserIdAndListingId(caller.getUserId(), id)) {
+            throw new AlreadyFavoritedException(id);
+        }
+
+        Favorite favorite = new Favorite();
+        favorite.setUserId(caller.getUserId());
+        favorite.setListingId(id);
+        favoriteRepository.save(favorite);
+
+        int currentCount = listing.getFavoriteCount() != null ? listing.getFavoriteCount() : 0;
+        listing.setFavoriteCount(currentCount + 1);
+        DesignListing saved = listingRepository.save(listing);
+
+        enrichWithDesigner(saved);
+        saved.setIsFavorited(true);
+        return ResponseEntity.ok(saved);
+    }
+
+    @DeleteMapping("/{id}/favorite")
+    public ResponseEntity<DesignListing> unfavoriteListing(
+            @PathVariable Long id,
+            Authentication authentication) {
+
+        DesignListing listing = listingRepository.findById(id)
+                .orElseThrow(() -> new ListingNotFoundException(id));
+        User caller = currentUser(authentication);
+
+        if (!favoriteRepository.existsByUserIdAndListingId(caller.getUserId(), id)) {
+            throw new FavoriteNotFoundException(id);
+        }
+
+        favoriteRepository.deleteByUserIdAndListingId(caller.getUserId(), id);
+
+        int currentCount = listing.getFavoriteCount() != null ? listing.getFavoriteCount() : 0;
+        listing.setFavoriteCount(Math.max(0, currentCount - 1));
+        DesignListing saved = listingRepository.save(listing);
+
+        enrichWithDesigner(saved);
+        saved.setIsFavorited(false);
+        return ResponseEntity.ok(saved);
+    }
+
+    @GetMapping("/favorites")
+    public ResponseEntity<List<DesignListing>> getFavorites(Authentication authentication) {
+        User caller = currentUser(authentication);
+
+        List<Long> listingIds = favoriteRepository.findByUserId(caller.getUserId()).stream()
+                .map(Favorite::getListingId)
+                .toList();
+        List<DesignListing> listings = listingRepository.findAllById(listingIds);
+
+        enrichWithDesigner(listings);
+        listings.forEach(l -> l.setIsFavorited(true));
+        return ResponseEntity.ok(listings);
+    }
+
+    @GetMapping("/{id}/favorite/status")
+    public ResponseEntity<Map<String, Object>> getFavoriteStatus(
+            @PathVariable Long id,
+            Authentication authentication) {
+
+        if (!listingRepository.existsById(id)) {
+            throw new ListingNotFoundException(id);
+        }
+        User caller = currentUser(authentication);
+
+        boolean isFavorited = favoriteRepository.existsByUserIdAndListingId(caller.getUserId(), id);
+        long favoriteCount = favoriteRepository.countByListingId(id);
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("isFavorited", isFavorited);
+        response.put("favoriteCount", favoriteCount);
+        return ResponseEntity.ok(response);
+    }
+
     // ── Designer's Own Listings ──────────────────────────────────────────────
 
     @PreAuthorize("hasRole('DESIGNER')")
@@ -126,6 +236,8 @@ public class MarketplaceController {
             @RequestParam("title") String title,
             @RequestParam(value = "description", required = false) String description,
             @RequestParam("base_price") BigDecimal basePrice,
+            @RequestParam(value = "thumbnail_file_id", required = false) String thumbnailFileId,
+            @RequestParam(value = "category", required = false) String category,
             @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
             Authentication authentication) {
 
@@ -138,6 +250,8 @@ public class MarketplaceController {
         listing.setDescription(description);
         listing.setBasePrice(basePrice);
         listing.setStatus("DRAFT");
+        listing.setThumbnailFileId(thumbnailFileId);
+        listing.setCategory(validateCategory(category));
 
         // Upload thumbnail to Cloudinary if provided
         if (thumbnail != null && !thumbnail.isEmpty()) {
@@ -145,7 +259,10 @@ public class MarketplaceController {
             listing.setThumbnailUrl(thumbnailUrl);
         }
 
-        return ResponseEntity.ok(listingRepository.save(listing));
+        DesignListing saved = listingRepository.save(listing);
+        saved.setDesignerName(designer.getFullName());
+        saved.setDesignerAvatar(designer.getProfilePictureUrl());
+        return ResponseEntity.ok(saved);
     }
 
     // ── Update Listing ───────────────────────────────────────────────────────
@@ -165,7 +282,9 @@ public class MarketplaceController {
             listing.setBasePrice(new BigDecimal(body.get("base_price").toString()));
         }
 
-        return ResponseEntity.ok(listingRepository.save(listing));
+        DesignListing saved = listingRepository.save(listing);
+        enrichWithDesigner(saved, currentUser(authentication));
+        return ResponseEntity.ok(saved);
     }
 
     // ── Publish ──────────────────────────────────────────────────────────────
@@ -179,7 +298,9 @@ public class MarketplaceController {
         DesignListing listing = getOwnedListing(id, authentication);
         listing.setStatus("PUBLISHED");
         listing.setPublishedAt(LocalDateTime.now());
-        return ResponseEntity.ok(listingRepository.save(listing));
+        DesignListing saved = listingRepository.save(listing);
+        enrichWithDesigner(saved, currentUser(authentication));
+        return ResponseEntity.ok(saved);
     }
 
     // ── Unpublish ────────────────────────────────────────────────────────────
@@ -193,7 +314,9 @@ public class MarketplaceController {
         DesignListing listing = getOwnedListing(id, authentication);
         listing.setStatus("DRAFT");
         listing.setPublishedAt(null);
-        return ResponseEntity.ok(listingRepository.save(listing));
+        DesignListing saved = listingRepository.save(listing);
+        enrichWithDesigner(saved, currentUser(authentication));
+        return ResponseEntity.ok(saved);
     }
 
     // ── Delete ───────────────────────────────────────────────────────────────
@@ -218,6 +341,55 @@ public class MarketplaceController {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private static final Set<String> VALID_CATEGORIES = Set.of(
+            "GEARS", "DRONES", "ENCLOSURES", "MINIATURES", "ARTICULATED", "OTHER"
+    );
+
+    /** Normalizes + validates a category value; null/blank passes through as null (category is optional). */
+    private String validateCategory(String category) {
+        if (category == null || category.isBlank()) return null;
+        String normalized = category.trim().toUpperCase();
+        if (!VALID_CATEGORIES.contains(normalized)) {
+            throw new InvalidListingInputException(
+                    "Invalid category '" + category + "'. Must be one of: " + VALID_CATEGORIES);
+        }
+        return normalized;
+    }
+
+    /** Batch designer lookup for list endpoints — avoids one query per listing. */
+    private void enrichWithDesigner(List<DesignListing> listings) {
+        if (listings.isEmpty()) return;
+        List<Long> designerIds = listings.stream()
+                .map(DesignListing::getDesignerId)
+                .filter(java.util.Objects::nonNull)
+                .distinct()
+                .toList();
+        Map<Long, User> designers = userRepository.findAllById(designerIds).stream()
+                .collect(Collectors.toMap(User::getUserId, u -> u));
+        for (DesignListing listing : listings) {
+            User designer = designers.get(listing.getDesignerId());
+            if (designer != null) {
+                listing.setDesignerName(designer.getFullName());
+                listing.setDesignerAvatar(designer.getProfilePictureUrl());
+            }
+        }
+    }
+
+    /** Single-listing variant — looks up the designer fresh. */
+    private void enrichWithDesigner(DesignListing listing) {
+        if (listing.getDesignerId() == null) return;
+        userRepository.findById(listing.getDesignerId()).ifPresent(designer -> {
+            listing.setDesignerName(designer.getFullName());
+            listing.setDesignerAvatar(designer.getProfilePictureUrl());
+        });
+    }
+
+    /** Single-listing variant when the designer (caller) is already on hand — no extra query. */
+    private void enrichWithDesigner(DesignListing listing, User designer) {
+        listing.setDesignerName(designer.getFullName());
+        listing.setDesignerAvatar(designer.getProfilePictureUrl());
+    }
+
     private DesignListing getOwnedListing(Long id, Authentication authentication) {
         DesignListing listing = listingRepository.findById(id)
                 .orElseThrow(() -> new ListingNotFoundException(id));
@@ -231,5 +403,38 @@ public class MarketplaceController {
     private User currentUser(Authentication authentication) {
         return userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+    }
+
+    /**
+     * Unlike currentUser(), never throws — returns null for an
+     * unauthenticated/anonymous caller. GET /api/marketplace currently
+     * requires auth (SecurityConfig has no permitAll entry for it), so this
+     * is defensive rather than load-bearing today; it keeps isFavorited
+     * correct (false) if the endpoint is ever made public later.
+     */
+    private Long safeCurrentUserId(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()
+                || "anonymousUser".equals(authentication.getPrincipal())) {
+            return null;
+        }
+        return userRepository.findByEmail(authentication.getName())
+                .map(User::getUserId)
+                .orElse(null);
+    }
+
+    private void enrichWithFavoriteStatus(DesignListing listing, Long callerId) {
+        listing.setIsFavorited(callerId != null
+                && favoriteRepository.existsByUserIdAndListingId(callerId, listing.getId()));
+    }
+
+    private void enrichWithFavoriteStatus(List<DesignListing> listings, Long callerId) {
+        if (callerId == null) {
+            listings.forEach(l -> l.setIsFavorited(false));
+            return;
+        }
+        Set<Long> favoritedIds = favoriteRepository.findByUserId(callerId).stream()
+                .map(Favorite::getListingId)
+                .collect(Collectors.toSet());
+        listings.forEach(l -> l.setIsFavorited(favoritedIds.contains(l.getId())));
     }
 }

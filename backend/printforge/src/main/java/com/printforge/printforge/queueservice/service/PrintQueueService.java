@@ -6,6 +6,8 @@ import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
+import com.printforge.printforge.labservice.model.LabLocation;
+import com.printforge.printforge.labservice.service.LabLocationService;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
@@ -20,6 +22,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 
 @Service
@@ -28,22 +31,36 @@ public class PrintQueueService {
     private static final Set<String> VALID_STATUSES =
             Set.of("SUBMITTED", "APPROVED", "QUEUED", "PRINTING", "COMPLETED", "REJECTED");
 
+    // Used only by transitionJobStatus() below (PATCH /api/print-jobs/{id}/transition).
+    // READY and COLLECTED are new statuses that the older free-form
+    // updateJobStatus()/VALID_STATUSES above deliberately doesn't know
+    // about — this is a separate, stricter state machine layered on top,
+    // not a replacement for it.
+    private static final java.util.Map<String, String> REQUIRED_PREVIOUS_STATUS = java.util.Map.of(
+            "PRINTING", "APPROVED",
+            "READY", "PRINTING",
+            "COLLECTED", "READY"
+    );
+
     private final PrintJobRepository printJobRepository;
     private final ModelFileRepository modelFileRepository;
     private final EstimateRepository estimateRepository;
     private final PrinterRepository printerRepository;
     private final NotificationService notificationService;
+    private final LabLocationService labLocationService;
 
     public PrintQueueService(PrintJobRepository printJobRepository,
                               ModelFileRepository modelFileRepository,
                               EstimateRepository estimateRepository,
                               PrinterRepository printerRepository,
-                              NotificationService notificationService) {
+                              NotificationService notificationService,
+                              LabLocationService labLocationService) {
         this.printJobRepository = printJobRepository;
         this.modelFileRepository = modelFileRepository;
         this.estimateRepository = estimateRepository;
         this.printerRepository = printerRepository;
         this.notificationService = notificationService;
+        this.labLocationService = labLocationService;
     }
 
     /**
@@ -195,5 +212,76 @@ public class PrintQueueService {
         }
 
         return saved;
+    }
+
+    /**
+     * Strict staff-driven lifecycle used by PATCH /api/print-jobs/{id}/transition:
+     * APPROVED → PRINTING → READY → COLLECTED only, one step at a time.
+     * Deliberately separate from updateJobStatus() above (which stays
+     * exactly as it was) rather than extending it, since updateJobStatus()
+     * is unconditional (any VALID_STATUSES value from any current status)
+     * and this needs to reject out-of-order jumps with a 400.
+     */
+    public PrintJob transitionJobStatus(Long jobId, String requestedStatus) {
+        PrintJob job = printJobRepository.findById(jobId)
+                .orElseThrow(() -> new PrintJobNotFoundException(jobId));
+
+        String normalized = requestedStatus == null ? "" : requestedStatus.trim().toUpperCase();
+        String requiredFrom = REQUIRED_PREVIOUS_STATUS.get(normalized);
+        if (requiredFrom == null) {
+            throw new InvalidJobStatusException(
+                    "Invalid status '" + requestedStatus + "'. Must be one of: PRINTING, READY, COLLECTED.");
+        }
+
+        String currentStatus = job.getStatus();
+        if (!requiredFrom.equals(currentStatus)) {
+            throw new InvalidJobStatusException(
+                    "Cannot transition from '" + currentStatus + "' to '" + normalized + "'. " +
+                            "Valid transitions: APPROVED→PRINTING, PRINTING→READY, READY→COLLECTED.");
+        }
+
+        job.setStatus(normalized);
+        if ("PRINTING".equals(normalized) && job.getStartedAt() == null) {
+            job.setStartedAt(LocalDateTime.now());
+        } else if ("COLLECTED".equals(normalized) && job.getCompletedAt() == null) {
+            job.setCompletedAt(LocalDateTime.now());
+        }
+
+        PrintJob saved = printJobRepository.save(job);
+
+        String jobName = modelFileRepository.findById(job.getFileId())
+                .map(ModelFile::getFileName)
+                .orElse("your print job");
+
+        switch (normalized) {
+            case "PRINTING" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Print Started",
+                    "Your print job " + jobName + " has started printing!",
+                    "info");
+            case "READY" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Ready for Pickup",
+                    readyForPickupMessage(job, jobName),
+                    "success");
+            case "COLLECTED" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Collected",
+                    "Thank you for collecting " + jobName + "!",
+                    "success");
+        }
+
+        return saved;
+    }
+
+    private String readyForPickupMessage(PrintJob job, String jobName) {
+        if (job.getLabLocationId() != null) {
+            Optional<LabLocation> lab = labLocationService.findById(job.getLabLocationId());
+            if (lab.isPresent()) {
+                return "Your print job '" + jobName + "' is ready for pickup at "
+                        + lab.get().getName() + ", " + lab.get().getAddress() + "!";
+            }
+        }
+        return "Your print job " + jobName + " is ready for pickup!";
     }
 }

@@ -49,6 +49,13 @@ public class ModelFile {
     @Column(name = "user_id")
     private Long userId;
 
+    // Cloudinary's public_id for the uploaded asset — only populated for
+    // images uploaded via POST /api/files/upload/image (saveImageMetadata).
+    // Nullable: general model-file uploads via the older store()/saveFileMetadata
+    // path don't capture this.
+    @Column(name = "public_id")
+    private String publicId;
+
     @PrePersist
     protected void onCreate() {
         this.uploadedAt = LocalDateTime.now();

@@ -10,6 +10,8 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Map;
+
 /**
  * Handles low-level queue operations that the facade doesn't own:
  *   - POST  /api/print-jobs/raw  (legacy: create job from existing fileId/estimateId)
@@ -45,6 +47,25 @@ public class PrintQueueController {
         PrintJob updatedJob = printQueueService.updateJobStatus(
                 jobId, status, printerId, operatorNotes, trackingNumber);
 
+        return ResponseEntity.ok(updatedJob);
+    }
+
+    // ── PATCH /api/print-jobs/:id/transition (Staff only) ────────────────────
+    // Strict APPROVED→PRINTING→READY→COLLECTED lifecycle with a JSON body
+    // ({"status": "PRINTING"}) and per-transition notifications. This is
+    // intentionally a separate path from /status above rather than a
+    // change to it: /status already exists with a query-param contract and
+    // no transition validation, and two @PatchMapping handlers can't share
+    // one path, so the new stricter behavior the spec calls for lives here
+    // instead of altering the existing endpoint.
+    @PreAuthorize("hasAnyRole('LAB_STAFF', 'ADMIN')")
+    @PatchMapping("/{jobId}/transition")
+    public ResponseEntity<PrintJob> transitionJobStatus(
+            @PathVariable Long jobId,
+            @RequestBody Map<String, Object> body) {
+
+        String status = body.get("status") != null ? body.get("status").toString() : null;
+        PrintJob updatedJob = printQueueService.transitionJobStatus(jobId, status);
         return ResponseEntity.ok(updatedJob);
     }
 

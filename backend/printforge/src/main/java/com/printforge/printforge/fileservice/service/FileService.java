@@ -41,6 +41,27 @@ public class FileService {
         return fileRepository.save(newFile);        // single save — no second pass needed
     }
 
+    /**
+     * Same idea as saveFileMetadata, but for images uploaded via
+     * POST /api/files/upload/image — uses storeImage() (content-type
+     * validated, printforge/images folder) and also captures Cloudinary's
+     * public_id on the saved row.
+     */
+    public ModelFile saveImageMetadata(MultipartFile file, Long uploaderId) {
+        FileStorageService.CloudinaryImageResult result = fileStorageService.storeImage(file);
+
+        ModelFile newFile = new ModelFile();
+        newFile.setFileName(file.getOriginalFilename());
+        newFile.setFileType(file.getContentType() != null ? file.getContentType() : "image/jpeg");
+        newFile.setStoredFilename(result.url());
+        newFile.setFileUrl(result.url());
+        newFile.setFileSizeBytes(file.getSize());
+        newFile.setUserId(uploaderId);
+        newFile.setPublicId(result.publicId());
+
+        return fileRepository.save(newFile);
+    }
+
     public ModelFile getFileById(Long id) {
         return fileRepository.findById(id)
                 .orElseThrow(() -> new ModelFileNotFoundException(id));

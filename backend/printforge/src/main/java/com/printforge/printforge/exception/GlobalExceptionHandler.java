@@ -14,8 +14,12 @@ import com.printforge.printforge.estimateservice.exception.InvalidEstimateInputE
 import com.printforge.printforge.printerservice.exception.DuplicatePrinterException;
 import com.printforge.printforge.printerservice.exception.InvalidPrinterStatusException;
 import com.printforge.printforge.printerservice.exception.PrinterBusyException;
+import com.printforge.printforge.marketplaceservice.exception.AlreadyFavoritedException;
+import com.printforge.printforge.marketplaceservice.exception.FavoriteNotFoundException;
+import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
+import com.printforge.printforge.labservice.exception.LabLocationNotFoundException;
 import com.printforge.printforge.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.printforge.paymentservice.exception.PaymentFailedException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
@@ -131,6 +135,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ListingNotPublishedException.class)
     public ResponseEntity<ErrorResponse> handleListingNotPublished(ListingNotPublishedException ex) {
         return buildError(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidListingInputException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidListingInput(InvalidListingInputException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(AlreadyFavoritedException.class)
+    public ResponseEntity<ErrorResponse> handleAlreadyFavorited(AlreadyFavoritedException ex) {
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(FavoriteNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleFavoriteNotFound(FavoriteNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(LabLocationNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleLabLocationNotFound(LabLocationNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidProfileInputException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidProfileInput(InvalidProfileInputException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(PaymentNotFoundException.class)

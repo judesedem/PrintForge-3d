@@ -40,6 +40,12 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/register", "/api/auth/login", "/api/payments/webhook").permitAll()
+                // Public designer-portfolio view — GET /api/users/{id}/designs — no
+                // auth needed to browse a designer's published work.
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/users/*/designs").permitAll()
+                // Public lab directory — GET /api/labs, GET /api/labs/{id}. POST/PATCH
+                // still require authentication (and ADMIN, via @PreAuthorize).
+                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/labs", "/api/labs/**").permitAll()
                 .anyRequest().authenticated()
             )
             .exceptionHandling(ex -> ex

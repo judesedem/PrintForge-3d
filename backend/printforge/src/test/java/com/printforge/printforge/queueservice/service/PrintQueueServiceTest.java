@@ -6,6 +6,7 @@ import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
+import com.printforge.printforge.labservice.service.LabLocationService;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.printerservice.exception.PrinterBusyException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
@@ -48,6 +49,7 @@ class PrintQueueServiceTest {
     EstimateRepository estimateRepository;
     PrinterRepository printerRepository;
     NotificationService notificationService;
+    LabLocationService labLocationService;
     PrintQueueService service;
 
     @BeforeEach
@@ -57,7 +59,8 @@ class PrintQueueServiceTest {
         estimateRepository = Mockito.mock(EstimateRepository.class);
         printerRepository = Mockito.mock(PrinterRepository.class);
         notificationService = Mockito.mock(NotificationService.class);
-        service = new PrintQueueService(printJobRepository, modelFileRepository, estimateRepository, printerRepository, notificationService);
+        labLocationService = Mockito.mock(LabLocationService.class);
+        service = new PrintQueueService(printJobRepository, modelFileRepository, estimateRepository, printerRepository, notificationService, labLocationService);
 
         Mockito.when(printJobRepository.save(Mockito.any(PrintJob.class)))
                 .thenAnswer(inv -> inv.getArgument(0));

@@ -15,6 +15,7 @@ import com.printforge.printforge.notificationservice.service.NotificationService
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 
 import javax.crypto.Mac;
@@ -24,6 +25,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
@@ -71,6 +74,13 @@ public class PaymentService {
 
         Estimate estimate = estimateRepository.findById(estimateId)
                 .orElseThrow(() -> new EstimateNotFoundException(estimateId));
+
+        // Previously any authenticated user could pay for someone else's
+        // estimate just by guessing/incrementing the id — nothing checked
+        // that the estimate actually belonged to the caller.
+        if (!estimate.getUserId().equals(userId)) {
+            throw new AccessDeniedException("You can only pay for your own estimates");
+        }
 
         // Total = machine+material cost from estimate + designer's base_price (if marketplace)
         double totalCost = estimate.getTotalCost();
@@ -328,12 +338,22 @@ public class PaymentService {
      * Paystack signs the raw request body with your secret key.
      */
     private boolean isValidSignature(String rawBody, String signature) {
+        if (signature == null) return false;
         try {
             Mac mac = Mac.getInstance("HmacSHA512");
             mac.init(new SecretKeySpec(paystackSecretKey.getBytes(), "HmacSHA512"));
             byte[] hash = mac.doFinal(rawBody.getBytes());
-            String computed = HexFormat.of().formatHex(hash);
-            return computed.equalsIgnoreCase(signature);
+            String computedHmac = HexFormat.of().formatHex(hash);
+
+            // MessageDigest.isEqual() instead of String.equals()/equalsIgnoreCase()
+            // — those short-circuit on the first mismatched character, and the
+            // time taken to reject a bad signature leaks how many leading bytes
+            // were correct, letting an attacker forge a valid one byte-by-byte.
+            // Lowercased first to keep the same case-insensitive behavior
+            // equalsIgnoreCase() had.
+            byte[] expected = computedHmac.toLowerCase().getBytes(StandardCharsets.UTF_8);
+            byte[] actual = signature.toLowerCase().getBytes(StandardCharsets.UTF_8);
+            return MessageDigest.isEqual(expected, actual);
         } catch (Exception e) {
             return false;
         }
