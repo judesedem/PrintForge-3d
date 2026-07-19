@@ -20,6 +20,9 @@ import com.printforge.printforge.marketplaceservice.exception.InvalidListingInpu
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
 import com.printforge.printforge.labservice.exception.LabLocationNotFoundException;
+import com.printforge.printforge.moderationservice.exception.InvalidModerationLogQueryException;
+import com.printforge.printforge.moderationservice.exception.InvalidReportInputException;
+import com.printforge.printforge.moderationservice.exception.ReportNotFoundException;
 import com.printforge.printforge.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.printforge.paymentservice.exception.PaymentFailedException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
@@ -159,6 +162,21 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(InvalidProfileInputException.class)
     public ResponseEntity<ErrorResponse> handleInvalidProfileInput(InvalidProfileInputException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidReportInputException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidReportInput(InvalidReportInputException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(ReportNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleReportNotFound(ReportNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidModerationLogQueryException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidModerationLogQuery(InvalidModerationLogQueryException ex) {
         return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 

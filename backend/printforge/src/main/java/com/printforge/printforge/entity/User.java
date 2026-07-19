@@ -41,4 +41,13 @@ public class User {
     // images don't pile up in the Cloudinary account.
     @Column(name = "profile_picture_public_id")
     private String profilePicturePublicId;
+
+    // Admin moderation takedown (#68). Nullable/boxed rather than a
+    // not-null primitive — same reasoning as Estimate.java's fileId/userId
+    // comment: ddl-auto=update won't retroactively backfill a NOT NULL
+    // column on a table (users) that already has rows. null is treated as
+    // "not suspended" everywhere this is read (Boolean.TRUE.equals checks),
+    // so the missing default on old rows is harmless.
+    @Column(name = "suspended")
+    private Boolean suspended;
 }

@@ -12,6 +12,9 @@ import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.model.Favorite;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.marketplaceservice.repository.FavoriteRepository;
+import com.printforge.printforge.moderationservice.model.ModerationActionType;
+import com.printforge.printforge.moderationservice.model.ModerationTargetType;
+import com.printforge.printforge.moderationservice.service.ModerationLogService;
 import com.printforge.printforge.repository.UserRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -50,17 +53,20 @@ public class MarketplaceController {
     private final FileStorageService fileStorageService;
     private final UserRepository userRepository;
     private final FavoriteRepository favoriteRepository;
+    private final ModerationLogService moderationLogService;
 
     public MarketplaceController(DesignListingRepository listingRepository,
                                   EstimateService estimateService,
                                   FileStorageService fileStorageService,
                                   UserRepository userRepository,
-                                  FavoriteRepository favoriteRepository) {
+                                  FavoriteRepository favoriteRepository,
+                                  ModerationLogService moderationLogService) {
         this.listingRepository = listingRepository;
         this.estimateService = estimateService;
         this.fileStorageService = fileStorageService;
         this.userRepository = userRepository;
         this.favoriteRepository = favoriteRepository;
+        this.moderationLogService = moderationLogService;
     }
 
     // ── Public Storefront ────────────────────────────────────────────────────
@@ -76,6 +82,7 @@ public class MarketplaceController {
                     .filter(l -> category.equalsIgnoreCase(l.getCategory()))
                     .toList();
         }
+        listings = excludeModerated(listings);
         enrichWithDesigner(listings);
         enrichWithFavoriteStatus(listings, safeCurrentUserId(authentication));
         return ResponseEntity.ok(listings);
@@ -96,6 +103,15 @@ public class MarketplaceController {
                 .anyMatch(a -> a.getAuthority().equals("ROLE_DESIGNER"));
         boolean isOwner = isDesigner && listing.getDesignerId().equals(currentUser(authentication).getUserId());
         if (!"PUBLISHED".equals(listing.getStatus()) && !isOwner) {
+            throw new ListingNotFoundException(id);
+        }
+        // #68 — a still-PUBLISHED listing owned by a since-suspended
+        // designer shouldn't stay individually reachable by direct link
+        // just because it's excluded from the storefront/search list.
+        // adminUnpublished doesn't need a separate check here: an admin
+        // takedown always flips status away from PUBLISHED, which the
+        // check above already catches.
+        if (!isOwner && isOwnerSuspended(listing)) {
             throw new ListingNotFoundException(id);
         }
 
@@ -238,8 +254,17 @@ public class MarketplaceController {
             @RequestParam("base_price") BigDecimal basePrice,
             @RequestParam(value = "thumbnail_file_id", required = false) String thumbnailFileId,
             @RequestParam(value = "category", required = false) String category,
+            @RequestParam(value = "ownership_attested", required = false, defaultValue = "false") boolean ownershipAttested,
             @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
             Authentication authentication) {
+
+        // #67 — a design listed without confirmed rights is exactly the
+        // "this design isn't theirs to sell" gap this attestation closes.
+        // Same clean-400 pattern as validateCategory() below, not an
+        // unhandled exception.
+        if (!ownershipAttested) {
+            throw new InvalidListingInputException("You must confirm you own the rights to this design");
+        }
 
         User designer = currentUser(authentication);
 
@@ -252,6 +277,7 @@ public class MarketplaceController {
         listing.setStatus("DRAFT");
         listing.setThumbnailFileId(thumbnailFileId);
         listing.setCategory(validateCategory(category));
+        listing.setOwnershipAttested(true);
 
         // Upload thumbnail to Cloudinary if provided
         if (thumbnail != null && !thumbnail.isEmpty()) {
@@ -299,6 +325,8 @@ public class MarketplaceController {
         listing.setStatus("PUBLISHED");
         listing.setPublishedAt(LocalDateTime.now());
         DesignListing saved = listingRepository.save(listing);
+        moderationLogService.log(currentUser(authentication), ModerationActionType.DESIGNER_PUBLISH,
+                ModerationTargetType.LISTING, id, null);
         enrichWithDesigner(saved, currentUser(authentication));
         return ResponseEntity.ok(saved);
     }
@@ -315,6 +343,8 @@ public class MarketplaceController {
         listing.setStatus("DRAFT");
         listing.setPublishedAt(null);
         DesignListing saved = listingRepository.save(listing);
+        moderationLogService.log(currentUser(authentication), ModerationActionType.DESIGNER_UNPUBLISH,
+                ModerationTargetType.LISTING, id, null);
         enrichWithDesigner(saved, currentUser(authentication));
         return ResponseEntity.ok(saved);
     }
@@ -354,6 +384,37 @@ public class MarketplaceController {
                     "Invalid category '" + category + "'. Must be one of: " + VALID_CATEGORIES);
         }
         return normalized;
+    }
+
+    /**
+     * #68 moderation filter for list endpoints (the main storefront feed;
+     * there's no separate search query in this codebase — the storefront's
+     * optional `category` param is the only "search" surface). Excludes
+     * listings an admin has force-unpublished and listings owned by a
+     * since-suspended designer. Deliberately in-memory (matches the
+     * existing `category` filter above, which already post-filters a
+     * fetched list rather than pushing it into the query) rather than a
+     * JPQL join — DesignListing.designerId is a plain FK, not a mapped
+     * association, so there's no association path to join through.
+     */
+    private List<DesignListing> excludeModerated(List<DesignListing> listings) {
+        if (listings.isEmpty()) return listings;
+        Set<Long> suspendedDesignerIds = userRepository.findBySuspendedTrue().stream()
+                .map(User::getUserId)
+                .collect(Collectors.toSet());
+        return listings.stream()
+                .filter(l -> !Boolean.TRUE.equals(l.getAdminUnpublished()))
+                .filter(l -> !suspendedDesignerIds.contains(l.getDesignerId()))
+                .toList();
+    }
+
+    /** Single-listing variant of the suspended-owner check, for GET /{id}. */
+    private boolean isOwnerSuspended(DesignListing listing) {
+        if (listing.getDesignerId() == null) return false;
+        return userRepository.findById(listing.getDesignerId())
+                .map(User::getSuspended)
+                .map(Boolean.TRUE::equals)
+                .orElse(false);
     }
 
     /** Batch designer lookup for list endpoints — avoids one query per listing. */

@@ -1,11 +1,18 @@
 package com.printforge.printforge.adminservice.controller;
 
+import com.printforge.printforge.adminservice.dto.SuspendUserRequest;
 import com.printforge.printforge.adminservice.service.AdminService;
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.dto.UserDto;
+import com.printforge.printforge.entity.User;
+import com.printforge.printforge.marketplaceservice.model.DesignListing;
+import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.service.AuthService;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -29,10 +36,12 @@ public class AdminController {
 
     private final AdminService adminService;
     private final AuthService authService;
+    private final UserRepository userRepository;
 
-    public AdminController(AdminService adminService, AuthService authService) {
+    public AdminController(AdminService adminService, AuthService authService, UserRepository userRepository) {
         this.adminService = adminService;
         this.authService = authService;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -52,6 +61,50 @@ public class AdminController {
     @GetMapping("/dashboard")
     public ResponseEntity<Map<String, Object>> getDashboard() {
         return ResponseEntity.ok(adminService.getDashboardSummary());
+    }
+
+    /**
+     * ADMIN only — force-unpublish any listing regardless of owner (#67/
+     * #68 takedown). Separate from MarketplaceController's designer-only
+     * publish/unpublish endpoints, which are untouched.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @PatchMapping("/listings/{id}/unpublish")
+    public ResponseEntity<DesignListing> unpublishListing(@PathVariable Long id, Authentication authentication) {
+        return ResponseEntity.ok(adminService.unpublishListing(id, currentUser(authentication)));
+    }
+
+    /**
+     * ADMIN only — undo a force-unpublish. See AdminService.
+     * republishListing()'s javadoc for the known limitation around
+     * distinguishing an admin takedown from a designer's own independent
+     * publish/unpublish choice made afterward.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @PatchMapping("/listings/{id}/republish")
+    public ResponseEntity<DesignListing> republishListing(@PathVariable Long id, Authentication authentication) {
+        return ResponseEntity.ok(adminService.republishListing(id, currentUser(authentication)));
+    }
+
+    /**
+     * ADMIN only — suspend/unsuspend a user account (#68). Takes effect
+     * immediately: JwtAuthFilter rejects that user's very next request with
+     * an already-issued token, it doesn't wait for a fresh login.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @PatchMapping("/users/{id}/suspend")
+    public ResponseEntity<UserDto> suspendUser(
+            @PathVariable Long id,
+            @RequestBody SuspendUserRequest request,
+            Authentication authentication) {
+
+        return ResponseEntity.ok(adminService.suspendUser(
+                id, request.isSuspended(), request.getReason(), currentUser(authentication)));
+    }
+
+    private User currentUser(Authentication authentication) {
+        return userRepository.findByEmail(authentication.getName())
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 
 }

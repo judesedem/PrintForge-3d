@@ -1,6 +1,8 @@
 package com.printforge.printforge.adminservice.service;
 
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
+import com.printforge.printforge.moderationservice.service.ModerationLogService;
+import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.printerservice.model.Printer;
 import com.printforge.printforge.printerservice.repository.PrinterRepository;
 import com.printforge.printforge.queueservice.model.PrintJob;
@@ -27,6 +29,8 @@ class AdminServiceTest {
     PrinterRepository printerRepository;
     DesignListingRepository designListingRepository;
     UserRepository userRepository;
+    NotificationService notificationService;
+    ModerationLogService moderationLogService;
     AdminService service;
 
     @BeforeEach
@@ -35,9 +39,12 @@ class AdminServiceTest {
         printerRepository = Mockito.mock(PrinterRepository.class);
         designListingRepository = Mockito.mock(DesignListingRepository.class);
         userRepository = Mockito.mock(UserRepository.class);
+        notificationService = Mockito.mock(NotificationService.class);
+        moderationLogService = Mockito.mock(ModerationLogService.class);
         // sumEarningsByDesigner returns empty list by default — no earnings to display
         Mockito.when(designListingRepository.sumEarningsByDesigner()).thenReturn(List.of());
-        service = new AdminService(printJobRepository, printerRepository, designListingRepository, userRepository);
+        service = new AdminService(printJobRepository, printerRepository, designListingRepository,
+                userRepository, notificationService, moderationLogService);
     }
 
     private PrintJob jobWithStatus(String status) {

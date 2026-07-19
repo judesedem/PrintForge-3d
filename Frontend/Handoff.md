@@ -2096,3 +2096,689 @@ Four independent backend fixes/features, all in `backend/printforge`.
     /api/auth/profile`) has only been verified by local compilation +
     the Spring context boot during tests, not exercised against a live
     request from the frontend or a REST client.
+
+---
+
+## 2026-07-19 — Backend: fix double PrintJob creation on paid orders (#58)
+
+Scope: `backend/printforge`, `PrintJobFacadeController`'s two submission
+endpoints only, per the task's explicit instruction not to start any other
+numbered issue this session.
+
+- **Problem.** `PrintJobFacadeController.submitJob()` (`POST
+  /api/print-jobs/upload`) and `submitMarketplaceOrder()` (`POST
+  /api/print-jobs`) each created a `PrintJob` eagerly at submission time
+  (status `SUBMITTED`) via `PrintQueueService.createPrintJob()`.
+  `PaymentService.handleWebhook()` independently created a **second**,
+  separate `PrintJob` from the same estimate once payment cleared — its
+  own code comment already says "creates the PrintJob (the gate: no
+  payment → no job)", i.e. its author assumed job creation only ever
+  happened there. Net effect: every paid order produced two `PrintJob`
+  rows, and an abandoned checkout left an orphaned unpaid `PrintJob`
+  sitting in `SUBMITTED` in the staff queue, indistinguishable from a paid
+  one — nothing on `PrintJob` marks it unpaid, only the `Payment` row
+  does, and it points at the *other* job.
+
+- **Fix.** Removed the `printQueueService.createPrintJob(...)` calls from
+  both endpoints entirely. Both now only create/reuse an `Estimate`
+  (marketplace order still adds the designer's `base_price` on top, same
+  as before) — no `PrintJob`. Read `PaymentService.handleWebhook()` in
+  full to confirm it needs no changes: it already pulls everything it
+  needs — `fileId` via its own `resolveFileId()` (listing or estimate),
+  `material`/`quantity`/`infill`/`quality` via the linked `Estimate`,
+  `userId` via the `Payment` row — without depending on any `PrintJob` the
+  facade used to create. Its comment's assumption ("this is the gate") is
+  now actually true, not aspirational.
+
+- **Response shape changed — flagged per the task, not a silent break.**
+  Both endpoints returned `PrintJobResponse` (a `job_id` among other
+  job fields); that's gone since no job exists yet at this point. New
+  `facade/dto/OrderAwaitingPaymentResponse.java`: `{status:
+  "awaiting_payment", estimate: {...raw Estimate entity, same
+  camelCase-via-Jackson convention as GET /api/estimates/{id}...},
+  listing_id}` — `listing_id` is `@JsonInclude(NON_NULL)` (present for
+  the marketplace endpoint, omitted for the upload endpoint). The
+  frontend takes `estimate.id` straight into the existing
+  `POST /api/payments/initiate` call.
+
+- **Notification wording.** Both endpoints' "submitted" notifications
+  said "...is awaiting review" — no longer accurate, since no job exists
+  yet for staff to review. Changed to "...is awaiting payment" in both.
+  Treated as required by the correctness of this change (the old text
+  would actively mislead the user about what happens next), not scope
+  creep beyond #58.
+
+- **Searched for anything reading a PrintJob by an id returned from
+  these two endpoints — found nothing:**
+  - `src/api/jobs.ts` has **no function that calls `POST /api/print-jobs`
+    or `POST /api/print-jobs/upload`** at all (confirmed by reading the
+    whole file) — it only wraps GET list/single, approve/reject, the
+    queue view, and the transition endpoint.
+  - `src/api/payments.ts`'s `initiatePayment()` doc comment (written in
+    an earlier session, before this fix) already states the real flow:
+    "the Paystack webhook (handleWebhook, server-side, not called from
+    the frontend) is what CREATES a brand new PrintJob... There is no
+    backend endpoint or field connecting a payment to an already-existing
+    PrintJob."
+  - `src/api/utils.ts`'s `mapQualityForUpload()` doc comment: "NOT
+    CURRENTLY USED anywhere in this app. This app's submit flow is
+    payment-gated end to end (upload → estimate → pay → webhook creates
+    the job) and never calls POST /api/print-jobs/upload directly."
+  - This file's own `2026-07-14 — Submit flow restructure` entry already
+    flagged the exact question this fix answers: "whether `POST
+    /api/print-jobs` ... should be deleted/locked down now that the app
+    never calls it."
+  - **Conclusion: no frontend screen needs a code change for this fix.**
+    The real submit flow already goes upload → `POST /api/estimates` →
+    `POST /api/payments/initiate` → Paystack, bypassing these two facade
+    endpoints entirely — this backend change brings the code in line
+    with what the frontend (and the webhook's own comment) already
+    assumed. No follow-up frontend prompt is needed as a *result* of this
+    specific change; if anything still calls these two endpoints directly
+    from outside this repo (e.g. a manual API test script), it needs to
+    switch to reading `estimate.id` from `OrderAwaitingPaymentResponse`
+    instead of `job_id` from the old response.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 51 tests run, same 4 pre-existing failures as the last
+    two sessions logged in this file (`AuthServiceTest` ×2 — role
+    self-assignment guard, `FileStorageServiceTest` ×1 — exception type
+    mismatch, `AdminServiceTest` ×1 — count assertion) — none touch any
+    file changed here.
+  - No test file exists for `PrintJobFacadeController` or
+    `PaymentService` (checked — neither has a `*Test.java` anywhere in
+    the tree), so there's no existing pattern to add a regression test
+    against. Per the task's own instruction, no test infra was set up
+    from scratch for this.
+  - **Not verified — needs a live check, manual steps:**
+    1. Submit an order through either endpoint without completing
+       payment → query the `print_jobs` table for that estimate's id →
+       confirm **zero** rows were created.
+    2. Complete payment for that same estimate (real Paystack checkout,
+       or replay a `charge.success` event against
+       `POST /api/payments/webhook` with a valid `X-Paystack-Signature`)
+       → confirm **exactly one** `PrintJob` row now exists, and
+       `Payment.printJobId` points at it.
+    3. Re-deliver the same webhook event a second time (Paystack does
+       retry on non-2xx or timeout) → confirm the existing idempotency
+       guard (`if ("COMPLETED".equals(payment.getStatus())) return;`)
+       still prevents a second `PrintJob` from being created.
+  - **Not deployed.** Per the task's explicit instruction, stopped after
+    the build succeeded — `railway up` was not run. Changes are local/
+    committed-pending-review only.
+
+**Files created:** `facade/dto/OrderAwaitingPaymentResponse.java`.
+**Files modified:** `facade/PrintJobFacadeController.java`.
+**Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: shared moderation system (#67 ownership + #68 harmful content/users)
+
+Scope: `backend/printforge` only. One goal per the task: a single moderation
+system covering both "this design isn't theirs to sell" (#67) and "this
+content/user is harmful" (#68), not two parallel features.
+
+- **Ownership attestation at listing creation (#67).** `DesignListing`
+  gained `ownershipAttested` (primitive `boolean`, DB-level `not null
+  default false` via `columnDefinition` — a genuine NOT NULL column that
+  still backfills existing rows cleanly under `ddl-auto=update`, unlike
+  the nullable-workaround pattern used elsewhere in this codebase for
+  fields that don't have a safe default). `MarketplaceController.
+  createListing()` gained a matching `ownership_attested` `@RequestParam`
+  (same snake_case-param, `consumes = {multipart/form-data,
+  application/json}` style already used by every other field on this
+  endpoint — not switched to `@RequestBody`). Missing or `false` → 400 via
+  the existing `InvalidListingInputException` (reused rather than adding a
+  new exception class — same type `validateCategory()` already throws for
+  bad input on this same endpoint), message "You must confirm you own the
+  rights to this design."
+
+- **Report entity + endpoints — the shared system.** New
+  `moderationservice` package (model/repository/service/controller/dto/
+  exception, matching the labservice/marketplaceservice convention).
+  `Report` (`reporterId`, `targetType` enum LISTING/USER, `targetId`,
+  `reason` — `varchar(1000) not null`, `status` enum PENDING/REVIEWED/
+  DISMISSED/ACTIONED defaulting PENDING via `@PrePersist`, `createdAt`).
+  `targetType`/`status` are plain `String` on the request DTOs
+  (`CreateReportRequest`, `UpdateReportStatusRequest`), not the enum types
+  directly — an invalid value fails as a clean `InvalidReportInputException`
+  → 400 from `ReportService`, not a Jackson enum-deserialization error
+  falling through to `GlobalExceptionHandler`'s generic `Exception` → 500
+  handler. New `ReportController`: `POST /api/reports` (any authenticated
+  user; 201 + the created `Report`), `GET /api/admin/reports` (ADMIN only,
+  `Page<Report>` via Spring Data `Pageable`/`@PageableDefault(sort=
+  "createdAt", direction=DESC)` — first use of paginated responses
+  anywhere in this codebase; optional `?status=` filter via
+  `ReportRepository.findByStatus`), `PATCH /api/admin/reports/{id}` (ADMIN
+  only, body `{status}`, restricted to REVIEWED/DISMISSED/ACTIONED —
+  PENDING deliberately rejected as a target value since resolving a
+  report only moves it forward). Target existence (does the reported
+  listing/user id actually exist) is **not validated** — only the two
+  checks the task specified (targetType, reason length/blankness) are
+  enforced; a report against a nonexistent id just becomes noise an admin
+  dismisses, a deliberate minimal-scope call, not an oversight.
+  `InvalidReportInputException`→400, `ReportNotFoundException`→404 wired
+  into `GlobalExceptionHandler`.
+
+- **Admin takedown actions (#68).** Confirmed `AdminController` still only
+  had `POST /users` + `GET /dashboard` before adding to it. New `PATCH
+  /api/admin/listings/{id}/unpublish` (ADMIN only) — force-unpublishes
+  any listing regardless of owner, **separate from and not modifying**
+  `MarketplaceController`'s existing designer-only publish/unpublish.
+  Sets status back to DRAFT **and** a new `DesignListing.adminUnpublished`
+  flag (nullable `Boolean`, defaults null/false) — needed because the
+  designer's own unmodified `/publish` endpoint would otherwise just flip
+  status back to PUBLISHED and silently undo an admin takedown; the
+  marketplace-visibility queries below check this flag independently of
+  status, so the takedown survives that. **Known gap, flagged not
+  silently left:** there's no admin "restore" endpoint to clear
+  `adminUnpublished` — once set, a listing needs a direct DB edit to ever
+  reappear. Not built since it wasn't asked for; follow-up if takedowns
+  turn out to need reversing.
+  New `PATCH /api/admin/users/{id}/suspend` (ADMIN only, body
+  `{suspended, reason}`) — `User` gained `suspended` (nullable `Boolean`,
+  same not-null-column-on-an-existing-table caution as other nullable
+  additions in this file; `null` reads as "not suspended" everywhere).
+  `reason` is not persisted anywhere — folded into a notification to the
+  affected user ("Account Suspended"/"Account Reactivated") the same way
+  `PrintJobFacadeController.rejectJob()`'s reason is notification-only,
+  not stored. Returns `UserDto` (extended with a `suspended` field), not
+  the raw `User` entity — `User` has no `@JsonIgnore` on `password`, so
+  returning it directly from any new endpoint would have serialized the
+  password hash into the response.
+  `JwtAuthFilter` now rejects a suspended account's very next request even
+  with a still-valid JWT: added a `UserRepository` lookup (by the email
+  already extracted from the token) right after the existing token-validity
+  check, before the `SecurityContextHolder` authentication is set. On
+  `suspended`, clears the context and writes `{"status":403,"message":
+  "Account suspended. Contact support."}` — same manual-JSON-write,
+  same-shape pattern the filter already uses for its existing 401
+  (filters run before `DispatcherServlet`, so `@RestControllerAdvice`
+  can't catch anything thrown here). **Deliberately did not** touch
+  `ApplicationConfig`'s `UserDetailsService` bean or the login flow: an
+  earlier design considered making `accountNonLocked` reflect `suspended`
+  there instead (avoiding this filter's second DB lookup), but
+  `DaoAuthenticationProvider` checks that automatically during
+  authentication, which would make a suspended user's *login* throw
+  `LockedException` — a type `AuthService.login()`'s catch block doesn't
+  handle, so it would've fallen through to the generic 500 handler. The
+  task's ask was specifically "wherever JWT auth validates a user **on
+  each request**," so this stays scoped to `JwtAuthFilter` only. **Known
+  consequence, flagged:** a suspended user can still log in and receive a
+  fresh JWT — they just can't use it for anything, since every subsequent
+  request 403s. Blocking login itself would be a reasonable follow-up but
+  wasn't in scope here.
+
+- **Marketplace query exclusions (#68) — every query method changed:**
+  - `MarketplaceController.getStorefront()` — new private
+    `excludeModerated(List<DesignListing>)` helper, called after the
+    existing `category` filter (same in-memory-filter-after-fetch style
+    already used for `category`, not a JPQL join — `DesignListing.
+    designerId` is a plain FK with no mapped association to join
+    through). Excludes `adminUnpublished=true` listings and listings
+    whose designer is in `userRepository.findBySuspendedTrue()` (new
+    repository method).
+  - `MarketplaceController.getListing()` (`GET /{id}`, single-listing
+    fetch) — **went one step beyond the task's literal three named
+    queries**, flagging this explicitly rather than silently expanding
+    scope: added a new private `isOwnerSuspended()` check alongside the
+    existing PUBLISHED-or-owner check. Reasoning: this endpoint also
+    "returns a listing to normal (non-owner) users" (the task's own
+    framing for what counts), and without this check a suspended
+    designer's still-PUBLISHED listing would stay individually reachable
+    by direct link even though it's excluded from the storefront feed —
+    an obvious moderation bypass to leave open. `adminUnpublished` needed
+    no separate check here: a takedown always flips status away from
+    PUBLISHED, which the pre-existing check already catches.
+  - `UserService.getPublishedDesignsForUser()` (`GET /api/users/{id}
+    /designs` — the designer public profile) — if the profiled designer
+    is suspended, returns `List.of()` (their whole portfolio hidden, not
+    just individual listings); otherwise filters out any
+    `adminUnpublished` listing from the PUBLISHED results, same
+    survives-a-republish reasoning as above.
+  - **Deliberately not touched:** `getFavorites()` (`GET
+    /api/marketplace/favorites`) — the task named "the main marketplace
+    feed, search, and designer public profile" as the areas to check;
+    favorites wasn't among them, and it already doesn't filter by
+    publication status at all today (a pre-existing behavior, not
+    something introduced or fixed here). There is no separate backend
+    "search" endpoint in this codebase — the storefront's optional
+    `category` param is the only query-narrowing surface, so it and "the
+    main marketplace feed" are the same query.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 51 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2 — role
+    self-assignment guard, `FileStorageServiceTest` ×1 — exception type
+    mismatch, `AdminServiceTest` ×1 — count assertion, now at a shifted
+    line number from the new `NotificationService` constructor param, same
+    root cause). **No new failures.** `AdminServiceTest` needed its direct
+    `new AdminService(...)` call updated with a mocked `NotificationService`
+    (5th constructor param) to compile — the only test file touched.
+  - Spring context boot (during `./mvnw test`) confirmed every schema
+    change applies cleanly under `ddl-auto=update`: `design_listings.
+    ownership_attested` added as `boolean not null default false`
+    (confirmed via the Hibernate DDL log — backfills existing rows,
+    doesn't fail), `design_listings.admin_unpublished` added nullable,
+    `reports` table created with enum check constraints
+    (`status`/`target_type`), `users.suspended` added nullable.
+  - **Not verified — needs a live check:** every new/changed endpoint
+    (`POST /api/reports`, `GET`/`PATCH /api/admin/reports*`, `PATCH
+    /api/admin/listings/{id}/unpublish`, `PATCH /api/admin/users/{id}
+    /suspend`, the `ownership_attested` 400 path, the suspended-account
+    403 from `JwtAuthFilter`, and the three updated marketplace-visibility
+    queries) has only been verified by local compilation + the Spring
+    context boot during tests, not exercised against a live request.
+  - Not deployed — no `railway up` run this session.
+
+**Files created:**
+`moderationservice/model/Report.java`,
+`moderationservice/model/ReportTargetType.java`,
+`moderationservice/model/ReportStatus.java`,
+`moderationservice/repository/ReportRepository.java`,
+`moderationservice/service/ReportService.java`,
+`moderationservice/controller/ReportController.java`,
+`moderationservice/dto/CreateReportRequest.java`,
+`moderationservice/dto/UpdateReportStatusRequest.java`,
+`moderationservice/exception/InvalidReportInputException.java`,
+`moderationservice/exception/ReportNotFoundException.java`,
+`adminservice/dto/SuspendUserRequest.java`.
+
+**Files modified:**
+`marketplaceservice/model/DesignListing.java` (ownershipAttested,
+adminUnpublished), `marketplaceservice/controller/MarketplaceController.java`
+(create-listing validation, excludeModerated/isOwnerSuspended),
+`entity/User.java` (suspended), `repository/UserRepository.java`
+(findBySuspendedTrue), `service/UserService.java`
+(getPublishedDesignsForUser exclusions), `dto/UserDto.java` (suspended),
+`adminservice/service/AdminService.java` (unpublishListing, suspendUser),
+`adminservice/controller/AdminController.java` (two new endpoints),
+`security/JwtAuthFilter.java` (suspended check),
+`exception/GlobalExceptionHandler.java` (two new handlers),
+`adminservice/service/AdminServiceTest.java` (constructor call updated to
+compile — not a behavior change).
+
+**Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: republish endpoint + block login for suspended users
+
+Scope: `backend/printforge` only. Two follow-up gaps flagged after the
+moderation-system session above, scoped together since both touch the
+same suspended/takedown area.
+
+- **`PATCH /api/admin/listings/{id}/republish`, ADMIN only.** New
+  `AdminService.republishListing(Long id)`: mirrors
+  `unpublishListing()`'s exact mechanism in reverse — clears
+  `adminUnpublished`, sets `status = "PUBLISHED"`, sets `publishedAt =
+  now()`. Gated on `adminUnpublished` currently being `true`; if not,
+  throws the existing `InvalidListingInputException` ("This listing was
+  not force-unpublished by an admin; there is nothing to republish.") →
+  400, reusing the same exception class `MarketplaceController` already
+  throws for other listing-input validation failures rather than adding a
+  new one.
+  **Requires no changes to the marketplace-visibility query exclusions**
+  added in the moderation session — traced through all three: `Marketplace
+  Controller.excludeModerated()` (storefront) and `.getListing()` (single
+  view) both key off `status == "PUBLISHED"` and `adminUnpublished !=
+  true`, and `UserService.getPublishedDesignsForUser()` (designer profile)
+  keys off the same two conditions — republish setting both back is
+  exactly what all three already check for, so a republished listing
+  reappears in all three with no further code changes. Confirmed by
+  reading each query's current implementation, not just asserted.
+
+  **Designer-vs-admin unpublish ambiguity — hit this, flagging it rather
+  than guessing a fix, per the task's explicit instruction.** The task
+  required republish to never override a listing the designer
+  independently unpublished themselves. Read `MarketplaceController.
+  publishListing()`/`unpublishListing()` (the designer-only pair) to
+  check: neither one touches `adminUnpublished` at all — they only ever
+  set `status`/`publishedAt`. That means `adminUnpublished` can *only* be
+  set by `AdminService.unpublishListing()` and *only* cleared by the new
+  `republishListing()` — nothing else in the codebase writes to it. On its
+  face that sounds like a clean signal ("true" always means "admin took
+  this down"), but it breaks under one interleaving:
+  1. Admin unpublishes a listing → `status=DRAFT`, `adminUnpublished=true`.
+  2. Designer, unaware, calls their own (unmodified) `/publish` → `status
+     =PUBLISHED`, `adminUnpublished` stays `true` (untouched — the
+     listing is now a "zombie": status says published, but the moderation
+     flag still hides it from every query above, exactly as designed in
+     the prior session).
+  3. The *same* designer later decides — independently, for their own
+     reasons unrelated to the admin's original concern — to unpublish it
+     again via their own endpoint → `status=DRAFT`, `adminUnpublished`
+     *still* stays `true` (untouched).
+  4. Resulting DB state: `status=DRAFT`, `adminUnpublished=true` — bit-
+     for-bit identical to the state immediately after step 1.
+
+  There is no timestamp on `adminUnpublished` and no audit/event trail
+  anywhere in the schema, so `republishListing()` (or any code reading
+  just these two fields) **cannot distinguish** "untouched since the
+  admin's original takedown" from "the designer independently took their
+  own action afterward, coincidentally landing back on the same flag
+  values." In that rare interleaving, calling republish would override
+  the designer's most recent, independent choice — precisely what the
+  task said not to do.
+  **Not silently resolved.** Implemented `republishListing()` as
+  specified above anyway, since it's correct for the overwhelming common
+  case (no designer action in between) and the task asked for the
+  endpoint unconditionally. Two ways to actually close the ambiguity,
+  neither applied here because both change designer-facing endpoint
+  behavior and deserve an explicit decision rather than a guess:
+  (a) add a timestamp to `adminUnpublished` (or a small moderation-action
+  log) so republish can check "has the designer touched this listing
+  *since* the admin's action," or (b) have `MarketplaceController`'s own
+  `publishListing()`/`unpublishListing()` clear `adminUnpublished`
+  whenever the designer takes independent action, which would make the
+  flag always mean "still exactly as the admin left it" — but that's a
+  behavior change to endpoints the original moderation session was
+  explicitly told to leave untouched, so it wasn't done here either.
+
+- **Login blocks suspended users (previously only `JwtAuthFilter` did,
+  on requests *after* login).** Read `AuthService.login()` in full first:
+  it authenticates via `authenticationManager.authenticate(...)`, catches
+  `BadCredentialsException` → rethrows `InvalidCredentialsException
+  ("Invalid email or password")` (→ 401 via `GlobalExceptionHandler`),
+  then re-fetches the `User` by email. Added the suspended check
+  immediately after that re-fetch — after credentials are already
+  confirmed correct, per the task's explicit requirement not to leak
+  account-existence/suspension status to someone who doesn't have the
+  right password — and before `jwtService.generateToken(...)` runs, so a
+  suspended user never receives a fresh token at all now (closing the gap
+  flagged in the prior session, where they could still log in and get a
+  token that every subsequent request would then 403 on).
+  Reuses `InvalidCredentialsException` (same class, same 401 status, same
+  `ErrorResponse` shape as every other failure path in this method) rather
+  than a new exception type — the task was explicit that the status/
+  response-shape convention shouldn't change, only the *message* needed
+  to be clearer: `"Account suspended. Contact support."`, copied verbatim
+  from `JwtAuthFilter`'s existing suspended-check text so the two surfaces
+  read consistently to a user who hits both.
+  **`JwtAuthFilter`'s suspended check is untouched**, exactly as
+  instructed — it remains defense-in-depth for a token issued before a
+  user was suspended, which stays valid (and would otherwise still pass
+  `jwtService.isTokenValid()`) until it naturally expires.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 51 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2 — role
+    self-assignment guard, `FileStorageServiceTest` ×1 — exception type
+    mismatch, `AdminServiceTest` ×1 — count assertion). **No new
+    failures.** No test file constructs `AuthService` or `AdminService`
+    in a way this session's changes broke (`AdminServiceTest` was already
+    updated for the extra constructor param in the prior session; nothing
+    needed touching this time). No schema changes this session (no new
+    entity fields — confirmed no `alter table`/`create table` lines in
+    the Hibernate DDL log during `./mvnw test`, as expected for a pure-
+    logic change).
+  - **Not verified — needs a live check:** `PATCH /api/admin/listings/{id}
+    /republish` end-to-end (unpublish → republish → confirm reappears in
+    `GET /api/marketplace`, `GET /api/marketplace/{id}`, and `GET
+    /api/users/{id}/designs`), the 400 path when republishing a listing
+    that was never admin-unpublished, and the suspended-login 401 path
+    (suspend a user → attempt login → confirm the new message, not the
+    generic one).
+  - Not deployed, not committed — per the task's explicit instruction,
+    stopping after tests/build for review.
+
+**Files modified:**
+`adminservice/service/AdminService.java` (republishListing),
+`adminservice/controller/AdminController.java` (new endpoint),
+`service/AuthService.java` (suspended check in login).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: adminUnpublishedAt timestamp (partial fix, ambiguity NOT closed)
+
+Scope: `backend/printforge` only. Follow-up to the republish ambiguity
+flagged in the entry above.
+
+- **Added `DesignListing.adminUnpublishedAt`** (`LocalDateTime`, nullable,
+  no `@Column` override — same plain-field style as the existing
+  `publishedAt`). Wired symmetrically into the two admin endpoints:
+  `AdminService.unpublishListing()` now sets it to `LocalDateTime.now()`
+  in the same call that sets `adminUnpublished=true`;
+  `AdminService.republishListing()` now clears it back to `null` in the
+  same call that sets `adminUnpublished=false`. No new logic in either
+  method beyond that — exactly as scoped.
+
+- **Step 4's question, answered directly: `DesignListing` has exactly
+  two timestamp fields today, and neither is a general "last modified by
+  owner" field:**
+  1. `createdAt` — set once in `@PrePersist`, never touched again. There
+     is no `@PreUpdate` hook anywhere on this entity.
+  2. `publishedAt` — set to `LocalDateTime.now()` whenever status
+     transitions to PUBLISHED (by the designer's own `/publish`, or now
+     by admin `/republish`), and set to **`null`** whenever status
+     transitions to DRAFT (by the designer's own `/unpublish`, **or** by
+     admin `/unpublish`). Because unpublishing of either kind nulls it
+     out rather than recording *when* the unpublish happened, this field
+     cannot serve as "when did the designer last unpublish" — the
+     information needed for the actual comparison is thrown away by the
+     very act of unpublishing.
+
+  **Consequence, stated plainly: adding `adminUnpublishedAt` alone does
+  NOT close the ambiguity from the prior session.** The original problem
+  was needing to compare "when did the admin take this down" against
+  "when did the designer last independently touch this listing" — and
+  this change only gives us the first half of that comparison.
+  `republishListing()`'s gating logic is unchanged (still just checks
+  `adminUnpublished == true`) because there is nothing yet to compare
+  `adminUnpublishedAt` *against*. The interleaving described in the prior
+  entry (admin unpublishes → designer independently republishes their own
+  listing → designer independently unpublishes it again, for reasons
+  unrelated to the admin's original concern → identical DB state as
+  right after the admin's action) is exactly as unresolved as before;
+  it's just that this specific listing's history now additionally shows
+  *when* the admin's original action happened, which is useful context
+  for a human reviewing the case manually, but isn't yet consulted by any
+  code.
+  **Not adding a second field speculatively, per the task's explicit
+  instruction.** If a "designer last touched this listing" timestamp is
+  wanted to actually close the gap, that needs its own explicit ask —
+  candidates would be either a new field written by
+  `MarketplaceController.publishListing()`/`unpublishListing()` (a
+  designer-facing behavior change), or a small append-only moderation-
+  action log table instead of more fields bolted onto `DesignListing`.
+  Neither was implemented here.
+
+- **Response shape:** unchanged beyond what falls out automatically.
+  `DesignListing` has no separate DTO layer anywhere it's returned
+  (`MarketplaceController` and `AdminController` both return
+  `ResponseEntity<DesignListing>` directly) — `adminUnpublished` was
+  already serializing into every listing response via its public getter,
+  so `adminUnpublishedAt` now appears alongside it the same way, with no
+  controller changes needed.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 51 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures.**
+  - Confirmed via the Hibernate DDL log during `./mvnw test`: `alter
+    table if exists design_listings add column admin_unpublished_at
+    timestamp(6)` — applied cleanly, nullable, no backfill issue (same
+    safe pattern as the existing nullable `adminUnpublished` column).
+  - Not deployed, not committed — stopping after tests/build for review,
+    per the task's explicit instruction.
+
+**Files modified:**
+`marketplaceservice/model/DesignListing.java` (adminUnpublishedAt field +
+getter/setter), `adminservice/service/AdminService.java`
+(unpublishListing/republishListing wiring + updated javadoc).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: moderation action log (audit finding #66, narrow slice)
+
+Scope: `backend/printforge` only. New `ModerationLogEntry` audit trail,
+scoped to exactly the 5 action types the task listed — this is a slice
+pulled forward from #66's full "audit trail on sensitive actions"
+workstream, not that workstream itself.
+
+- **New entity `ModerationLogEntry`** (`moderationservice/model/`,
+  matching the `Report` entity's style/package convention from earlier
+  this session): `actorId` (not-null — every logged action has an actor),
+  `actorRole` (String, captured at write time from the actor's *current*
+  role at the moment of the action, not re-derived later — so a role
+  change after the fact never rewrites history), `actionType` (new enum
+  `ModerationActionType`: `ADMIN_UNPUBLISH`, `ADMIN_REPUBLISH`,
+  `ADMIN_SUSPEND_USER`, `ADMIN_REPORT_STATUS_CHANGE`, `DESIGNER_PUBLISH`,
+  `DESIGNER_UNPUBLISH`), `targetType` (new enum `ModerationTargetType`:
+  `LISTING`, `USER`, `REPORT` — separate from the existing
+  `ReportTargetType`, which only covers what a *report* can be filed
+  against and has no `REPORT` case of its own), `targetId`, `metadata`
+  (`String`, nullable, `@Column(length = 1000)` — short human-readable
+  context, not structured JSON), `createdAt` (`@PrePersist`). Rows are
+  append-only — nothing in this session ever updates or deletes one.
+  New `ModerationLogEntryRepository`
+  (`findByTargetTypeAndTargetIdOrderByCreatedAtAsc`) and
+  `ModerationLogService` — a single `log(User actor, actionType,
+  targetType, targetId, metadata)` write path plus `getLogForTarget(...)`
+  for reads. Centralizing actorId/actorRole extraction in this one
+  service (rather than at each of the 5 call sites) is what keeps every
+  call site down to the one-line log call the task asked for.
+
+- **All 5 action types confirmed logged, one call each, right after the
+  point of success (not before validation, not on failure paths):**
+  1. **`ADMIN_UNPUBLISH`** — `AdminService.unpublishListing()`, logged
+     immediately after `designListingRepository.save(listing)` succeeds.
+  2. **`ADMIN_REPUBLISH`** — `AdminService.republishListing()`, logged
+     after its save — the existing `adminUnpublished == true` gate (and
+     its `InvalidListingInputException` on failure) still runs *before*
+     this, so a rejected republish attempt logs nothing.
+  3. **`ADMIN_SUSPEND_USER`** — `AdminService.suspendUser()`, logged
+     after `userRepository.save(user)` and the existing notification
+     call. Covers both suspend *and* unsuspend under the one action type
+     the task's enum list specifies (there's no separate "unsuspend"
+     type) — `metadata` disambiguates: `"Suspended"` or `"Unsuspended"`,
+     plus `": <reason>"` if one was given.
+  4. **`ADMIN_REPORT_STATUS_CHANGE`** — `ReportService.updateStatus()`,
+     logged after `reportRepository.save(report)`; the existing
+     REVIEWED/DISMISSED/ACTIONED validation (and its exception on an
+     invalid value) still runs first. `metadata` is the new status
+     string.
+  5. **`DESIGNER_PUBLISH` / `DESIGNER_UNPUBLISH`** — the new piece, per
+     the task: `MarketplaceController.publishListing()` and
+     `.unpublishListing()` (the designer-only pair, previously never
+     logged by anything) each got one log call added right after their
+     existing `listingRepository.save(listing)` line. Read both methods
+     in full first to confirm the one-line addition doesn't touch their
+     existing behavior — it doesn't; `getOwnedListing()`'s ownership
+     check and the status/publishedAt writes are unchanged.
+
+- **Threading the actor through — the actual wiring work.** None of
+  `AdminService.unpublishListing()/republishListing()/suspendUser()` or
+  `ReportService.updateStatus()` previously received the caller's
+  identity at all (checked — confirmed by reading each signature before
+  touching it). Added a `User actor` parameter to all four, and to
+  `MarketplaceController`'s two designer endpoints. `AdminController` had
+  no `currentUser()` helper or `UserRepository` before this session (it
+  only ever called `adminService.xxx(id)` with no auth-derived data) — added
+  both, matching the identical helper already used in
+  `MarketplaceController`/`ReportController`. `ReportController` already
+  had the helper; just added `Authentication` to `updateReportStatus()`'s
+  signature and passed `currentUser(authentication)` through.
+  `MarketplaceController.publishListing()`/`.unpublishListing()` already
+  had `Authentication` in scope — no signature change needed there, just
+  the one added log call each (calling `currentUser(authentication)` a
+  further time, consistent with those methods already calling it twice
+  independently for `getOwnedListing()` and `enrichWithDesigner()`).
+
+- **New read endpoint: `GET /api/admin/moderation-log/{targetType}
+  /{targetId}`**, ADMIN only, in a new `ModerationLogController`
+  (`moderationservice/controller/`) — kept as its own controller rather
+  than folded into `AdminController`, matching the established precedent
+  that `ReportController` (not `AdminController`) owns `/api/admin/reports`
+  because those endpoints belong to the Report resource; this one belongs
+  to the ModerationLogEntry resource the same way. `targetType` is
+  accepted as a `String` path segment and parsed manually into
+  `ModerationTargetType`, not bound directly as the enum type — an
+  invalid value throws the new `InvalidModerationLogQueryException` → 400
+  (wired into `GlobalExceptionHandler`), rather than letting Spring's
+  `MethodArgumentTypeMismatchException` fall through to the generic 500
+  handler; same reasoning already applied to `CreateReportRequest.
+  targetType` earlier this session. Returns
+  `List<ModerationLogEntry>` ordered `createdAt` ASC — raw entity, no DTO
+  layer, matching `Report`'s existing precedent.
+
+- **adminUnpublishedAt's ambiguity: now loggable/investigable, NOT
+  automatically resolved — this is deliberate, not an oversight.** Per
+  the task's explicit instruction, `republishListing()`'s gating logic
+  (`adminUnpublished == true`) and `adminUnpublishedAt` itself are
+  untouched this session. What changes is that an admin (or anyone
+  reading this log) can now call `GET /api/admin/moderation-log/LISTING
+  /{id}` and see the *entire* ordered history of a listing — every
+  `ADMIN_UNPUBLISH`, `DESIGNER_PUBLISH`, `DESIGNER_UNPUBLISH`, and
+  `ADMIN_REPUBLISH` event, in order, each with a timestamp. That's
+  exactly the "designer independently republished-then-unpublished after
+  an admin takedown" scenario from two sessions ago — a human (or code,
+  later) can now actually distinguish it from "untouched since the
+  admin's takedown" by reading the log, which was impossible before
+  today (nothing recorded a designer's publish/unpublish at all). Whether
+  to have `republishListing()` *itself* consult this log automatically —
+  e.g., refuse to republish if a `DESIGNER_UNPUBLISH` entry postdates the
+  most recent `ADMIN_UNPUBLISH` — is exactly the "follow-up once the log
+  exists" the task deferred; not implemented here.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 51 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1 — line number
+    shifted from the new constructor param, same root cause as before).
+    **No new failures.** `AdminServiceTest` was the only test file
+    needing a change (its direct `new AdminService(...)` call updated
+    with a 6th mocked `ModerationLogService` param) — confirmed via
+    search that no test constructs `ReportService` or
+    `MarketplaceController` directly, so neither needed touching.
+  - Confirmed via the Hibernate DDL log during `./mvnw test`: `create
+    table moderation_log_entries (...)` — applied cleanly, with `CHECK`
+    constraints on `action_type` (all 6 values) and `target_type` (all 3
+    values), `actor_id`/`actor_role`/`action_type`/`target_type`/`target_id`
+    all `NOT NULL`, `metadata` nullable `varchar(1000)`.
+  - **Not verified — needs a live check:** exercising each of the 5
+    logged actions against a running instance and confirming
+    `GET /api/admin/moderation-log/{targetType}/{targetId}` returns them
+    in the right order with the right `actorRole`/`metadata`; the 400
+    path for an invalid `targetType` segment.
+  - Not deployed, not committed — per the task's explicit instruction,
+    stopping after tests/build for review.
+
+**Files created:**
+`moderationservice/model/ModerationActionType.java`,
+`moderationservice/model/ModerationTargetType.java`,
+`moderationservice/model/ModerationLogEntry.java`,
+`moderationservice/repository/ModerationLogEntryRepository.java`,
+`moderationservice/service/ModerationLogService.java`,
+`moderationservice/controller/ModerationLogController.java`,
+`moderationservice/exception/InvalidModerationLogQueryException.java`.
+
+**Files modified:**
+`adminservice/service/AdminService.java` (ModerationLogService injected;
+`unpublishListing`/`republishListing`/`suspendUser` all gained a `User
+actor` param + one log call each), `adminservice/controller/
+AdminController.java` (new `UserRepository` + `currentUser()` helper;
+`Authentication` added to the 3 endpoints touching those methods),
+`moderationservice/service/ReportService.java` (`ModerationLogService`
+injected; `updateStatus()` gained a `User actor` param + one log call),
+`moderationservice/controller/ReportController.java` (`Authentication`
+added to `updateReportStatus()`), `marketplaceservice/controller/
+MarketplaceController.java` (`ModerationLogService` injected;
+`publishListing()`/`unpublishListing()` each gained one log call, no
+signature change), `exception/GlobalExceptionHandler.java` (new handler
+for `InvalidModerationLogQueryException` → 400),
+`adminservice/service/AdminServiceTest.java` (constructor call updated
+to compile — not a behavior change).
+
+**Files deleted:** none.

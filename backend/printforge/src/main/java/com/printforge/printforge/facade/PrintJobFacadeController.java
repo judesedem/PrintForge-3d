@@ -4,6 +4,7 @@ import com.printforge.printforge.entity.User;
 import com.printforge.printforge.estimateservice.model.Estimate;
 import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.estimateservice.service.EstimateService;
+import com.printforge.printforge.facade.dto.OrderAwaitingPaymentResponse;
 import com.printforge.printforge.facade.dto.PrintJobResponse;
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.service.FileService;
@@ -41,8 +42,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  * Bridges the frontend's 1-step job submission flow to the backend's
  * multi-service architecture.
  *
- * POST /api/print-jobs         → marketplace order (JSON: listing_id + print params)
- * POST /api/print-jobs/upload  → bring-your-own-file (multipart, backward compat)
+ * POST /api/print-jobs         → marketplace order (JSON: listing_id + print params).
+ *                                 Creates/reuses an Estimate only — no PrintJob yet.
+ *                                 PaymentService.handleWebhook creates the PrintJob
+ *                                 once payment clears (see #58).
+ * POST /api/print-jobs/upload  → bring-your-own-file (multipart, backward compat).
+ *                                 Same payment-gated behavior as above.
  * GET  /api/print-jobs         → list jobs
  * GET  /api/print-jobs/:id     → single job
  * PATCH /api/print-jobs/:id/approve
@@ -86,7 +91,7 @@ public class PrintJobFacadeController {
     // ── Marketplace Order (JSON body with listing_id) ─────────────────────────
 
     @PostMapping(consumes = "application/json")
-    public ResponseEntity<PrintJobResponse> submitMarketplaceOrder(
+    public ResponseEntity<OrderAwaitingPaymentResponse> submitMarketplaceOrder(
             @RequestBody Map<String, Object> body,
             Authentication authentication) {
 
@@ -105,11 +110,9 @@ public class PrintJobFacadeController {
 
         // 3. Parse print params
         String material = body.getOrDefault("material", "PLA").toString();
-        String color = body.getOrDefault("color", "").toString();
         int quantity = body.containsKey("quantity") ? ((Number) body.get("quantity")).intValue() : 1;
         String infill = body.getOrDefault("infill", "20%").toString();
         String quality = body.getOrDefault("quality", "Standard").toString();
-        String notes = body.containsKey("notes") ? body.get("notes").toString() : null;
 
         // 4. Reuse existing estimate or calculate fresh one
         Estimate estimate;
@@ -131,36 +134,32 @@ public class PrintJobFacadeController {
             estimateRepository.save(estimate);
         }
 
-        // 5. Create the print job via PrintQueueService.
-        // skipFileOwnershipCheck=true: the file belongs to the designer; the
-        // listing being PUBLISHED is the gate that authorises the customer to
-        // order it. Estimate ownership is still enforced inside the service.
-        PrintJob savedJob = printQueueService.createPrintJob(
-                fileId, estimate.getId(), caller.getUserId(),
-                material, color, quantity, infill, quality, notes,
-                true);
+        // 5. No PrintJob here — PaymentService.handleWebhook is the only place
+        // a PrintJob gets created, gated on payment actually clearing (#58).
+        // Creating one here too meant every paid order produced two PrintJob
+        // rows, and an abandoned checkout left an orphaned unpaid one sitting
+        // in the staff queue indistinguishable from a paid job.
 
         // 6. Designer earnings are incremented in PaymentService.handleWebhook
         // after payment actually confirms — not here at submission time.
         // Counting here would over-report if the user abandons checkout or
         // payment fails.
 
-        // 7. Notify customer
+        // 7. Notify customer — payment, not staff review, is the next step.
         notificationService.createNotification(
                 caller.getUserId(),
                 "Order Submitted",
-                "Your order for '" + listing.getTitle() + "' has been submitted and is awaiting review.",
+                "Your order for '" + listing.getTitle() + "' has been submitted and is awaiting payment.",
                 "info"
         );
 
-        ModelFile file = safeGetFile(fileId);
-        return ResponseEntity.ok(toResponse(savedJob, file, caller, estimate));
+        return ResponseEntity.ok(new OrderAwaitingPaymentResponse(estimate, listingId));
     }
 
     // ── Bring-Your-Own-File Upload (backward compat) ──────────────────────────
 
     @PostMapping(path = "/upload", consumes = "multipart/form-data")
-    public ResponseEntity<PrintJobResponse> submitJob(
+    public ResponseEntity<OrderAwaitingPaymentResponse> submitJob(
             @RequestPart("file") MultipartFile file,
             @RequestParam("material") String material,
             @RequestParam("color") String color,
@@ -175,22 +174,22 @@ public class PrintJobFacadeController {
         ModelFile savedFile = fileService.saveFileMetadata(file, caller.getUserId());
         Estimate estimate = calculateEstimate(savedFile.getFileId(), quality, infill, quantity, material, caller.getUserId());
 
-        // Route through the service so ownership checks are always enforced.
-        // skipFileOwnershipCheck=false: the file was just uploaded by this
-        // caller, so the check will pass — but we keep it on for correctness.
-        PrintJob savedJob = printQueueService.createPrintJob(
-                savedFile.getFileId(), estimate.getId(), caller.getUserId(),
-                material, color, quantity, infill, quality, notes,
-                false);
+        // No PrintJob here — PaymentService.handleWebhook is the only place a
+        // PrintJob gets created, gated on payment actually clearing (#58).
+        // material/color/quantity/infill/quality/notes are still validated
+        // and folded into the Estimate above; color and notes specifically
+        // have no home on Estimate and are dropped here, same pre-existing
+        // gap already documented in PaymentService.handleWebhook's job-
+        // creation comment for the marketplace path.
 
         notificationService.createNotification(
                 caller.getUserId(),
                 "Job Submitted",
-                "Your print job for '" + savedFile.getFileName() + "' has been submitted and is awaiting review.",
+                "Your print job for '" + savedFile.getFileName() + "' has been submitted and is awaiting payment.",
                 "info"
         );
 
-        return ResponseEntity.ok(toResponse(savedJob, savedFile, caller, estimate));
+        return ResponseEntity.ok(new OrderAwaitingPaymentResponse(estimate, null));
     }
 
     // ── List Jobs ────────────────────────────────────────────────────────────

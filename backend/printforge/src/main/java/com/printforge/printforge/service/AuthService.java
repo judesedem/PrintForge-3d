@@ -126,6 +126,20 @@ public class AuthService {
         User user = userRepository.findByEmail(request.getEmail())
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid email or password"));
 
+        // #68 follow-up — checked only after credentials are confirmed
+        // correct above, so this can't be used to probe whether an email
+        // is registered/suspended without knowing the password. Reuses the
+        // same exception type (and therefore the same 401 + ErrorResponse
+        // shape) every other login failure in this method already throws,
+        // per the task's explicit ask not to introduce a new response
+        // shape or status convention here — just a message that actually
+        // says what's wrong, matching JwtAuthFilter's suspended-check
+        // wording from the moderation work rather than the generic
+        // "invalid credentials" text.
+        if (Boolean.TRUE.equals(user.getSuspended())) {
+            throw new InvalidCredentialsException("Account suspended. Contact support.");
+        }
+
         String token = jwtService.generateToken(user.getEmail());
 
         return AuthResponse.builder()

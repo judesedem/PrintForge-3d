@@ -52,6 +52,40 @@ public class DesignListing {
 
     private Integer favoriteCount = 0;
 
+    // Designer's attestation at creation time that they own the rights to
+    // sell this design (#67). Not-null with a DB-level default so existing
+    // rows backfill to false via ddl-auto=update instead of failing the
+    // ALTER TABLE (see Estimate.java's fileId/userId comment for the
+    // general version of this gotcha — this field avoids it by giving
+    // Postgres an explicit DEFAULT alongside NOT NULL, rather than leaving
+    // the column nullable). MarketplaceController.createListing() rejects
+    // with 400 before save if the caller didn't set this true.
+    @Column(columnDefinition = "boolean not null default false")
+    private boolean ownershipAttested;
+
+    // Set when an admin force-unpublishes a listing via
+    // PATCH /api/admin/listings/{id}/unpublish (#68), as distinct from a
+    // designer voluntarily unpublishing their own listing (both set status
+    // back to DRAFT, but only this flag is checked by the marketplace-
+    // visibility queries) — so the listing stays hidden from browsing even
+    // if the designer's own unmodified /publish endpoint is called again.
+    // Nullable/boxed: null means "never taken down", same as an unset flag.
+    private Boolean adminUnpublished;
+
+    // When the admin takedown above was applied — set alongside
+    // adminUnpublished=true by AdminService.unpublishListing(), cleared
+    // back to null alongside adminUnpublished=false by
+    // AdminService.republishListing(). Added to let a future check compare
+    // "when did the admin take this down" against some "when did the
+    // designer last touch this listing" signal — but per the current
+    // Handoff.md writeup, DesignListing has no such counterpart timestamp
+    // today (publishedAt gets nulled out on every unpublish, admin's or
+    // the designer's own, so it can't record when a *designer* unpublish
+    // happened), so this field alone does not yet resolve the
+    // republish-vs-designer-choice ambiguity documented there — it only
+    // records the admin side of the comparison.
+    private LocalDateTime adminUnpublishedAt;
+
     // Populated by the controller/service from the User referenced by
     // designerId, right before serialization — not persisted. Lets every
     // listing response include who made it without turning designerId into
@@ -131,4 +165,13 @@ public class DesignListing {
 
     public Boolean getIsFavorited() { return isFavorited; }
     public void setIsFavorited(Boolean isFavorited) { this.isFavorited = isFavorited; }
+
+    public boolean isOwnershipAttested() { return ownershipAttested; }
+    public void setOwnershipAttested(boolean ownershipAttested) { this.ownershipAttested = ownershipAttested; }
+
+    public Boolean getAdminUnpublished() { return adminUnpublished; }
+    public void setAdminUnpublished(Boolean adminUnpublished) { this.adminUnpublished = adminUnpublished; }
+
+    public LocalDateTime getAdminUnpublishedAt() { return adminUnpublishedAt; }
+    public void setAdminUnpublishedAt(LocalDateTime adminUnpublishedAt) { this.adminUnpublishedAt = adminUnpublishedAt; }
 }

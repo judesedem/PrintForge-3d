@@ -1,5 +1,7 @@
 package com.printforge.printforge.security;
 
+import com.printforge.printforge.entity.User;
+import com.printforge.printforge.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -22,6 +24,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserDetailsService userDetailsService;
+    private final UserRepository userRepository;
 
     @Override
     protected void doFilterInternal(
@@ -47,6 +50,24 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
                 if (jwtService.isTokenValid(jwt, userDetails.getUsername())) {
+
+                    // Suspended accounts (#68) are rejected on every request
+                    // from here on, even with a still-valid JWT — a
+                    // moderation suspension has to take effect immediately,
+                    // not just at next login. userDetailsService already
+                    // looked this user up once above; this is a second,
+                    // separate lookup because the UserDetailsService bean
+                    // (ApplicationConfig) returns a plain Spring Security
+                    // User, not the domain entity, so `suspended` isn't
+                    // available on userDetails itself.
+                    User user = userRepository.findByEmail(email).orElse(null);
+                    if (user != null && Boolean.TRUE.equals(user.getSuspended())) {
+                        SecurityContextHolder.clearContext();
+                        response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                        response.setContentType("application/json");
+                        response.getWriter().write("{\"status\":403,\"message\":\"Account suspended. Contact support.\"}");
+                        return;
+                    }
 
                     UsernamePasswordAuthenticationToken authToken =
                             new UsernamePasswordAuthenticationToken(

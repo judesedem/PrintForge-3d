@@ -54,10 +54,28 @@ public class UserService {
         return toUserDto(saved);
     }
 
-    /** GET /api/users/{id}/designs — public, PUBLISHED-only, newest first. */
+    /**
+     * GET /api/users/{id}/designs — public, PUBLISHED-only, newest first.
+     * #68: a suspended designer's whole portfolio is hidden here (not just
+     * individual listings), and any listing an admin has force-unpublished
+     * stays excluded even if status somehow reads PUBLISHED again — e.g. if
+     * the designer calls their own (unmodified) /publish endpoint after a
+     * takedown, which flips status back without clearing adminUnpublished.
+     */
     public List<DesignListing> getPublishedDesignsForUser(Long designerId) {
+        boolean designerSuspended = userRepository.findById(designerId)
+                .map(User::getSuspended)
+                .map(Boolean.TRUE::equals)
+                .orElse(false);
+        if (designerSuspended) {
+            return List.of();
+        }
+
         List<DesignListing> listings =
                 listingRepository.findByDesignerIdAndStatusOrderByCreatedAtDesc(designerId, "PUBLISHED");
+        listings = listings.stream()
+                .filter(l -> !Boolean.TRUE.equals(l.getAdminUnpublished()))
+                .toList();
         enrichWithDesigner(listings);
         return listings;
     }
