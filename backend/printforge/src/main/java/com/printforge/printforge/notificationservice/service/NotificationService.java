@@ -5,6 +5,7 @@ import com.printforge.printforge.notificationservice.model.Notification;
 import com.printforge.printforge.notificationservice.repository.NotificationRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -65,7 +66,23 @@ public class NotificationService {
         return notificationRepository.save(notification);
     }
 
-    // 6. Mark all as read (Bonus feature)
+    /**
+     * Mark all as read (Bonus feature).
+     *
+     * @Transactional keeps the entities fetched by getUnreadNotifications()
+     * managed/attached for the rest of this method — without it, each
+     * repository call ran in its own separate transaction (Spring Data
+     * JPA repository methods are individually transactional by default),
+     * so by the time saveAll() ran the fetched entities were already
+     * detached. saveAll() on detached entities calls entityManager.merge(),
+     * which issues an extra SELECT per entity to reconcile state before
+     * the UPDATE — confirmed via @SpringBootTest + hibernate.orm.jdbc.batch
+     * logging in the prior Hibernate-batching fix. This annotation is a
+     * pure query-count reduction: same entities fetched, same rows
+     * updated, same batched-UPDATE behavior from that fix — just without
+     * the now-unnecessary per-entity SELECT beforehand.
+     */
+    @Transactional
     public void markAllAsRead(Long userId) {
         List<Notification> unread = getUnreadNotifications(userId);
         unread.forEach(n -> n.setRead(true));

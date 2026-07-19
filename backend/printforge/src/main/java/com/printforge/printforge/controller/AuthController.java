@@ -1,8 +1,10 @@
 package com.printforge.printforge.controller;
 
 import com.printforge.printforge.dto.AuthResponse;
+import com.printforge.printforge.dto.ForgotPasswordRequest;
 import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.dto.ResetPasswordRequest;
 import com.printforge.printforge.dto.UpdateProfileRequest;
 import com.printforge.printforge.dto.UserDto;
 import com.printforge.printforge.service.AuthService;
@@ -13,6 +15,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -51,6 +56,35 @@ public class AuthController {
             @AuthenticationPrincipal UserDetails userDetails) {
 
         AuthResponse response = authService.updateProfile(userDetails.getUsername(), request);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Always 200 with the same generic message, whether or not the email
+     * is registered — see AuthService.forgotPassword()'s javadoc. Public
+     * endpoint (see SecurityConfig's permitAll list), same as /register
+     * and /login — a user who forgot their password can't authenticate.
+     */
+    @PostMapping("/forgot-password")
+    public ResponseEntity<Map<String, String>> forgotPassword(
+            @Valid @RequestBody ForgotPasswordRequest request) {
+
+        authService.forgotPassword(request.getEmail());
+
+        Map<String, String> response = new LinkedHashMap<>();
+        response.put("message", "If an account exists, a reset link has been sent");
+        return ResponseEntity.ok(response);
+    }
+
+    /** Public endpoint — see SecurityConfig's permitAll list. */
+    @PostMapping("/reset-password")
+    public ResponseEntity<Map<String, String>> resetPassword(
+            @Valid @RequestBody ResetPasswordRequest request) {
+
+        authService.resetPassword(request.getToken(), request.getNewPassword());
+
+        Map<String, String> response = new LinkedHashMap<>();
+        response.put("message", "Password reset successful");
         return ResponseEntity.ok(response);
     }
 

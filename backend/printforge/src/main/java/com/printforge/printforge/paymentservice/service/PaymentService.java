@@ -14,6 +14,7 @@ import com.printforge.printforge.paymentservice.repository.PaymentRepository;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -25,13 +26,16 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class PaymentService {
 
@@ -59,7 +63,15 @@ public class PaymentService {
         this.listingRepository  = listingRepository;
         this.printJobRepository = printJobRepository;
         this.notificationService = notificationService;
-        this.httpClient  = HttpClient.newHttpClient();
+        // Connect timeout only bounds establishing the TCP/TLS connection —
+        // it does not bound waiting for a response once connected, which is
+        // why each individual HttpRequest below also sets its own .timeout().
+        // Without either, a slow/hung Paystack leaves the request thread
+        // blocked on the OS-level TCP timeout (effectively unbounded from
+        // this app's perspective) instead of failing in a controlled way.
+        this.httpClient = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(5))
+                .build();
         this.objectMapper = new ObjectMapper();
     }
 
@@ -276,6 +288,7 @@ public class PaymentService {
                     .uri(URI.create(PAYSTACK_INITIALIZE_URL))
                     .header("Authorization", "Bearer " + paystackSecretKey)
                     .header("Content-Type", "application/json")
+                    .timeout(Duration.ofSeconds(10))
                     .POST(HttpRequest.BodyPublishers.ofString(body))
                     .build();
 
@@ -288,6 +301,12 @@ public class PaymentService {
 
             return json.path("data").path("authorization_url").asText();
 
+        } catch (HttpTimeoutException e) {
+            // Caller-facing message, deliberately not the raw exception text —
+            // this surfaces straight to the frontend via
+            // GlobalExceptionHandler's PaymentFailedException -> 502 mapping.
+            log.warn("Paystack initialize request timed out for reference {}: {}", reference, e.getMessage());
+            throw new PaymentFailedException("Payment service is temporarily unavailable, please try again");
         } catch (PaymentFailedException e) {
             throw e;
         } catch (Exception e) {
@@ -300,6 +319,7 @@ public class PaymentService {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(PAYSTACK_VERIFY_URL + reference))
                     .header("Authorization", "Bearer " + paystackSecretKey)
+                    .timeout(Duration.ofSeconds(10))
                     .GET()
                     .build();
 
@@ -310,6 +330,18 @@ public class PaymentService {
             if (!"success".equals(txStatus)) {
                 throw new PaymentFailedException("Paystack verification returned status: " + txStatus);
             }
+        } catch (HttpTimeoutException e) {
+            // This runs inside handleWebhook(), BEFORE payment.setStatus
+            // ("COMPLETED") — so throwing here (same as any other failure
+            // path already did) leaves the Payment row untouched at
+            // PENDING, not FAILED. The PaymentFailedException below still
+            // makes PaymentController.webhook() return non-2xx, which is
+            // exactly what should happen: Paystack sees delivery as failed
+            // and retries the webhook later, rather than this app silently
+            // swallowing the timeout and never confirming the payment.
+            log.warn("Paystack verify request timed out for reference {} — payment left PENDING, " +
+                    "expecting Paystack's webhook retry: {}", reference, e.getMessage());
+            throw new PaymentFailedException("Could not verify transaction with Paystack: request timed out");
         } catch (PaymentFailedException e) {
             throw e;
         } catch (Exception e) {

@@ -5,15 +5,20 @@ import com.printforge.printforge.dto.LoginRequest;
 import com.printforge.printforge.dto.RegisterRequest;
 import com.printforge.printforge.dto.UpdateProfileRequest;
 import com.printforge.printforge.dto.UserDto;
+import com.printforge.printforge.emailservice.service.EmailService;
+import com.printforge.printforge.entity.PasswordResetToken;
 import com.printforge.printforge.entity.Role;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.exception.EmailAlreadyExistsException;
 import com.printforge.printforge.exception.InvalidCredentialsException;
+import com.printforge.printforge.exception.InvalidPasswordResetTokenException;
 import com.printforge.printforge.exception.InvalidProfileInputException;
 import com.printforge.printforge.exception.InvalidRoleException;
+import com.printforge.printforge.repository.PasswordResetTokenRepository;
 import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.security.JwtService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -21,14 +26,28 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+
+    private static final int RESET_TOKEN_EXPIRY_MINUTES = 30;
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
+    private final PasswordResetTokenRepository passwordResetTokenRepository;
+    private final EmailService emailService;
+
+    @Value("${app.frontend.reset-password-url}")
+    private String frontendResetPasswordUrl;
 
     public AuthResponse register(RegisterRequest request) {
 
@@ -219,6 +238,75 @@ public class AuthService {
                 .token(token)
                 .user(toUserDto(saved))
                 .build();
+    }
+
+    /**
+     * POST /api/auth/forgot-password. Always completes silently whether or
+     * not the email is registered — the controller returns the same 200 +
+     * generic message either way, so this method never throws for "user
+     * not found." Invalidates any previous unused token for the user
+     * before issuing a new one, so an old reset link stops working the
+     * moment a fresh one is requested.
+     */
+    public void forgotPassword(String email) {
+        Optional<User> maybeUser = userRepository.findByEmail(email);
+        if (maybeUser.isEmpty()) {
+            return;
+        }
+        User user = maybeUser.get();
+
+        List<PasswordResetToken> previousTokens =
+                passwordResetTokenRepository.findByUserIdAndUsedFalse(user.getUserId());
+        previousTokens.forEach(t -> t.setUsed(true));
+        passwordResetTokenRepository.saveAll(previousTokens);
+
+        String token = UUID.randomUUID().toString().replace("-", "");
+        PasswordResetToken resetToken = new PasswordResetToken();
+        resetToken.setUserId(user.getUserId());
+        resetToken.setToken(token);
+        resetToken.setExpiresAt(LocalDateTime.now().plusMinutes(RESET_TOKEN_EXPIRY_MINUTES));
+        resetToken.setUsed(false);
+        passwordResetTokenRepository.save(resetToken);
+
+        Map<String, String> templateVars = new LinkedHashMap<>();
+        templateVars.put("fullName", user.getFullName());
+        templateVars.put("resetLink", frontendResetPasswordUrl + "?token=" + token);
+        templateVars.put("expiryMinutes", String.valueOf(RESET_TOKEN_EXPIRY_MINUTES));
+
+        // Best-effort — same pattern as FileStorageService.deleteImage():
+        // an email-provider failure here must never surface as anything
+        // other than the controller's generic 200. Letting it propagate
+        // would turn "the send failed" into a distinguishable response
+        // from "no account exists," reopening exactly the enumeration gap
+        // this endpoint's uniform-response design exists to close.
+        try {
+            emailService.sendTemplatedEmail(
+                    user.getEmail(), "Reset your password", "password-reset", templateVars);
+        } catch (Exception e) {
+            // swallowed intentionally — see comment above
+        }
+    }
+
+    /**
+     * POST /api/auth/reset-password. Rejects with
+     * InvalidPasswordResetTokenException (400) if the token is unknown,
+     * already used, or expired — same generic message for all three, so
+     * the response never tells a caller which case applied.
+     */
+    public void resetPassword(String token, String newPassword) {
+        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(token)
+                .filter(t -> !t.isUsed())
+                .filter(t -> t.getExpiresAt().isAfter(LocalDateTime.now()))
+                .orElseThrow(() -> new InvalidPasswordResetTokenException("Invalid or expired reset link"));
+
+        User user = userRepository.findById(resetToken.getUserId())
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+
+        resetToken.setUsed(true);
+        passwordResetTokenRepository.save(resetToken);
     }
 
     private UserDto toUserDto(User user) {

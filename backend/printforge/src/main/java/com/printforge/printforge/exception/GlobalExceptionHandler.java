@@ -6,6 +6,8 @@ import com.printforge.printforge.fileservice.exception.CloudinaryUploadException
 import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
+import com.printforge.printforge.emailservice.exception.EmailSendException;
+import com.printforge.printforge.emailservice.exception.EmailTemplateNotFoundException;
 import com.printforge.printforge.notificationservice.exception.NotificationNotFoundException;
 import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
@@ -54,6 +56,13 @@ public class GlobalExceptionHandler {
             InvalidCredentialsException ex) {
 
         return buildError(HttpStatus.UNAUTHORIZED, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidPasswordResetTokenException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidPasswordResetToken(
+            InvalidPasswordResetTokenException ex) {
+
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(UsernameNotFoundException.class)
@@ -202,6 +211,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(CloudinaryUploadException.class)
     public ResponseEntity<ErrorResponse> handleCloudinaryUpload(CloudinaryUploadException ex) {
         return buildError(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    @ExceptionHandler(EmailSendException.class)
+    public ResponseEntity<ErrorResponse> handleEmailSend(EmailSendException ex) {
+        return buildError(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    @ExceptionHandler(EmailTemplateNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleEmailTemplateNotFound(EmailTemplateNotFoundException ex) {
+        return buildError(HttpStatus.INTERNAL_SERVER_ERROR, ex.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

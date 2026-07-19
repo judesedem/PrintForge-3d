@@ -50,4 +50,23 @@ public class User {
     // so the missing default on old rows is harmless.
     @Column(name = "suspended")
     private Boolean suspended;
+
+    // Whether this user has confirmed their email address via a
+    // verification link. Not-null with a DB-level default so existing
+    // rows backfill to false via ddl-auto=update instead of failing the
+    // ALTER TABLE — same safe pattern as DesignListing.ownershipAttested
+    // (a real NOT NULL column with a DEFAULT, rather than the
+    // nullable-Boolean workaround used for fields with no natural
+    // default, like `suspended` above).
+    @Column(name = "email_verified", columnDefinition = "boolean not null default false")
+    private boolean emailVerified;
+
+    // Whether this user has opted in to receiving email. Defaults true —
+    // this app currently sends transactional email only (password reset,
+    // etc.), not marketing, so opting in by default doesn't yet mean
+    // anything beyond "you'll get password-reset/notification email if
+    // we build that." Exists now so a future marketing-email feature has
+    // a real opt-in signal to check instead of retrofitting one.
+    @Column(name = "email_opt_in", columnDefinition = "boolean not null default true")
+    private boolean emailOptIn;
 }

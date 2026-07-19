@@ -2,9 +2,11 @@ package com.printforge.printforge.service;
 
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.emailservice.service.EmailService;
 import com.printforge.printforge.entity.Role;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.exception.InvalidRoleException;
+import com.printforge.printforge.repository.PasswordResetTokenRepository;
 import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.security.JwtService;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,6 +31,8 @@ class AuthServiceTest {
     PasswordEncoder passwordEncoder;
     JwtService jwtService;
     AuthenticationManager authenticationManager;
+    PasswordResetTokenRepository passwordResetTokenRepository;
+    EmailService emailService;
     AuthService authService;
 
     @BeforeEach
@@ -37,7 +41,10 @@ class AuthServiceTest {
         passwordEncoder = Mockito.mock(PasswordEncoder.class);
         jwtService = Mockito.mock(JwtService.class);
         authenticationManager = Mockito.mock(AuthenticationManager.class);
-        authService = new AuthService(userRepository, passwordEncoder, jwtService, authenticationManager);
+        passwordResetTokenRepository = Mockito.mock(PasswordResetTokenRepository.class);
+        emailService = Mockito.mock(EmailService.class);
+        authService = new AuthService(userRepository, passwordEncoder, jwtService, authenticationManager,
+                passwordResetTokenRepository, emailService);
 
         Mockito.when(passwordEncoder.encode(Mockito.any())).thenReturn("hashed");
         Mockito.when(jwtService.generateToken(Mockito.any())).thenReturn("fake-token");

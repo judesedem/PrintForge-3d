@@ -40,6 +40,12 @@ public class SecurityConfig {
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/api/auth/register", "/api/auth/login", "/api/payments/webhook").permitAll()
+                // A user who forgot their password can't authenticate, so
+                // these two have to be public — same reasoning as
+                // register/login above. Neither is behind RateLimitFilter
+                // yet (that filter only covers /login and /register today);
+                // see Handoff.md for that flagged gap.
+                .requestMatchers("/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
                 // Public designer-portfolio view — GET /api/users/{id}/designs — no
                 // auth needed to browse a designer's published work.
                 .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/users/*/designs").permitAll()
