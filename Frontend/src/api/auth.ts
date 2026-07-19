@@ -53,3 +53,34 @@ export function getCurrentUser(token: string): Promise<UserDto> {
 export function logout(token: string): Promise<void> {
   return apiFetch<void>('/api/auth/logout', { method: 'POST', token });
 }
+
+/**
+ * Maps to POST /api/auth/forgot-password — this endpoint does not exist
+ * on the backend yet. forgot-password.tsx calls this and catches the
+ * failure itself (the screen shows a generic "reset link sent if account
+ * exists" toast either way, so a 404 here degrades invisibly to the user
+ * until the real endpoint lands).
+ */
+export function forgotPassword(email: string): Promise<void> {
+  return apiFetch<void>('/api/auth/forgot-password', {
+    method: 'POST',
+    body: { email },
+  });
+}
+
+/**
+ * Maps to PATCH /api/auth/change-password — this endpoint does not exist
+ * on the backend yet. change-password.tsx calls this and catches the
+ * failure itself with a "coming soon" toast until the real endpoint lands.
+ */
+export function changePassword(
+  token: string,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return apiFetch<void>('/api/auth/change-password', {
+    method: 'PATCH',
+    token,
+    body: { currentPassword, newPassword },
+  });
+}

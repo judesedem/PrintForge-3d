@@ -172,8 +172,28 @@ export default function SubmitScreen() {
   );
 
   const handleGetEstimate = async () => {
-    if (!token || !modelFile || !materialName || estimatePhase !== "idle")
+    if (!token || estimatePhase !== "idle") return;
+
+    // Client-side validation — these should already be unreachable via
+    // the stepper min/slider bounds/isReadyForEstimate gating below, but
+    // checked explicitly here too so a bad value never reaches the API.
+    if (!modelFile) {
+      setEstimateError("Please select a file to upload");
       return;
+    }
+    if (qty < 1) {
+      setEstimateError("Quantity must be at least 1");
+      return;
+    }
+    if (infill < 0 || infill > 100) {
+      setEstimateError("Infill must be between 0% and 100%");
+      return;
+    }
+    if (!materialName || materialName.trim() === "") {
+      setEstimateError("Please select a material");
+      return;
+    }
+
     setEstimateError(null);
     try {
       setEstimatePhase("uploading");
@@ -715,7 +735,7 @@ export default function SubmitScreen() {
           value={infill}
           minimumValue={0}
           maximumValue={100}
-          step={1}
+          step={5}
           onValueChange={(value: any) =>
             setInfill(Array.isArray(value) ? value[0] : value)
           }

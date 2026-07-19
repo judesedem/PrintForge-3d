@@ -46,6 +46,10 @@ function RootStack() {
       */}
       <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
       <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
+      <Stack.Screen
+        name="(auth)/forgot-password"
+        options={{ headerShown: false }}
+      />
       <Stack.Screen name="(app)" options={{ headerShown: false }} />
       <Stack.Screen name="jobs" options={{ headerShown: false }} />
       <Stack.Screen name="admin" options={{ headerShown: false }} />

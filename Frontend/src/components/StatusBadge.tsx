@@ -13,7 +13,9 @@ export default function StatusBadge({ status }: { status: JobStatus }) {
     QUEUED: colors.statusQueued,
     PRINTING: colors.statusPrinting,
     IN_PROGRESS: colors.statusInProgress,
+    READY: colors.statusReady,
     COMPLETED: colors.statusCompleted,
+    COLLECTED: colors.statusCollected,
     FAILED: colors.statusFailed,
     REJECTED: colors.statusRejected,
   };

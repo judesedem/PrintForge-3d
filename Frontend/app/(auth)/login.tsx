@@ -1,6 +1,7 @@
-import { useRouter } from 'expo-router';
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
+  Image,
   ImageBackground,
   Pressable,
   SafeAreaView,
@@ -9,14 +10,23 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { ArrowRight, Box, Eye, EyeOff, Lock, Mail, TriangleAlert } from 'lucide-react-native';
-import { useState } from 'react';
-import { useTheme } from '../../src/ThemeContext';
-import { useSession } from '../../src/SessionContext';
-import { useToast } from '../../src/ToastContext';
-import { ApiError } from '../../src/api/client';
-import { designTokens } from '../../src/theme';
+} from "react-native";
+import {
+  ArrowRight,
+  Box,
+  Eye,
+  EyeOff,
+  Lock,
+  Mail,
+  TriangleAlert,
+} from "lucide-react-native";
+import { useState } from "react";
+import { useTheme } from "../../src/ThemeContext";
+import { useSession } from "../../src/SessionContext";
+import { useToast } from "../../src/ToastContext";
+import { Dimensions } from "react-native";
+import { ApiError } from "../../src/api/client";
+import { designTokens } from "../../src/theme";
 
 /**
  * Login — Bolt redesign Pass 2. Blurred 3D-printing hero behind a dark
@@ -27,14 +37,17 @@ import { designTokens } from '../../src/theme';
  */
 
 const HERO_IMAGE =
-  'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=800';
+  "https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=800";
 
 // Fixed card-local colors — the card is white in both themes.
-const CARD_FG = '#0A182E';
-const CARD_MUTED = 'rgba(10, 24, 46, 0.55)';
-const CARD_BORDER = 'rgba(10, 24, 46, 0.12)';
-const CARD_INPUT_BG = '#F6F7F9';
-const ORANGE = '#FF6A00';
+const CARD_FG = "#0A182E";
+const CARD_MUTED = "rgba(10, 24, 46, 0.55)";
+const CARD_BORDER = "rgba(10, 24, 46, 0.12)";
+const CARD_INPUT_BG = "#F6F7F9";
+const ORANGE = "#FF6A00";
+const { height } = Dimensions.get("window");
+
+const bottom_value = height / 6 - 50;
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -43,8 +56,8 @@ export default function LoginScreen() {
   useTheme();
   const { showToast } = useToast();
   const { signInWithGoogle, login, authLoading } = useSession();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -54,7 +67,7 @@ export default function LoginScreen() {
   // based on the real UserDto.role that comes back from the backend.
   const handleSignIn = async () => {
     if (!email.trim() || !password) {
-      setError('Enter your email and password.');
+      setError("Enter your email and password.");
       return;
     }
     setError(null);
@@ -64,9 +77,13 @@ export default function LoginScreen() {
       // Concrete leaf route — the bare '/(app)/(tabs)' group href has an
       // empty concrete pathname ((tabs) has no index.tsx) and can resolve
       // to Unmatched Route. See register.tsx's handleCreateAccount comment.
-      router.replace('/(app)/(tabs)/dashboard');
+      router.replace("/(app)/(tabs)/dashboard");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Something went wrong. Try again.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -83,9 +100,9 @@ export default function LoginScreen() {
     setError(null);
     const user = await signInWithGoogle();
     if (user) {
-      router.replace('/(app)/(tabs)/dashboard');
+      router.replace("/(app)/(tabs)/dashboard");
     } else {
-      setError('Google sign-in didn’t complete. Try again.');
+      setError("Google sign-in didn’t complete. Try again.");
     }
   };
   void handleGoogleSignIn;
@@ -94,7 +111,11 @@ export default function LoginScreen() {
 
   return (
     <View style={s.root}>
-      <ImageBackground source={{ uri: HERO_IMAGE }} style={s.hero} blurRadius={6}>
+      <ImageBackground
+        source={{ uri: HERO_IMAGE }}
+        style={s.hero}
+        blurRadius={6}
+      >
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
           <ScrollView
@@ -102,13 +123,17 @@ export default function LoginScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            <View style={s.card}>
+            <View style={s.brandSection}>
               <View style={s.logoMark}>
-                <Box size={30} color="#FFFFFF" strokeWidth={2.2} />
+                <Box size={26} color="#FFFFFF" strokeWidth={2.2} />
               </View>
               <Text style={s.brandTitle}>PrintForge 3D</Text>
-              <Text style={s.brandSubtitle}>Print. Share. Build the future.</Text>
+              <Text style={s.brandSubtitle}>
+                Print. Share. Build the future.
+              </Text>
+            </View>
 
+            <View style={s.card}>
               {/* Log In | Sign Up switcher — separate routes, so the
                   inactive segment navigates rather than swapping state. */}
               <View style={s.segment}>
@@ -117,7 +142,7 @@ export default function LoginScreen() {
                 </View>
                 <Pressable
                   accessibilityRole="tab"
-                  onPress={() => router.push('/(auth)/register')}
+                  onPress={() => router.push("/(auth)/register")}
                   style={s.segmentTab}
                 >
                   <Text style={s.segmentText}>Sign Up</Text>
@@ -162,8 +187,10 @@ export default function LoginScreen() {
                 />
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                  onPress={() => setShowPassword(v => !v)}
+                  accessibilityLabel={
+                    showPassword ? "Hide password" : "Show password"
+                  }
+                  onPress={() => setShowPassword((v) => !v)}
                   hitSlop={8}
                 >
                   {showPassword ? (
@@ -176,7 +203,7 @@ export default function LoginScreen() {
 
               <Pressable
                 accessibilityRole="button"
-                onPress={() => showToast('Password reset is coming soon.')}
+                onPress={() => router.push("/(auth)/forgot-password")}
                 style={s.forgotLink}
               >
                 <Text style={s.forgotText}>Forgot password?</Text>
@@ -186,11 +213,7 @@ export default function LoginScreen() {
                 accessibilityRole="button"
                 disabled={busy}
                 onPress={handleSignIn}
-                style={({ pressed }) => [
-                  s.primaryButton,
-                  pressed && s.primaryButtonPressed,
-                  busy && s.disabled,
-                ]}
+                style={s.primaryButton}
               >
                 {submitting ? (
                   <ActivityIndicator color="#FFFFFF" />
@@ -208,8 +231,25 @@ export default function LoginScreen() {
                 <View style={s.divider} />
               </View>
 
+              {/* Placeholder per spec — real Google OAuth wiring (see
+                  handleGoogleSignIn above) comes later. */}
               <Pressable
-                onPress={() => router.push('/(auth)/register')}
+                accessibilityRole="button"
+                onPress={() => console.log("google sign in")}
+                android_ripple={{ color: "rgba(0,0,0,0.05)" }}
+                style={s.googleButton}
+              >
+                <View>
+                  <Image
+                    source={require("../../assets/google_icon.png")}
+                    style={{ width: 20, height: 20 }}
+                  />
+                </View>
+                <Text style={s.googleButtonText}>Continue with Google</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => router.push("/(auth)/register")}
                 style={s.footerLink}
                 disabled={busy}
               >
@@ -225,62 +265,63 @@ export default function LoginScreen() {
 }
 
 const s = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#0A182E' },
+  root: { flex: 1, backgroundColor: "#0A182E" },
   hero: { flex: 1 },
   heroOverlay: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(10, 24, 46, 0.85)',
+    backgroundColor: "rgba(10, 24, 46, 0.21)",
   },
   safeArea: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+    justifyContent: "center",
     paddingVertical: 32,
   },
-  card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 28,
+  brandSection: {
+    alignItems: "center",
     paddingHorizontal: 24,
-    paddingVertical: 32,
-    shadowColor: '#000000',
+    marginBottom: 24,
+  },
+  logoMark: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: "#FF6A00",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  brandTitle: {
+    color: "#FFFFFF",
+    fontSize: 22,
+    fontWeight: "800",
+    textAlign: "center",
+    marginTop: 8,
+  },
+  brandSubtitle: {
+    color: "rgba(255,255,255,0.7)",
+    fontSize: 13,
+    textAlign: "center",
+    marginTop: 4,
+  },
+  card: {
+    backgroundColor: "#FFFFFF",
+    borderRadius: 24,
+    marginHorizontal: 20,
+    top: bottom_value,
+    padding: 24,
+    shadowColor: "#000000",
     shadowOffset: { width: 0, height: 16 },
     shadowOpacity: 0.35,
     shadowRadius: 32,
     elevation: 12,
   },
-  logoMark: {
-    width: 60,
-    height: 60,
-    borderRadius: 18,
-    backgroundColor: '#FF6A00',
-    alignItems: 'center',
-    justifyContent: 'center',
-    alignSelf: 'center',
-    marginBottom: 12,
-  },
-  brandTitle: {
-    color: CARD_FG,
-    fontFamily: designTokens.type.display,
-    fontSize: 26,
-    textAlign: 'center',
-    letterSpacing: -0.5,
-  },
-  brandSubtitle: {
-    color: CARD_MUTED,
-    fontFamily: designTokens.type.body,
-    fontSize: 13,
-    textAlign: 'center',
-    marginTop: 4,
-    marginBottom: 22,
-  },
   segment: {
-    flexDirection: 'row',
-    backgroundColor: 'rgba(10, 24, 46, 0.07)',
+    flexDirection: "row",
+    backgroundColor: "rgba(10, 24, 46, 0.07)",
     borderRadius: 12,
     padding: 3,
     marginBottom: 18,
@@ -289,8 +330,8 @@ const s = StyleSheet.create({
     flex: 1,
     minHeight: 36,
     borderRadius: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   segmentTabActive: { backgroundColor: ORANGE },
   segmentText: {
@@ -299,32 +340,32 @@ const s = StyleSheet.create({
     fontSize: 13,
   },
   segmentTextActive: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontFamily: designTokens.type.heading,
     fontSize: 13,
   },
   errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 8,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: '#D92D20',
-    backgroundColor: 'rgba(217, 45, 32, 0.08)',
+    borderColor: "#D92D20",
+    backgroundColor: "rgba(217, 45, 32, 0.08)",
     padding: 11,
     marginBottom: 14,
   },
   errorText: {
     flex: 1,
-    color: '#D92D20',
+    color: "#D92D20",
     fontFamily: designTokens.type.medium,
     fontSize: 12.5,
     lineHeight: 17,
   },
   inputShell: {
     minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     paddingHorizontal: 14,
     borderRadius: 12,
@@ -340,7 +381,7 @@ const s = StyleSheet.create({
     fontSize: 15,
     paddingVertical: 0,
   },
-  forgotLink: { alignSelf: 'flex-end', marginBottom: 16, paddingVertical: 2 },
+  forgotLink: { alignSelf: "flex-end", marginBottom: 16, paddingVertical: 2 },
   forgotText: {
     color: ORANGE,
     fontFamily: designTokens.type.heading,
@@ -350,26 +391,77 @@ const s = StyleSheet.create({
     minHeight: 52,
     borderRadius: 12,
     backgroundColor: ORANGE,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
     gap: 8,
   },
-  primaryButtonPressed: { backgroundColor: '#E05F00', transform: [{ scale: 0.99 }] },
+  primaryButtonPressed: {
+    backgroundColor: "#E05F00",
+    transform: [{ scale: 0.99 }],
+  },
   primaryButtonText: {
-    color: '#FFFFFF',
+    color: "#FFFFFF",
     fontFamily: designTokens.type.heading,
     fontSize: 16,
   },
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 18 },
-  divider: { flex: 1, height: 1, backgroundColor: CARD_BORDER },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginVertical: 18,
+  },
+  divider: { flex: 1, height: 1, backgroundColor: "#E5E7EB" },
   dividerText: {
-    color: CARD_MUTED,
-    fontFamily: designTokens.type.body,
+    color: "#9CA3AF",
     fontSize: 12,
+    marginHorizontal: 12,
+  },
+  googleButton: {
+    width: "100%",
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#E5E7EB",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    marginBottom: 16,
+  },
+  googleButtonPressed: { opacity: 0.7 },
+  googleLogoCircle: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: "#4285F4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  googleLogoText: {
+    fontSize: 13,
+    fontWeight: "800",
+    color: "#FFFFFF",
+  },
+  googleButtonText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#374151",
   },
   disabled: { opacity: 0.55 },
-  footerLink: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },
-  footerText: { color: CARD_MUTED, fontFamily: designTokens.type.body, fontSize: 13 },
-  footerAction: { color: ORANGE, fontFamily: designTokens.type.heading, fontSize: 13 },
+  footerLink: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  footerText: {
+    color: CARD_MUTED,
+    fontFamily: designTokens.type.body,
+    fontSize: 13,
+  },
+  footerAction: {
+    color: ORANGE,
+    fontFamily: designTokens.type.heading,
+    fontSize: 13,
+  },
 });

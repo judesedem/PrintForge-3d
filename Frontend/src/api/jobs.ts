@@ -94,3 +94,106 @@ export async function rejectJob(token: string, jobId: string, reason?: string): 
   });
   return toJob(data);
 }
+
+export type GroupedQueue = {
+  SUBMITTED: Job[];
+  APPROVED: Job[];
+  PRINTING: Job[];
+  READY: Job[];
+  COLLECTED: Job[];
+  FAILED: Job[];
+};
+
+const QUEUE_GROUPS: (keyof GroupedQueue)[] = [
+  'SUBMITTED', 'APPROVED', 'PRINTING', 'READY', 'COLLECTED', 'FAILED',
+];
+
+/**
+ * Staff-only. Maps to GET /api/print-jobs/queue (PrintJobFacadeController.
+ * getQueueView) — every job grouped by status, same enriched shape as
+ * GET /api/print-jobs, ordered submittedAt ASC within each group.
+ *
+ * The backend only ever populates SUBMITTED/APPROVED/PRINTING/READY/
+ * COLLECTED (its QUEUE_STATUSES) — FAILED/REJECTED/QUEUED jobs don't
+ * appear in any group there. FAILED is always normalized to [] here so
+ * the return shape is always complete; a real FAILED bucket would need
+ * a backend change this endpoint doesn't currently make.
+ */
+export async function fetchGroupedQueue(token: string): Promise<GroupedQueue> {
+  const data = await apiFetch<Record<string, PrintJobApiResponse[]>>(
+    '/api/print-jobs/queue',
+    { token },
+  );
+
+  const grouped = {} as GroupedQueue;
+  for (const key of QUEUE_GROUPS) {
+    grouped[key] = (data[key] ?? []).map(toJob);
+  }
+  return grouped;
+}
+
+/**
+ * Client-side fallback for fetchGroupedQueue — used if GET
+ * /api/print-jobs/queue 404s. Maps the legacy statuses that predate the
+ * new transition endpoint onto their closest bucket (matching the
+ * mapping already documented at the top of app/jobs/index.tsx): QUEUED/
+ * IN_PROGRESS are "still printing"; COMPLETED is the old model's
+ * "ready for pickup" (there was no separate READY status before).
+ * REJECTED has no bucket here — a resolved dead-end, not outstanding
+ * queue work.
+ */
+export function groupJobsByStatus(jobs: Job[]): GroupedQueue {
+  const grouped = {} as GroupedQueue;
+  for (const key of QUEUE_GROUPS) {
+    grouped[key] = [];
+  }
+  for (const job of jobs) {
+    switch (job.status) {
+      case 'SUBMITTED':
+        grouped.SUBMITTED.push(job);
+        break;
+      case 'APPROVED':
+        grouped.APPROVED.push(job);
+        break;
+      case 'PRINTING':
+      case 'QUEUED':
+      case 'IN_PROGRESS':
+        grouped.PRINTING.push(job);
+        break;
+      case 'READY':
+      case 'COMPLETED':
+        grouped.READY.push(job);
+        break;
+      case 'COLLECTED':
+        grouped.COLLECTED.push(job);
+        break;
+      case 'FAILED':
+        grouped.FAILED.push(job);
+        break;
+      default:
+        break;
+    }
+  }
+  return grouped;
+}
+
+/**
+ * Staff-only. Maps to PATCH /api/print-jobs/{jobId}/transition (NOT
+ * /status — that older endpoint takes query params, not a JSON body, and
+ * its VALID_STATUSES set doesn't include READY/COLLECTED at all, so it
+ * can't actually perform these transitions). /transition enforces
+ * APPROVED→PRINTING→READY→COLLECTED in strict order and fires the
+ * matching notification server-side.
+ */
+export async function updateJobStatus(
+  token: string,
+  jobId: string,
+  status: 'PRINTING' | 'READY' | 'COLLECTED' | 'FAILED',
+): Promise<Job> {
+  const data = await apiFetch<PrintJobApiResponse>(`/api/print-jobs/${jobId}/transition`, {
+    method: 'PATCH',
+    token,
+    body: { status },
+  });
+  return toJob(data);
+}

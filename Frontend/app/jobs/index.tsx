@@ -2,6 +2,7 @@ import { FlatList, Pressable, StyleSheet, Text, View, Animated } from 'react-nat
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
+  AlertCircle,
   Bell,
   Box,
   CheckCircle2,
@@ -39,7 +40,16 @@ import type { Job, JobStatus } from '../../src/data/mockData';
  */
 
 const STAGES = ['Subm', 'Appr', 'Print', 'Ready', 'Coll'] as const;
+// FAILED is a terminal state alongside COLLECTED, but unlike the other
+// 5 statuses it has no fixed position in this linear pipeline — a job
+// can fail at any stage, and the backend doesn't record which one it
+// reached. Handled as its own branch in the timeline render below
+// (assumes it failed during PRINTING, the most common real failure
+// point) rather than by giving it an index in this array.
 const STATUS_ORDER = ['SUBMITTED', 'APPROVED', 'PRINTING', 'READY', 'COLLECTED'] as const;
+// Index into STAGES a FAILED job is assumed to have reached before
+// failing — see comment above. 2 = "Print".
+const FAILED_ASSUMED_STAGE = 2;
 
 type StatusVisual = {
   label: string;
@@ -63,7 +73,7 @@ function statusVisual(status: JobStatus, colors: Colors): StatusVisual {
     case 'COMPLETED':
       return { label: 'Ready for Pickup', stage: 3, fg: '#22C55E', bg: 'rgba(34, 197, 94, 0.15)' };
     case 'FAILED':
-      return { label: 'Failed', stage: -1, fg: colors.statusFailed.text, bg: colors.statusFailed.bg };
+      return { label: 'Failed', stage: -1, fg: '#EF4444', bg: 'rgba(239,68,68,0.2)' };
     case 'REJECTED':
       return { label: 'Rejected', stage: -1, fg: colors.statusRejected.text, bg: colors.statusRejected.bg };
     default:
@@ -143,7 +153,7 @@ export default function JobsList() {
 
   const renderCard = ({ item }: { item: Job }) => {
     const visual = statusVisual(item.status, colors);
-    const failed = visual.stage === -1;
+    const isFailed = item.status === 'FAILED';
     return (
       <View style={s.card}>
         <View style={s.cardTopRow}>
@@ -172,7 +182,13 @@ export default function JobsList() {
 
         <View style={s.timeline}>
           {STAGES.map((stage, i) => {
-            const stageIndex = STATUS_ORDER.indexOf(item.status as any);
+            // FAILED has no real position in STATUS_ORDER (see comment up
+            // top) — pills up to FAILED_ASSUMED_STAGE show as completed,
+            // that one stage shows red instead of orange, and the rest
+            // stay gray/future.
+            const stageIndex = isFailed
+              ? FAILED_ASSUMED_STAGE
+              : STATUS_ORDER.indexOf(item.status as any);
             const done = i < stageIndex;
             const current = i === stageIndex;
             return (
@@ -181,7 +197,7 @@ export default function JobsList() {
                   style={[
                     s.timelinePill,
                     done && s.timelinePillDone,
-                    current && s.timelinePillCurrent,
+                    current && (isFailed ? s.timelinePillFailed : s.timelinePillCurrent),
                   ]}
                 />
                 <Text style={s.timelineLabel}>{stage}</Text>
@@ -189,6 +205,15 @@ export default function JobsList() {
             );
           })}
         </View>
+
+        {isFailed ? (
+          <View style={s.failedRow}>
+            <AlertCircle size={12} color="#EF4444" />
+            <Text style={s.failedText}>
+              This job could not be completed. Contact the lab.
+            </Text>
+          </View>
+        ) : null}
 
         <Pressable
           accessibilityRole="button"
@@ -402,10 +427,24 @@ function makeStyles(colors: Colors) {
     timelinePillCurrent: {
       backgroundColor: '#FF6A00',
     },
+    timelinePillFailed: {
+      backgroundColor: '#EF4444',
+    },
     timelineLabel: {
       color: 'rgba(255,255,255,0.4)',
       fontSize: 9,
       fontFamily: designTokens.type.body,
+    },
+    failedRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginTop: 6,
+    },
+    failedText: {
+      color: '#EF4444',
+      fontFamily: designTokens.type.body,
+      fontSize: 10,
+      marginLeft: 4,
     },
 
     detailsLink: { alignSelf: 'flex-end', paddingTop: 4, paddingHorizontal: 2 },

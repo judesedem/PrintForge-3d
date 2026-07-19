@@ -71,6 +71,13 @@ function statusColors(approved: StatusColor, pending: StatusColor, failed: Statu
   return {
     statusApproved: withDot(approved),
     statusCompleted: withDot(approved),
+    // READY/COLLECTED postdate the original 3-bucket brand doc (added
+    // alongside the PATCH /api/print-jobs/{id}/transition endpoint) —
+    // both are "good outcome" terminal-ish states, same as COMPLETED, so
+    // they reuse the same `approved` (green) bucket rather than
+    // introducing new colors nobody's specified.
+    statusReady: withDot(approved),
+    statusCollected: withDot(approved),
     statusSubmitted: withDot(pending),
     statusQueued: withDot(pending),
     statusPrinting: withDot(pending),

@@ -1657,3 +1657,442 @@ calls, just restyled around.
   following.tsx (currently local state only, resets on remount), and a
   job/design name field on the Payment response so My Orders can show
   something better than `Estimate #{id}`.
+
+## Progress Log — 2026-07-19 — Backend security fixes (8 gaps closed)
+
+**Scope executed:** 8 backend fixes in `backend/printforge`. No endpoint
+signature the frontend already calls was changed — every fix is either
+internal (exception handling, an added ownership/authz check, a
+comparison method) or a genuinely new route.
+
+- **JwtAuthFilter — malformed/expired tokens no longer 500.**
+  `jwtService.extractEmail(jwt)` → `userDetailsService.loadUserByUsername`
+  → `isTokenValid` is now wrapped in one try/catch(RuntimeException). On
+  any failure (`ExpiredJwtException`, `MalformedJwtException`,
+  `SignatureException`, `IllegalArgumentException` from jjwt, or
+  `UsernameNotFoundException` for a token whose user was since deleted)
+  it clears `SecurityContextHolder`, writes
+  `{"status":401,"message":"Invalid or expired token"}`, and returns
+  without calling `filterChain.doFilter`. Verified live: a garbage
+  `Authorization: Bearer` value now returns exactly that JSON at 401
+  instead of an unhandled-exception 500; the normal no-token path (which
+  falls through to `JwtAuthEntryPoint`) is unaffected.
+
+- **PaymentService.initiatePayment — estimate ownership enforced.**
+  Right after `estimateRepository.findById(estimateId)`, added
+  `if (!estimate.getUserId().equals(userId)) throw new
+  AccessDeniedException("You can only pay for your own estimates");`.
+  Previously any authenticated user could pay for (and thus create a
+  print job against) another user's estimate by guessing/incrementing
+  the id.
+
+- **Paystack webhook signature — constant-time comparison.**
+  `isValidSignature()`'s `computed.equalsIgnoreCase(signature)` replaced
+  with `MessageDigest.isEqual()` on UTF-8 bytes (both sides lowercased
+  first to preserve the original case-insensitive behavior).
+  `String.equals`/`equalsIgnoreCase` short-circuit on the first
+  mismatched character, which leaks timing information an attacker could
+  use to forge a valid signature byte-by-byte; `MessageDigest.isEqual`
+  runs in constant time regardless of where the mismatch is.
+
+- **`/api/job-service/print-jobs` locked to ADMIN.** Added
+  `@PreAuthorize("hasRole('ADMIN')")` to all four methods
+  (`PrintJobController`) plus a class comment explaining why: this
+  controller bypasses the facade's validation, role checks, and
+  notifications entirely, so it's ops/debugging-only now, not reachable
+  by STUDENT/DESIGNER/LAB_STAFF.
+
+- **`GET /api/users/{id}/stats` — earnings visibility restricted.**
+  `UserService.getUserStats` now takes `(userId, callerId,
+  callerIsAdmin)`; `totalEarnings` is only computed (non-null) when the
+  caller is the designer themselves or an ADMIN — everyone else gets
+  `null` rather than the designer's real revenue figure.
+  `UserController` resolves the caller + `ROLE_ADMIN` check from
+  `Authentication` and passes both through. (This endpoint was built in
+  the prior gaps pass; the restriction is new.)
+
+- **First-ADMIN bootstrap — new `config/AdminSeeder.java`.**
+  `CommandLineRunner` reading `admin.email`/`admin.password`/`admin.name`
+  (mapped from `ADMIN_EMAIL`/`ADMIN_PASSWORD`/`ADMIN_NAME` in
+  `application.properties`, defaults `admin@printforge.com` / *(none)* /
+  `System Admin`). If `ADMIN_PASSWORD` is unset, skips silently — no
+  fallback password, so a deploy that forgets to set it doesn't end up
+  with a guessable default admin. If `ADMIN_EMAIL` already exists,
+  skips silently (idempotent, safe on every startup). Verified live: a
+  local boot with no `ADMIN_PASSWORD` set logged exactly `"ADMIN_PASSWORD
+  not set, skipping admin seed"`. Added `backend/printforge/.env.example`
+  documenting all env vars (existing ones + the 3 new admin ones) with
+  placeholders — no real secrets in it.
+
+- **`GET /api/print-jobs/queue` — new staff queue view**, added to
+  `PrintJobFacadeController` (the controller that already owns the
+  enriched `toResponse()` shape), gated
+  `@PreAuthorize("hasAnyRole('LAB_STAFF', 'ADMIN')")`. Returns all jobs
+  bucketed into `{SUBMITTED, APPROVED, PRINTING, READY, COLLECTED}`
+  (every key always present, even as `[]`), each job using the same
+  enriched shape as `GET /api/print-jobs`, sorted `submittedAt` ASC
+  within each bucket (one sort of the flat list before bucketing, not a
+  sort per bucket — same result, one pass). Jobs in other statuses
+  (QUEUED/COMPLETED/REJECTED — the older status vocabulary) simply don't
+  appear in this view; not an error, this endpoint is specifically the
+  live-queue picture.
+
+- **Dead code removed:** `MarketplaceService.java`, `MarketplaceItem.java`,
+  `MarketplaceItemRepository.java` (marketplaceservice package). Grepped
+  the entire `src` tree (main + test) for both class names first — zero
+  references outside the three files themselves, no `@Bean`/`@Component`
+  wiring anywhere else. This was a parallel, never-wired-up first draft
+  of the marketplace model; the real one is `DesignListing` +
+  `DesignListingRepository`, used by `MarketplaceController` all along.
+
+- **Not in scope, per the prompt** (noted, not fixed): forgot-password
+  flow (needs an email service), change-password endpoint, JWT
+  revocation (needs Redis/DB blacklist), payout mechanism (needs payment
+  provider integration beyond Paystack checkout), and the misleading
+  `jwt.secret` fallback comment (cosmetic).
+
+- **Test/build verification:**
+  - `./mvnw test`: 51 tests, 4 pre-existing failures — **confirmed
+    unrelated by `git stash`-ing every change in this pass and rerunning
+    against the untouched baseline**: `AuthServiceTest` ×2
+    (`registeringWithAdminRoleActuallyCreatesAnAdmin`,
+    `registeringWithLabStaffRoleIsCaseInsensitive` — these assert
+    self-registration can create ADMIN/LAB_STAFF, but
+    `AuthService.resolveRole()` already blocks that by design and was
+    never touched this pass or last), `FileStorageServiceTest
+    .wrapsCloudinaryExceptionInFileStorageException` (expects
+    `FileStorageException`, `store()` has thrown
+    `CloudinaryUploadException` since before this pass), and
+    `AdminServiceTest.summaryCountsJobsAndPrintersByStatus` (expected 3,
+    got 0 — same failure on the clean baseline). All four fail
+    identically with none of today's changes applied.
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - Ran the packaged jar locally (`java -jar ... --server.port=8099`):
+    clean boot, `AdminSeeder` logged the skip message correctly, then
+    smoke-tested every changed/new route — malformed JWT → 401 with the
+    exact new JSON body; no-token requests to `/api/auth/me`,
+    `/api/print-jobs/queue`, `/api/job-service/print-jobs`,
+    `/api/payments/initiate`, `/api/marketplace` all still correctly
+    401 via the normal entry point (confirms the try/catch didn't break
+    the no-token pass-through, and that deleting the marketplace dead
+    code didn't break Spring context startup).
+  - `railway up`: attempted, failed at the same ~10s mark as the prior
+    session's attempt, same deployment ID reappearing across repeated
+    `railway status` checks — consistent with the pre-existing,
+    already-broken deploy pipeline documented in the previous Progress
+    Log entry (not caused by this session's changes, which build and
+    boot cleanly locally). Production is still serving the last good
+    revision (`HTTP 400` on a malformed login POST, as expected) — no
+    outage. Railway dashboard access (browser login) would be needed to
+    see the actual pipeline failure reason.
+
+## Progress Log — 2026-07-19 — Missing/updated screens: forgot/change password, FAILED status, submit validation, grouped staff queue
+
+**Scope executed:** 5 frontend gaps in `Frontend`. Two new screens, one
+new backend-facing endpoint deviation (documented below), and updates to
+4 existing screens/files. `npx tsc --noEmit` was 0 errors on the first
+real run (after fixing a completely unrelated, pre-existing missing-
+`node_modules` state — see Verification).
+
+- **`app/(auth)/forgot-password.tsx` — new screen.** Same hero/overlay/
+  white-card shell as `login.tsx` (literally copy-pasted card styles for
+  visual parity), back arrow → `router.back()`, email input, "Send Reset
+  Link" button. Calls `POST /api/auth/forgot-password` (new, added to
+  `src/api/auth.ts` — this endpoint doesn't exist on the backend). Split
+  the "graceful degradation" and "inline error" requirements by status
+  code rather than treating them as the same thing: a 404 specifically
+  (endpoint truly doesn't exist) shows the generic "Reset link sent if
+  account exists" toast and navigates back after 2s; any *other* failure
+  (network error, 500, a real future implementation rejecting a bad
+  email) shows an inline error banner instead, matching "show inline
+  error if request fails" as its own distinct case. Registered in
+  `app/_layout.tsx`'s `RootStack` (this app registers every `(auth)` leaf
+  route explicitly — there's no `(auth)/_layout.tsx`).
+- **`login.tsx`** — "Forgot password?" now calls
+  `router.push('/(auth)/forgot-password')` instead of a
+  `showToast(...)` dead tap.
+
+- **`app/(app)/change-password.tsx` — new screen.** Stack screen, navy
+  background, `colors.card` surface, 3 password fields (current/new/
+  confirm) each with a Lock icon + eye toggle, inline validation (new
+  password ≥ 8 chars, new === confirm) before calling
+  `PATCH /api/auth/change-password` (new, added to `src/api/auth.ts` —
+  also doesn't exist on the backend yet). Same 404-vs-other-error split
+  as forgot-password: 404 → "Password change coming soon" toast +
+  `router.back()`; anything else → inline error, form stays open so the
+  user can retry. Registered in `app/(app)/_layout.tsx` alongside
+  `following`.
+- **`profile.tsx`** — added a "Change Password" row to Settings between
+  Help & Support and Sign Out (Lock icon, same `settingsRow`/
+  `settingsRowLeft`/`settingsRowText` styles every other row already
+  uses — no new one-off styling needed), `onPress` →
+  `router.push('/(app)/change-password')`.
+
+- **`app/jobs/index.tsx` — FAILED status.** `statusVisual()`'s FAILED
+  case now uses the spec's literal colors (`bg: rgba(239,68,68,0.2)`,
+  `text: #EF4444`) instead of the theme's `colors.statusFailed` (which
+  was `0.15` alpha, not `0.2` — close but not what was asked; this file
+  already hardcodes literal hex for several other statuses like
+  APPROVED/COMPLETED, so this matches its own established convention).
+  Timeline: FAILED has no real position in the existing `STATUS_ORDER`
+  pipeline array — a job can fail at any stage, and neither `Job` nor
+  the backend record *which* stage it reached before failing. Rather
+  than fabricate a data source that doesn't exist, or naively push
+  `'FAILED'` onto the end of `STATUS_ORDER` (which would have made
+  `i < stageIndex` true for every pill, i.e. all-green with no red pill
+  — not what "current pill shows red" describes), FAILED is handled as
+  its own branch: assumes it reached `FAILED_ASSUMED_STAGE = 2`
+  ("Print") before failing — the most common real failure point (a
+  print failing mid-job, vs. REJECTED which already means "never even
+  started") — pills before that show green/done, that one shows red,
+  the rest stay gray. Documented as a judgment call in the file itself.
+  Added the `AlertCircle` error row below the timeline exactly per spec,
+  shown only when `status === 'FAILED'`.
+  Widened `JobStatus` (`src/data/mockData.ts`) to include `'READY' |
+  'COLLECTED'` — this file already referenced both via `STATUS_ORDER`
+  and an `item.status as any` cast, clearly anticipating this gap; now
+  closed. That widening surfaced two *other* files with
+  `Record<JobStatus, ...>` exhaustive maps missing the two new keys —
+  fixed both (see Verification) rather than leaving them to fail at
+  runtime for any job that reaches READY/COLLECTED.
+
+- **`submit.tsx` — client-side validation.** `handleGetEstimate`'s old
+  guard (`if (!token || !modelFile || !materialName || ...) return;`)
+  silently no-op'd on a missing file/material with no message. Replaced
+  with the 4 explicit checks from the spec (file present, qty ≥ 1,
+  0 ≤ infill ≤ 100, material non-empty), each setting `estimateError` to
+  a specific message before returning — so what used to be a silently
+  disabled button now also explains itself if reached. Slider
+  `step`: `1` → `5` (0/5/10/.../100 only); `minimumValue`/`maximumValue`
+  were already `0`/`100`, confirmed not changed.
+
+- **`src/api/jobs.ts` — new functions**, `fetchGroupedQueue` and
+  `updateJobStatus`, both following the existing `apiFetch` pattern.
+  **Deviation worth flagging:** `updateJobStatus` calls
+  `PATCH /api/print-jobs/{jobId}/transition`, not `/status` as the
+  prompt literally said. The older `/status` endpoint
+  (`PrintQueueController`) takes query params, not a JSON body, and its
+  status vocabulary is `SUBMITTED/APPROVED/QUEUED/PRINTING/COMPLETED/
+  REJECTED` — it has no READY or COLLECTED at all, so it cannot perform
+  either of the transitions this screen needs regardless of how it's
+  called. `/transition` is the endpoint actually built for this (see the
+  2026-07-19 backend Progress Log entry above) — enforces
+  APPROVED→PRINTING→READY→COLLECTED one step at a time and fires the
+  matching notification. Wiring the literal `/status` path would have
+  produced a button that always 400s.
+  `fetchGroupedQueue` normalizes the backend's response (which only ever
+  populates `SUBMITTED/APPROVED/PRINTING/READY/COLLECTED` — FAILED never
+  appears there) into the full 6-key `GroupedQueue` shape, defaulting
+  FAILED to `[]` from that path. `groupJobsByStatus` is the client-side
+  fallback (used if the real endpoint 404s), grouping the already-loaded
+  `JobsContext` flat list — mapped QUEUED/IN_PROGRESS → PRINTING and
+  COMPLETED → READY (matching this repo's own documented old-model
+  mapping at the top of `jobs/index.tsx`: "Ready → COMPLETED, backend
+  has no separate READY status"), REJECTED jobs are dropped from this
+  view entirely (a resolved dead-end, not outstanding queue work).
+
+- **`app/staff/queue.tsx` — grouped-by-status redesign.** Removed the
+  local All/Pending/Printing/Ready filter pills entirely. Now loads
+  `fetchGroupedQueue(token)` on mount (falling back to
+  `groupJobsByStatus(jobs)` from `JobsContext` on any failure), and
+  renders one section per non-empty status
+  (SUBMITTED→APPROVED→PRINTING→READY→COLLECTED→FAILED order; empty
+  sections render nothing, not even a header). Section header: bold
+  white status name + a small count pill colored to match that status.
+  Same card body as before (avatar/name, title, spec pills, submitted-
+  ago). Actions per section: SUBMITTED keeps the exact existing Reject/
+  Approve flow (including the inline rejection-reason textarea)
+  untouched; APPROVED and PRINTING both show "Mark as Ready"; READY
+  shows "Mark Collected"; FAILED shows a plain red "Failed" label, no
+  buttons; COLLECTED shows nothing extra (muted, matching spec).
+  **Judgment call:** because `/transition` only allows one step at a
+  time, "Mark as Ready" can't literally always request `READY` — on an
+  APPROVED job it requests `PRINTING` (the only valid next step from
+  APPROVED), and on a PRINTING job it requests `READY`. The button label
+  stays "Mark as Ready" in both cases per the spec's grouping; only the
+  status value sent differs, computed via `nextTransitionStatus(job.status)`.
+  In practice this means an APPROVED job may need the button tapped
+  twice (once to start printing, once to mark ready) — which also
+  matches reality better than being able to mark an unstarted job
+  "ready." approveJob/rejectJob calls themselves are untouched; both now
+  also call the new `loadQueue()` afterward (in addition to the existing
+  `refetch()`) so this screen's grouped view stays in sync too.
+
+- **Verification:**
+  - First `npx tsc --noEmit` run came back with ~50 "Cannot find module"
+    errors across every file in the project, including ones untouched
+    this session — traced to `node_modules` being completely absent
+    (pre-existing environment state, not caused by this work). Ran
+    `npm install --legacy-peer-deps` (plain `npm install` failed on a
+    pre-existing react/react-dom peer-dependency conflict already baked
+    into the lockfile) to restore it.
+  - After that, two *real* errors surfaced, both caused by widening
+    `JobStatus`: `app/jobs/[id].tsx`'s `STATUS_ORDER` and
+    `src/components/StatusBadge.tsx`'s `statusMap` are both
+    `Record<JobStatus, ...>` exhaustive maps that didn't have READY/
+    COLLECTED yet. Fixed both — `STATUS_ORDER` gives READY the same
+    index as COMPLETED (4) and COLLECTED one past it (5, "further along
+    than ready"); `StatusBadge`'s map needed two new theme tokens
+    (`colors.statusReady`, `colors.statusCollected`, added to
+    `theme.ts`'s `statusColors()` — both reuse the existing green
+    `approved` bucket rather than inventing new unrequested colors).
+  - Final `npx tsc --noEmit`: **0 errors.**
+  - Confirmed via `ls`/`grep`: both new screens exist as real files
+    under `app/`, Expo Router's file-system routing needs no further
+    registration beyond the `Stack.Screen` entries added to
+    `app/_layout.tsx` / `app/(app)/_layout.tsx` (this app always
+    registers every leaf route explicitly — see the comment already in
+    `app/_layout.tsx`); `login.tsx`'s forgot-password link and
+    `profile.tsx`'s Change Password row both navigate to the right
+    routes.
+  - **Not verified — needs a device/simulator run:** the actual visual
+    layout of both new screens, the FAILED timeline's red-pill
+    rendering, and the grouped queue screen's real behavior against a
+    running backend (only typechecked, not exercised at runtime this
+    pass).
+
+---
+
+## 2026-07-19 — Backend: IDOR fix, lab pickup locations, favorites, profile editing
+
+Four independent backend fixes/features, all in `backend/printforge`.
+
+- **IDOR fix on `/api/job-service/print-jobs`** (raw CRUD controller, not
+  the facade). Previously every method here was locked to `@PreAuthorize
+  ("hasRole('ADMIN')")` from the last security pass — too broad in the
+  other direction, since STUDENT/DESIGNER callers need to see/edit their
+  *own* jobs through this path too. Relaxed GET list/single and PUT to
+  any authenticated caller, replaced with in-method ownership checks
+  (same `isStaff()`/`currentUser()` pattern already used in
+  `PrintJobFacadeController`): GET list returns all jobs for staff/admin,
+  only the caller's own (filtered by `userId`) otherwise; GET `/{id}`
+  throws `AccessDeniedException` unless caller is the owner or
+  staff/admin. POST stays ADMIN-only (untouched, not in scope).
+  PUT's `@RequestBody PrintJob` (raw entity, mass-assignable — a caller
+  could set `status`, `userId`, `assignedPrinter`, anything) replaced
+  with a new `UpdateJobRequest` DTO (`dto/UpdateJobRequest.java`)
+  containing only `notes`/`color`; `PrintJobService.updatePrintJob()`
+  (the vulnerable method) replaced with `updateJobFields()`, which only
+  ever touches those two fields. Staff-only fields remain reachable
+  solely through the existing PATCH `/{id}/status` endpoint.
+
+- **Lab pickup locations** — new `labservice` package (model/repository/
+  service/controller/exception/dto), matching the codebase's existing
+  convention for self-contained features (marketplaceservice,
+  fileservice, etc.). `LabLocation` entity (name/address/lat/lng/
+  isActive/createdAt) + `LabLocationRepository` + `LabLocationSeeder`
+  (idempotent CommandLineRunner — skips if any row exists, reads
+  `LAB_NAME`/`LAB_ADDRESS`/`LAB_LATITUDE`/`LAB_LONGITUDE` env vars with
+  KNUST defaults). `PrintJob` gained `labLocationId` (nullable), set in
+  `PrintJobFacadeController.approveJob()` from the currently active lab.
+  `PrintJobResponse` gained `pickup_location` (a lean `LabLocationSummary`
+  DTO — id/name/address/lat/lng — `@JsonInclude(NON_NULL)` so the key is
+  omitted rather than null when a job has no lab yet). New endpoints:
+  `GET /api/labs` + `GET /api/labs/{id}` (public — added to
+  `SecurityConfig`'s permitAll list), `POST /api/labs` + `PATCH
+  /api/labs/{id}` (ADMIN only).
+  **Deviation from the literal spec, flagged explicitly:** the task said
+  to enrich the READY notification "in PATCH /{id}/status" — but that
+  endpoint's status vocabulary (`PrintQueueService.updateJobStatus()`,
+  `VALID_STATUSES`) has no READY value at all, so there's no READY case
+  there to enrich. This mirrors the exact same `/status` vs `/transition`
+  split already documented earlier in this file (see the `submit.tsx`/
+  `jobs.ts` entry above) — the real READY transition, and its
+  notification, live in `PrintQueueService.transitionJobStatus()`
+  (PATCH `/{id}/transition`). Enriched that one instead: message is now
+  `"Your print job '[name]' is ready for pickup at [lab.name],
+  [lab.address]!"` when the job has a `labLocationId`, falling back to
+  the old generic message otherwise. `PrintQueueService`'s constructor
+  gained a 6th param (`LabLocationService`) — updated
+  `PrintQueueServiceTest.java`'s direct-construction call (line 60) to
+  keep it compiling, with a mocked `LabLocationService`.
+
+- **Favorites/wishlist** — new `Favorite` entity (marketplaceservice
+  package, unique constraint on `user_id`+`listing_id`) + `FavoriteRepository`
+  (`existsByUserIdAndListingId`, `findByUserId`, `deleteByUserIdAndListingId`,
+  `countByListingId`) + `AlreadyFavoritedException`/`FavoriteNotFoundException`.
+  `DesignListing` gained a persisted `favoriteCount` (Integer, defaults to
+  0 in `@PrePersist`) and a `@Transient isFavorited` (per-caller, same
+  enrichment pattern as the existing `designerName`/`designerAvatar`).
+  New endpoints on `MarketplaceController`: `POST /{id}/favorite` (409
+  via `AlreadyFavoritedException` if already favorited), `DELETE
+  /{id}/favorite` (404 via `FavoriteNotFoundException` if not), `GET
+  /favorites` (caller's favorited listings, `isFavorited: true` on all),
+  `GET /{id}/favorite/status` (`{isFavorited, favoriteCount}`). Wired
+  `isFavorited` enrichment into the existing `GET /api/marketplace` and
+  `GET /api/marketplace/{id}` responses via a new `safeCurrentUserId()`
+  helper that returns `null` instead of throwing for an unauthenticated
+  caller — **not currently reachable in practice**, since
+  `GET /api/marketplace` already requires auth per `SecurityConfig`
+  (confirmed via live testing in an earlier session this file
+  documents), so this is defensive groundwork for if that endpoint is
+  ever made public, not a behavior change today.
+
+- **Profile editing + Cloudinary orphan cleanup** — new `PATCH
+  /api/auth/profile` (`UpdateProfileRequest`: optional `fullName`/`email`,
+  `@Email`-validated). Validates fullName non-blank/≤100 chars when
+  present, normalizes email (trim+lowercase) and checks it's not already
+  taken by someone else (reused the existing `EmailAlreadyExistsException`
+  → 409 mapping rather than adding a redundant one). Always returns a
+  fresh `AuthResponse` (`{token, user}`) — a deliberate choice over
+  conditionally shaping the response on whether email changed: the email
+  *is* the JWT subject, so a changed email needs a new token regardless,
+  and re-issuing a token when only the name changed is harmless, not a
+  bug. New `InvalidProfileInputException` → 400.
+  Separately, fixed the Cloudinary orphan leak in
+  `UserService.updateProfilePicture()`: it uploaded a new image and
+  overwrote `profilePictureUrl` but never stored `publicId` and never
+  deleted the old asset, so every profile picture change left the
+  previous one orphaned in Cloudinary forever. Added
+  `User.profilePicturePublicId` (nullable), `FileStorageService.
+  deleteImage()` (best-effort `cloudinary.uploader().destroy()`, swallows
+  failures so a delete problem never blocks the new upload), and
+  reordered `updateProfilePicture()` to: load user → destroy old asset
+  if `profilePicturePublicId` is set → upload new image → save both new
+  URL and new publicId. `UserDto` already had `profile_picture_url`
+  (confirmed by reading it — no change needed there).
+
+- **New exceptions wired into `GlobalExceptionHandler`:**
+  `AlreadyFavoritedException`→409, `FavoriteNotFoundException`→404,
+  `LabLocationNotFoundException`→404, `InvalidProfileInputException`→400.
+
+- **`.env.example` / `application.properties`:** added `LAB_NAME`,
+  `LAB_ADDRESS`, `LAB_LATITUDE`, `LAB_LONGITUDE` (KNUST defaults) to
+  both.
+
+- **Verification:**
+  - `./mvnw test`: 51 tests run, 4 failures/errors — all 4 are the
+    *same* pre-existing failures already documented as unrelated in
+    earlier sessions of this file (`AuthServiceTest` ×2 — role
+    self-assignment guard rejecting ADMIN/LAB_STAFF, a stricter-than-the-
+    test's-assumption behavior from an earlier security pass;
+    `FileStorageServiceTest` ×1 — exception type mismatch;
+    `AdminServiceTest` ×1 — count assertion). None touch any file
+    changed this session. `PrintQueueServiceTest` (whose constructor
+    call I updated) passed in full.
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**, produced
+    `target/printforge-0.0.1-SNAPSHOT.jar`.
+  - Spring context boot (during `./mvnw test`) confirmed all new
+    schema changes apply cleanly: `favorites` table created,
+    `lab_locations` table created + seeded ("Default lab location
+    seeded: KNUST 3D Printing Lab"), `print_jobs.lab_location_id`
+    column added, `users.profile_picture_public_id` column added,
+    unique constraint on `favorites(user_id, listing_id)` applied.
+  - `railway up`: attempted **3 times**, all 3 failed identically —
+    each attempt got stuck at `scheduling build on Metal builder
+    "builder-lmhrgx"` with **zero further build-log or deploy-log
+    output** (not even a compiler line), then was marked `FAILED`
+    within about a minute. This is a Railway-platform-side failure, not
+    a code issue: the local package build above succeeded cleanly, and
+    the failure signature (empty logs, stuck at scheduling) is
+    identical across all 3 attempts regardless of what triggered them.
+    The production service (`printforge-backend-production.up.railway.app`)
+    is still running the old deployment (`afa2c468`, from 2026-07-16) —
+    **none of today's changes are live yet.** Retrying `railway up`
+    again later (or checking Railway's own status page) is the
+    reasonable next step; this doesn't need a code change on this end.
+  - **Not verified — needs the above deploy to succeed first:** every
+    new endpoint (`/api/labs*`, `/api/marketplace/*/favorite*`, `PATCH
+    /api/auth/profile`) has only been verified by local compilation +
+    the Spring context boot during tests, not exercised against a live
+    request from the frontend or a REST client.

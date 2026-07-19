@@ -1,5 +1,5 @@
 export type Role = 'student' | 'designer' | 'staff' | 'admin';
-export type JobStatus = 'SUBMITTED' | 'APPROVED' | 'QUEUED' | 'PRINTING' | 'IN_PROGRESS' | 'COMPLETED' | 'FAILED' | 'REJECTED';
+export type JobStatus = 'SUBMITTED' | 'APPROVED' | 'QUEUED' | 'PRINTING' | 'IN_PROGRESS' | 'READY' | 'COLLECTED' | 'COMPLETED' | 'FAILED' | 'REJECTED';
 export type PrinterStatus = 'AVAILABLE' | 'BUSY' | 'OFFLINE' | 'MAINTENANCE';
 export type Material = 'PLA' | 'RESIN' | 'ABS';
 export type Quality = 'DRAFT' | 'STANDARD' | 'HIGH';

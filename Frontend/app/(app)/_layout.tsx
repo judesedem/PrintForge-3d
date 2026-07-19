@@ -9,6 +9,10 @@ export default function AppLayout() {
       <Stack.Screen name="notifications" options={{ headerShown: false }} />
       <Stack.Screen name="following" options={{ headerShown: false }} />
       <Stack.Screen
+        name="change-password"
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
         name="marketplace/create"
         options={{ headerShown: false }}
       />

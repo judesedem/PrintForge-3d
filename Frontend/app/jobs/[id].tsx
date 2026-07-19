@@ -72,7 +72,9 @@ const STATUS_ORDER: Record<JobStatus, number> = {
   QUEUED: 2,
   PRINTING: 3,
   IN_PROGRESS: 3,
+  READY: 4,
   COMPLETED: 4,
+  COLLECTED: 5,
   FAILED: 3,
   REJECTED: 0,
 };

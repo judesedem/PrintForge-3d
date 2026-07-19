@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -14,36 +14,56 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/ThemeContext';
 import { useJobs } from '@/JobsContext';
 import { useSession } from '@/SessionContext';
-import { approveJob, rejectJob } from '@/api/jobs';
+import {
+  approveJob,
+  rejectJob,
+  fetchGroupedQueue,
+  groupJobsByStatus,
+  updateJobStatus,
+  GroupedQueue,
+} from '@/api/jobs';
 import { Job, JobStatus, PRINTERS } from '@/data/mockData';
 import { Colors, designTokens } from '@/theme';
 
 /**
- * Lab queue — Bolt redesign Pass 2.
+ * Lab queue — grouped-by-status redesign.
  *
- * Real actions kept exactly: approveJob / rejectJob (PATCH endpoints) +
- * refetch, including the printerId the approve call always sent. The old
- * screen's printer-fleet section was entirely MOCK data (PRINTERS from
- * mockData.ts) and is gone; the approve call still passes the same
- * default available-printer id it effectively always did.
+ * Real actions kept exactly: approveJob / rejectJob (PATCH .../approve,
+ * .../reject), including the printerId the approve call always sent.
  *
- * Buttons the backend can't back yet render DISABLED on purpose:
- * "Mark as Ready" / "Mark Collected" have no endpoint (the only staff
- * transitions are approve/reject), so they're visible per the design but
- * inert with a "not wired" caption — no fake API calls.
+ * NEW: "Mark as Ready" and "Mark Collected" are now wired to
+ * updateJobStatus(), which calls PATCH /api/print-jobs/{id}/transition —
+ * NOT the older .../status endpoint the "fixes" prompt referenced. That
+ * older endpoint takes query params (not a JSON body) and its status
+ * vocabulary doesn't include READY/COLLECTED at all, so it can't actually
+ * perform these transitions; /transition is the endpoint that was
+ * actually built for this and enforces APPROVED→PRINTING→READY→COLLECTED
+ * one step at a time. Because of that one-step-at-a-time rule, "Mark as
+ * Ready" on an APPROVED job actually calls updateJobStatus(..., 'PRINTING')
+ * (the only valid next step from APPROVED) — tapping it again once the
+ * job shows PRINTING then calls updateJobStatus(..., 'READY'). The button
+ * label stays "Mark as Ready" for both per the spec; what changes is which
+ * status it requests under the hood, based on the job's current status.
  *
- * Spec pills show material/quality/qty — Job carries no infill % or file
- * size, so those two from the reference can't be shown.
+ * The primary data source is GET /api/print-jobs/queue (fetchGroupedQueue).
+ * If that fails for any reason (including a 404, in case it isn't
+ * deployed yet), this falls back to grouping the flat job list
+ * JobsContext already loaded (groupJobsByStatus) rather than showing a
+ * hard error.
  */
 
-type QueueFilter = 'All' | 'Pending' | 'Printing' | 'Ready';
-const FILTERS: QueueFilter[] = ['All', 'Pending', 'Printing', 'Ready'];
+type SectionKey = keyof GroupedQueue;
 
-const FILTER_STATUSES: Record<Exclude<QueueFilter, 'All'>, JobStatus[]> = {
-  Pending: ['SUBMITTED'],
-  Printing: ['APPROVED', 'QUEUED', 'PRINTING', 'IN_PROGRESS'],
-  Ready: ['COMPLETED'],
-};
+const SECTION_ORDER: SectionKey[] = [
+  'SUBMITTED', 'APPROVED', 'PRINTING', 'READY', 'COLLECTED', 'FAILED',
+];
+
+/** Only APPROVED and PRINTING show "Mark as Ready" — see file header comment. */
+function nextTransitionStatus(status: JobStatus): 'PRINTING' | 'READY' | null {
+  if (status === 'APPROVED') return 'PRINTING';
+  if (status === 'PRINTING') return 'READY';
+  return null;
+}
 
 function statusPill(status: JobStatus, colors: Colors): { label: string; fg: string; bg: string } {
   switch (status) {
@@ -55,14 +75,34 @@ function statusPill(status: JobStatus, colors: Colors): { label: string; fg: str
     case 'PRINTING':
     case 'IN_PROGRESS':
       return { label: 'Printing', fg: colors.primary, bg: colors.primarySoft };
+    case 'READY':
     case 'COMPLETED':
       return { label: 'Ready', fg: '#22C55E', bg: 'rgba(34, 197, 94, 0.15)' };
+    case 'COLLECTED':
+      return { label: 'Collected', fg: colors.mutedFg, bg: colors.muted };
     case 'FAILED':
-      return { label: 'Failed', fg: colors.statusFailed.text, bg: colors.statusFailed.bg };
+      return { label: 'Failed', fg: '#EF4444', bg: 'rgba(239,68,68,0.2)' };
     case 'REJECTED':
       return { label: 'Rejected', fg: colors.statusRejected.text, bg: colors.statusRejected.bg };
     default:
       return { label: status, fg: colors.mutedFg, bg: colors.muted };
+  }
+}
+
+function sectionColor(key: SectionKey, colors: Colors): { fg: string; bg: string } {
+  switch (key) {
+    case 'SUBMITTED':
+      return { fg: colors.mutedFg, bg: colors.muted };
+    case 'APPROVED':
+      return { fg: '#5B8DEF', bg: 'rgba(37, 99, 235, 0.18)' };
+    case 'PRINTING':
+      return { fg: colors.primary, bg: colors.primarySoft };
+    case 'READY':
+      return { fg: '#22C55E', bg: 'rgba(34, 197, 94, 0.15)' };
+    case 'COLLECTED':
+      return { fg: colors.mutedFg, bg: colors.muted };
+    case 'FAILED':
+      return { fg: '#EF4444', bg: 'rgba(239,68,68,0.2)' };
   }
 }
 
@@ -90,24 +130,46 @@ export default function StaffQueue() {
   const { token } = useSession();
   const s = makeStyles(colors);
 
-  const [filter, setFilter] = useState<QueueFilter>('All');
   // Same default the old screen used for its approve call — first
   // AVAILABLE mock printer (the fleet UI itself was mock and is gone).
   const [printer] = useState(
     PRINTERS.find(item => item.status === 'AVAILABLE')?.id || 'printer-3',
   );
-  const [actionJob, setActionJob] = useState<{ id: string; kind: 'approve' | 'reject' } | null>(null);
+
+  const [groupedQueue, setGroupedQueue] = useState<GroupedQueue | null>(null);
+  const [queueLoading, setQueueLoading] = useState(true);
+
+  const [actionJob, setActionJob] = useState<
+    { id: string; kind: 'approve' | 'reject' | 'ready' | 'collect' } | null
+  >(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
 
-  const filtered = useMemo(
-    () =>
-      filter === 'All'
-        ? jobs
-        : jobs.filter(job => FILTER_STATUSES[filter].includes(job.status)),
-    [jobs, filter],
-  );
+  const loadQueue = useCallback(async () => {
+    if (!token) return;
+    setQueueLoading(true);
+    try {
+      const data = await fetchGroupedQueue(token);
+      setGroupedQueue(data);
+    } catch {
+      // GET /api/print-jobs/queue failed (404 or otherwise) — fall back
+      // to grouping the flat list JobsContext already has, rather than
+      // showing a hard error on a staff-critical screen.
+      setGroupedQueue(groupJobsByStatus(jobs));
+    } finally {
+      setQueueLoading(false);
+    }
+    // Only re-run when the token changes — `jobs` is read inside the
+    // catch branch intentionally without retriggering a refetch every
+    // time JobsContext's own polling updates it (refetch()/loadQueue()
+    // pairs after each action already keep both in sync).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  useEffect(() => {
+    loadQueue();
+  }, [loadQueue]);
 
   const handleApprove = async (job: Job) => {
     if (!token || actionJob) return;
@@ -116,6 +178,7 @@ export default function StaffQueue() {
     try {
       await approveJob(token, job.id, { printerId: printer });
       await refetch();
+      await loadQueue();
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Failed to approve job');
     } finally {
@@ -130,6 +193,7 @@ export default function StaffQueue() {
     try {
       await rejectJob(token, job.id, rejectReason.trim() || undefined);
       await refetch();
+      await loadQueue();
       setRejectingId(null);
       setRejectReason('');
     } catch (err) {
@@ -138,6 +202,188 @@ export default function StaffQueue() {
       setActionJob(null);
     }
   };
+
+  const handleMarkReady = async (job: Job) => {
+    if (!token || actionJob) return;
+    const nextStatus = nextTransitionStatus(job.status);
+    if (!nextStatus) return;
+    setActionJob({ id: job.id, kind: 'ready' });
+    setActionError(null);
+    try {
+      await updateJobStatus(token, job.id, nextStatus);
+      await refetch();
+      await loadQueue();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update job status');
+    } finally {
+      setActionJob(null);
+    }
+  };
+
+  const handleMarkCollected = async (job: Job) => {
+    if (!token || actionJob) return;
+    setActionJob({ id: job.id, kind: 'collect' });
+    setActionError(null);
+    try {
+      await updateJobStatus(token, job.id, 'COLLECTED');
+      await refetch();
+      await loadQueue();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to update job status');
+    } finally {
+      setActionJob(null);
+    }
+  };
+
+  const renderJobCard = (job: Job, sectionKey: SectionKey) => {
+    const pill = statusPill(job.status, colors);
+    const busy = actionJob?.id === job.id;
+    const rejecting = rejectingId === job.id;
+
+    return (
+      <View key={job.id} style={s.card}>
+        <View style={s.cardTopRow}>
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{initialsOf(job.student)}</Text>
+          </View>
+          <Text style={s.studentName} numberOfLines={1}>{job.student}</Text>
+          <View style={[s.statusPill, { backgroundColor: pill.bg }]}>
+            <Text style={[s.statusPillText, { color: pill.fg }]}>{pill.label}</Text>
+          </View>
+        </View>
+
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.push(`/jobs/${job.id}`)}
+          style={({ pressed }) => pressed && s.pressed}
+        >
+          <Text style={s.jobTitle} numberOfLines={1}>{job.title}</Text>
+        </Pressable>
+
+        <View style={s.specRow}>
+          <View style={s.specPill}><Text style={s.specPillText}>{job.material}</Text></View>
+          <View style={s.specPill}><Text style={s.specPillText}>{job.quality}</Text></View>
+          <View style={s.specPill}><Text style={s.specPillText}>Qty {job.qty}</Text></View>
+          <View style={s.specPill}>
+            <Text style={s.specPillText}>GH₵ {job.cost.toFixed(2)}</Text>
+          </View>
+        </View>
+
+        <Text style={s.submittedText}>{submittedAgo(job.submittedAt)}</Text>
+
+        {sectionKey === 'SUBMITTED' ? (
+          rejecting ? (
+            <View style={s.rejectBlock}>
+              <TextInput
+                style={s.reasonInput}
+                value={rejectReason}
+                onChangeText={setRejectReason}
+                placeholder="Reason for rejection (optional)..."
+                placeholderTextColor={colors.mutedFg}
+                multiline
+                editable={!busy}
+              />
+              <View style={s.actionRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => {
+                    setRejectingId(null);
+                    setRejectReason('');
+                  }}
+                  style={({ pressed }) => [s.ghostButton, pressed && s.pressed]}
+                >
+                  <Text style={s.ghostButtonText}>Cancel</Text>
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={() => handleConfirmReject(job)}
+                  style={({ pressed }) => [s.rejectButton, pressed && s.pressed, busy && s.disabled]}
+                >
+                  {busy && actionJob?.kind === 'reject' ? (
+                    <ActivityIndicator color={colors.destructive} size="small" />
+                  ) : (
+                    <>
+                      <X size={16} color={colors.destructive} />
+                      <Text style={s.rejectButtonText}>Confirm Reject</Text>
+                    </>
+                  )}
+                </Pressable>
+              </View>
+            </View>
+          ) : (
+            <View style={s.actionRow}>
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => setRejectingId(job.id)}
+                style={({ pressed }) => [s.rejectButton, pressed && s.pressed, busy && s.disabled]}
+              >
+                <X size={16} color={colors.destructive} />
+                <Text style={s.rejectButtonText}>Reject</Text>
+              </Pressable>
+              <Pressable
+                accessibilityRole="button"
+                disabled={busy}
+                onPress={() => handleApprove(job)}
+                style={({ pressed }) => [s.approveButton, pressed && s.pressed, busy && s.disabled]}
+              >
+                {busy && actionJob?.kind === 'approve' ? (
+                  <ActivityIndicator color="#FFFFFF" size="small" />
+                ) : (
+                  <>
+                    <Check size={16} color="#FFFFFF" />
+                    <Text style={s.approveButtonText}>Approve</Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          )
+        ) : null}
+
+        {sectionKey === 'APPROVED' || sectionKey === 'PRINTING' ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => handleMarkReady(job)}
+            style={({ pressed }) => [s.fullButton, pressed && s.pressed, busy && s.disabled]}
+          >
+            {busy && actionJob?.kind === 'ready' ? (
+              <ActivityIndicator color="#FFFFFF" size="small" />
+            ) : (
+              <Text style={s.fullButtonText}>Mark as Ready</Text>
+            )}
+          </Pressable>
+        ) : null}
+
+        {sectionKey === 'READY' ? (
+          <Pressable
+            accessibilityRole="button"
+            disabled={busy}
+            onPress={() => handleMarkCollected(job)}
+            style={({ pressed }) => [s.fullGhostButton, pressed && s.pressed, busy && s.disabled]}
+          >
+            {busy && actionJob?.kind === 'collect' ? (
+              <ActivityIndicator color={colors.foreground} size="small" />
+            ) : (
+              <Text style={s.fullGhostButtonText}>Mark Collected</Text>
+            )}
+          </Pressable>
+        ) : null}
+
+        {sectionKey === 'FAILED' ? (
+          <View style={s.failedLabel}>
+            <Text style={s.failedLabelText}>Failed</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
+  const hasAnyJobs = groupedQueue
+    ? SECTION_ORDER.some(key => groupedQueue[key].length > 0)
+    : false;
 
   return (
     <SafeAreaView style={s.safeArea} edges={['top']}>
@@ -154,23 +400,6 @@ export default function StaffQueue() {
         <View style={s.topSpacer} />
       </View>
 
-      <View style={s.filterRow}>
-        {FILTERS.map(item => {
-          const active = filter === item;
-          return (
-            <Pressable
-              key={item}
-              accessibilityRole="button"
-              accessibilityState={{ selected: active }}
-              onPress={() => setFilter(item)}
-              style={[s.filterPill, active && s.filterPillActive]}
-            >
-              <Text style={[s.filterText, active && s.filterTextActive]}>{item}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
-
       <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         {actionError ? (
           <View style={s.errorBanner}>
@@ -178,139 +407,29 @@ export default function StaffQueue() {
           </View>
         ) : null}
 
-        {filtered.length === 0 ? (
+        {queueLoading && !groupedQueue ? (
+          <View style={s.emptyState}>
+            <ActivityIndicator color={colors.primary} />
+          </View>
+        ) : !hasAnyJobs ? (
           <View style={s.emptyState}>
             <Text style={s.emptyTitle}>Queue is clear</Text>
-            <Text style={s.emptyBody}>No jobs match this filter right now.</Text>
+            <Text style={s.emptyBody}>No jobs in the queue right now.</Text>
           </View>
         ) : (
-          filtered.map(job => {
-            const pill = statusPill(job.status, colors);
-            const busy = actionJob?.id === job.id;
-            const rejecting = rejectingId === job.id;
+          SECTION_ORDER.map(key => {
+            const items = groupedQueue ? groupedQueue[key] : [];
+            if (items.length === 0) return null;
+            const color = sectionColor(key, colors);
             return (
-              <View key={job.id} style={s.card}>
-                <View style={s.cardTopRow}>
-                  <View style={s.avatar}>
-                    <Text style={s.avatarText}>{initialsOf(job.student)}</Text>
-                  </View>
-                  <Text style={s.studentName} numberOfLines={1}>{job.student}</Text>
-                  <View style={[s.statusPill, { backgroundColor: pill.bg }]}>
-                    <Text style={[s.statusPillText, { color: pill.fg }]}>{pill.label}</Text>
+              <View key={key}>
+                <View style={s.sectionHeaderRow}>
+                  <Text style={s.sectionHeaderText}>{key}</Text>
+                  <View style={[s.sectionCountBadge, { backgroundColor: color.bg }]}>
+                    <Text style={[s.sectionCountText, { color: color.fg }]}>{items.length}</Text>
                   </View>
                 </View>
-
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={() => router.push(`/jobs/${job.id}`)}
-                  style={({ pressed }) => pressed && s.pressed}
-                >
-                  <Text style={s.jobTitle} numberOfLines={1}>{job.title}</Text>
-                </Pressable>
-
-                <View style={s.specRow}>
-                  <View style={s.specPill}><Text style={s.specPillText}>{job.material}</Text></View>
-                  <View style={s.specPill}><Text style={s.specPillText}>{job.quality}</Text></View>
-                  <View style={s.specPill}><Text style={s.specPillText}>Qty {job.qty}</Text></View>
-                  <View style={s.specPill}>
-                    <Text style={s.specPillText}>GH₵ {job.cost.toFixed(2)}</Text>
-                  </View>
-                </View>
-
-                <Text style={s.submittedText}>{submittedAgo(job.submittedAt)}</Text>
-
-                {job.status === 'SUBMITTED' ? (
-                  rejecting ? (
-                    <View style={s.rejectBlock}>
-                      <TextInput
-                        style={s.reasonInput}
-                        value={rejectReason}
-                        onChangeText={setRejectReason}
-                        placeholder="Reason for rejection (optional)..."
-                        placeholderTextColor={colors.mutedFg}
-                        multiline
-                        editable={!busy}
-                      />
-                      <View style={s.actionRow}>
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={busy}
-                          onPress={() => {
-                            setRejectingId(null);
-                            setRejectReason('');
-                          }}
-                          style={({ pressed }) => [s.ghostButton, pressed && s.pressed]}
-                        >
-                          <Text style={s.ghostButtonText}>Cancel</Text>
-                        </Pressable>
-                        <Pressable
-                          accessibilityRole="button"
-                          disabled={busy}
-                          onPress={() => handleConfirmReject(job)}
-                          style={({ pressed }) => [s.rejectButton, pressed && s.pressed, busy && s.disabled]}
-                        >
-                          {busy && actionJob?.kind === 'reject' ? (
-                            <ActivityIndicator color={colors.destructive} size="small" />
-                          ) : (
-                            <>
-                              <X size={16} color={colors.destructive} />
-                              <Text style={s.rejectButtonText}>Confirm Reject</Text>
-                            </>
-                          )}
-                        </Pressable>
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={s.actionRow}>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => setRejectingId(job.id)}
-                        style={({ pressed }) => [s.rejectButton, pressed && s.pressed, busy && s.disabled]}
-                      >
-                        <X size={16} color={colors.destructive} />
-                        <Text style={s.rejectButtonText}>Reject</Text>
-                      </Pressable>
-                      <Pressable
-                        accessibilityRole="button"
-                        disabled={busy}
-                        onPress={() => handleApprove(job)}
-                        style={({ pressed }) => [s.approveButton, pressed && s.pressed, busy && s.disabled]}
-                      >
-                        {busy && actionJob?.kind === 'approve' ? (
-                          <ActivityIndicator color="#FFFFFF" size="small" />
-                        ) : (
-                          <>
-                            <Check size={16} color="#FFFFFF" />
-                            <Text style={s.approveButtonText}>Approve</Text>
-                          </>
-                        )}
-                      </Pressable>
-                    </View>
-                  )
-                ) : null}
-
-                {['APPROVED', 'QUEUED', 'PRINTING', 'IN_PROGRESS'].includes(job.status) ? (
-                  <>
-                    <View style={[s.fullButton, s.disabled]}>
-                      <Text style={s.fullButtonText}>Mark as Ready</Text>
-                    </View>
-                    <Text style={s.notWiredText}>
-                      Status updates beyond approval aren’t supported by the backend yet.
-                    </Text>
-                  </>
-                ) : null}
-
-                {job.status === 'COMPLETED' ? (
-                  <>
-                    <View style={[s.fullGhostButton, s.disabled]}>
-                      <Text style={s.fullGhostButtonText}>Mark Collected</Text>
-                    </View>
-                    <Text style={s.notWiredText}>
-                      Pickup tracking isn’t supported by the backend yet.
-                    </Text>
-                  </>
-                ) : null}
+                {items.map(job => renderJobCard(job, key))}
               </View>
             );
           })
@@ -347,25 +466,6 @@ function makeStyles(colors: Colors) {
       textAlign: 'center',
     },
     topSpacer: { width: 32 },
-    filterRow: {
-      flexDirection: 'row',
-      gap: 8,
-      paddingHorizontal: designTokens.spacing.lg,
-      paddingVertical: designTokens.spacing.sm,
-    },
-    filterPill: {
-      borderRadius: designTokens.radius.pill,
-      backgroundColor: colors.muted,
-      paddingHorizontal: 14,
-      paddingVertical: 7,
-    },
-    filterPillActive: { backgroundColor: colors.primary },
-    filterText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.heading,
-      fontSize: 12,
-    },
-    filterTextActive: { color: '#FFFFFF' },
     content: {
       paddingHorizontal: designTokens.spacing.lg,
       paddingTop: designTokens.spacing.sm,
@@ -398,6 +498,31 @@ function makeStyles(colors: Colors) {
       color: colors.mutedFg,
       fontFamily: designTokens.type.body,
       fontSize: 12,
+    },
+    sectionHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginTop: designTokens.spacing.lg,
+      marginBottom: designTokens.spacing.sm,
+    },
+    sectionHeaderText: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+      fontWeight: '800',
+      letterSpacing: 0.5,
+    },
+    sectionCountBadge: {
+      borderRadius: designTokens.radius.pill,
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      minWidth: 22,
+      alignItems: 'center',
+    },
+    sectionCountText: {
+      fontFamily: designTokens.type.heading,
+      fontSize: 11,
     },
     card: {
       borderRadius: 16,
@@ -552,11 +677,17 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.heading,
       fontSize: 13,
     },
-    notWiredText: {
-      color: colors.mutedFg,
-      fontFamily: designTokens.type.body,
-      fontSize: 10,
-      marginTop: 6,
+    failedLabel: {
+      alignSelf: 'flex-start',
+      borderRadius: designTokens.radius.pill,
+      backgroundColor: 'rgba(239,68,68,0.2)',
+      paddingHorizontal: 10,
+      paddingVertical: 5,
+    },
+    failedLabelText: {
+      color: '#EF4444',
+      fontFamily: designTokens.type.heading,
+      fontSize: 12,
     },
   });
 }
