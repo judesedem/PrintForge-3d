@@ -8,6 +8,7 @@ import com.printforge.printforge.fileservice.exception.InvalidFileException;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
 import com.printforge.printforge.emailservice.exception.EmailSendException;
 import com.printforge.printforge.emailservice.exception.EmailTemplateNotFoundException;
+import com.printforge.printforge.notificationservice.exception.InvalidNotificationInputException;
 import com.printforge.printforge.notificationservice.exception.NotificationNotFoundException;
 import com.printforge.printforge.queueservice.exception.InvalidJobStatusException;
 import com.printforge.printforge.queueservice.exception.PrintJobNotFoundException;
@@ -97,6 +98,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(NotificationNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleNotificationNotFound(NotificationNotFoundException ex) {
         return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(InvalidNotificationInputException.class)
+    public ResponseEntity<ErrorResponse> handleInvalidNotificationInput(InvalidNotificationInputException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(PrintJobNotFoundException.class)

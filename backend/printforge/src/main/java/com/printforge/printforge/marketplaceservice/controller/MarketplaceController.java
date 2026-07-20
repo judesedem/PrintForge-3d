@@ -272,7 +272,7 @@ public class MarketplaceController {
         listing.setFileId(fileId);
         listing.setDesignerId(designer.getUserId());
         listing.setTitle(title);
-        listing.setDescription(description);
+        listing.setDescription(validateDescription(description));
         listing.setBasePrice(basePrice);
         listing.setStatus("DRAFT");
         listing.setThumbnailFileId(thumbnailFileId);
@@ -303,7 +303,7 @@ public class MarketplaceController {
         DesignListing listing = getOwnedListing(id, authentication);
 
         if (body.containsKey("title")) listing.setTitle((String) body.get("title"));
-        if (body.containsKey("description")) listing.setDescription((String) body.get("description"));
+        if (body.containsKey("description")) listing.setDescription(validateDescription((String) body.get("description")));
         if (body.containsKey("base_price")) {
             listing.setBasePrice(new BigDecimal(body.get("base_price").toString()));
         }
@@ -384,6 +384,28 @@ public class MarketplaceController {
                     "Invalid category '" + category + "'. Must be one of: " + VALID_CATEGORIES);
         }
         return normalized;
+    }
+
+    /**
+     * #71 length cap for the public-storefront description field. description
+     * is optional (null/blank passes through), so this only rejects an
+     * over-long value, same shape as validateCategory() above.
+     *
+     * Bound via @RequestParam (createListing) and a raw Map (updateListing)
+     * rather than a single @Valid-checked DTO, so a manual check here —
+     * not a Jakarta @Size — is what's actually reachable from both call
+     * sites. The DB column stays TEXT (unbounded) rather than being
+     * narrowed to @Column(length=2000): this app runs
+     * spring.jpa.hibernate.ddl-auto=update, which doesn't reliably narrow
+     * an existing live column's type, so this check is the sole
+     * enforcement point.
+     */
+    private String validateDescription(String description) {
+        if (description == null || description.isBlank()) return description;
+        if (description.length() > 2000) {
+            throw new InvalidListingInputException("Description must be 2000 characters or fewer");
+        }
+        return description;
     }
 
     /**

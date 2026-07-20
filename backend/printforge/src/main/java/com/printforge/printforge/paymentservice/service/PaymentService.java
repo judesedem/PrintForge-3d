@@ -81,8 +81,15 @@ public class PaymentService {
      * Looks up the estimate, adds the listing base_price if this is a marketplace
      * order, calls Paystack to get a hosted checkout URL, saves a PENDING Payment
      * record, and returns it. The frontend redirects the user to checkoutUrl.
+     *
+     * color/notes (both nullable) are captured at order-submission time
+     * (PrintJobFacadeController.submitMarketplaceOrder()/submitJob()) and
+     * carried here by the caller so they land on the Payment row —
+     * handleWebhook() later copies them onto the PrintJob it creates. They
+     * play no part in the charge amount.
      */
-    public Payment initiatePayment(Long estimateId, Long listingId, Long userId, String userEmail) {
+    public Payment initiatePayment(Long estimateId, Long listingId, Long userId, String userEmail,
+                                    String color, String notes) {
 
         Estimate estimate = estimateRepository.findById(estimateId)
                 .orElseThrow(() -> new EstimateNotFoundException(estimateId));
@@ -120,6 +127,8 @@ public class PaymentService {
         payment.setAmount(BigDecimal.valueOf(totalCost));
         payment.setPaystackReference(reference);
         payment.setCheckoutUrl(checkoutUrl);
+        payment.setColor(color);
+        payment.setNotes(notes);
         // status defaults to PENDING via @PrePersist
 
         return paymentRepository.save(payment);
@@ -186,9 +195,9 @@ public class PaymentService {
         // 5. Create the PrintJob — this is the gate.
         // Pull print parameters from the linked Estimate so that lab staff
         // see a fully-populated job in the queue view, not a row of nulls.
-        // color and notes have no source here (they are captured at
-        // submission time in the facade, never sent to EstimateService),
-        // so they are left null — honest rather than fabricated.
+        // color/notes come from the Payment instead — the Estimate has no
+        // home for them (captured at order-submission time, carried
+        // through initiatePayment(), see Payment.color/notes's javadoc).
         Estimate linkedEstimate = estimateRepository.findById(payment.getEstimateId())
                 .orElseThrow(() -> new EstimateNotFoundException(payment.getEstimateId()));
 
@@ -197,12 +206,14 @@ public class PaymentService {
         job.setEstimateId(payment.getEstimateId());
         job.setUserId(payment.getUserId());
         job.setMaterial(linkedEstimate.getMaterialType());
+        job.setColor(payment.getColor());
         job.setQuantity(linkedEstimate.getQuantity());
         // infillPercent is stored as an integer (e.g. 20); normalise to the
         // "20%" string format the rest of the app uses on PrintJob.infill
         job.setInfill(linkedEstimate.getInfillPercent() != null
                 ? linkedEstimate.getInfillPercent() + "%" : null);
         job.setQuality(linkedEstimate.getQuality());
+        job.setNotes(payment.getNotes());
         // status defaults to SUBMITTED via @PrePersist on PrintJob
         PrintJob savedJob = printJobRepository.save(job);
 
@@ -314,7 +325,15 @@ public class PaymentService {
         }
     }
 
-    private void verifyWithPaystack(String reference) {
+    // protected rather than private solely so a test can Mockito.spy() this
+    // bean and stub out just this one external re-verification call —
+    // there's no way to drive it to "success" for a synthetic webhook
+    // payload without an actual completed Paystack transaction (an
+    // initiated-but-never-paid test-mode reference reports "abandoned",
+    // confirmed empirically against the real API). Production behavior is
+    // unchanged: every real webhook call still goes through this
+    // unconditionally, nothing here weakens the check itself.
+    protected void verifyWithPaystack(String reference) {
         try {
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(PAYSTACK_VERIFY_URL + reference))

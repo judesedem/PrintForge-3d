@@ -23,6 +23,18 @@ public class Payment {
     // The print job created after payment clears (null until webhook confirms)
     private Long printJobId;
 
+    // Carried through from order submission to handleWebhook()'s PrintJob
+    // creation — the Estimate has no home for these (see
+    // PrintJobFacadeController.submitMarketplaceOrder()'s comment), and
+    // color/notes are only known at order-submission time, not recoverable
+    // from the Estimate. notes capped to match PrintJob.notes's own
+    // @Column(length=500) (#71) — color is left uncapped, same as
+    // PrintJob.color.
+    private String color;
+
+    @Column(length = 500)
+    private String notes;
+
     @Column(precision = 10, scale = 2)
     private BigDecimal amount;
 
@@ -64,6 +76,12 @@ public class Payment {
 
     public Long getPrintJobId() { return printJobId; }
     public void setPrintJobId(Long printJobId) { this.printJobId = printJobId; }
+
+    public String getColor() { return color; }
+    public void setColor(String color) { this.color = color; }
+
+    public String getNotes() { return notes; }
+    public void setNotes(String notes) { this.notes = notes; }
 
     public BigDecimal getAmount() { return amount; }
     public void setAmount(BigDecimal amount) { this.amount = amount; }

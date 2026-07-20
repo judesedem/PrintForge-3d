@@ -23,6 +23,16 @@ public class PrintJob {
     private Integer quantity;
     private String infill;
     private String quality;
+
+    // #71 — length cap made explicit (widens Hibernate's implicit
+    // VARCHAR(255) default). JPA-level @Column only, not a Jakarta
+    // @Size on the entity: this field is only ever set via UpdateJobRequest
+    // (validated below with @Valid) or the ADMIN-only raw create endpoint,
+    // so putting @Size here too would add a second enforcement path whose
+    // failure mode is an unhandled ConstraintViolationException at
+    // save()-time (500, not 400) — see Report.reason for the same
+    // DB-cap-only precedent.
+    @Column(length = 500)
     private String notes;
 
     // Production status

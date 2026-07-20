@@ -18,13 +18,45 @@ public class NotificationService {
         this.notificationRepository = notificationRepository;
     }
 
-    // 1. Create a new notification (Triggered by the Queue Service later)
+    private static final int MAX_MESSAGE_LENGTH = 500;
+
+    /**
+     * 1. Create a new notification (Triggered by the Queue Service later).
+     *
+     * #71 — message has no dedicated client-facing DTO the way
+     * Report.reason does: this one method is called both from
+     * NotificationController's staff-only POST endpoint (the sole
+     * external caller — rejected there with a clean 400 before this
+     * method ever runs, see NotificationController.createNotification())
+     * and from many internal fire-and-forget call sites (job/payment/
+     * suspension flows) that don't expect a notification side-effect to
+     * ever fail their primary operation. So instead of throwing here,
+     * this defensively truncates rather than rejects — a genuine (if
+     * unlikely) oversized message degrades gracefully instead of, e.g.,
+     * failing an admin's suspend-user action over notification text
+     * length.
+     */
     public Notification createNotification(Long userId, String title, String message, String type) {
+        return createNotification(userId, title, message, type, null);
+    }
+
+    /**
+     * 1b. Same as the 4-arg createNotification(), plus an optional
+     * deepLink (e.g. "printforge://jobs/123") the frontend can use to
+     * navigate straight to the relevant screen when the user taps the
+     * in-app notification card. Only transitionJobStatus()'s READY branch
+     * sets one today — every other call site keeps calling the 4-arg
+     * version above, which passes null here unchanged.
+     */
+    public Notification createNotification(Long userId, String title, String message, String type, String deepLink) {
         Notification notification = new Notification();
         notification.setUserId(userId);
         notification.setTitle(title);
-        notification.setMessage(message);
+        notification.setMessage(message != null && message.length() > MAX_MESSAGE_LENGTH
+                ? message.substring(0, MAX_MESSAGE_LENGTH)
+                : message);
         notification.setType(type);
+        notification.setDeepLink(deepLink);
         return notificationRepository.save(notification);
     }
 

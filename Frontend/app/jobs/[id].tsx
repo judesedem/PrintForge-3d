@@ -168,7 +168,14 @@ export default function JobDetail() {
                 <Text style={s.title} numberOfLines={2}>{job.title}</Text>
               </View>
             </View>
-            <StatusBadge status={job.status} />
+            <StatusBadge
+              status={job.status}
+              // #Gap3 — backend's real initial status is SUBMITTED; the
+              // user story's Orders step calls this "Queued". Frontend-only
+              // display mapping (Option B from Handoff.md's writeup) —
+              // deliberately not a backend status-machine change.
+              label={job.status === 'SUBMITTED' ? 'QUEUED' : undefined}
+            />
           </View>
 
           <View style={s.progressHeader}>

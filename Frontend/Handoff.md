@@ -2782,3 +2782,1461 @@ for `InvalidModerationLogQueryException` → 400),
 to compile — not a behavior change).
 
 **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: general-purpose email infrastructure (not wired to forgot-password yet)
+
+Scope: `backend/printforge` only. Standalone email-sending infrastructure,
+built ahead of forgot-password specifically so that feature (and any
+future email notification) doesn't have to retrofit templating/compliance
+concerns later. Provider: **Spring JavaMailSender + SMTP**, confirmed with
+the user before picking it over SendGrid/Mailgun/SES.
+
+- **Dependency:** added `spring-boot-starter-mail` to `pom.xml`. Spring
+  Boot auto-configures the `JavaMailSender` bean from `spring.mail.*`
+  properties — no manual `@Bean` needed.
+
+- **`User` gained two fields**, both using the same DB-level-default
+  pattern as `DesignListing.ownershipAttested` (a real `NOT NULL` column
+  with a `DEFAULT`, safe under `ddl-auto=update` even with existing
+  rows — confirmed via the Hibernate DDL log, see Verification below):
+  `emailVerified` (`boolean`, default `false`) and `emailOptIn`
+  (`boolean`, default `true` — this app sends transactional email only
+  today, so opting in by default doesn't yet imply anything beyond that;
+  the field exists now so a future marketing-email feature has a real
+  signal to check instead of retrofitting one). Neither is read or
+  written anywhere yet — pure groundwork.
+
+- **New `emailservice` package** (matching the feature-package convention
+  established by `labservice`/`moderationservice`/etc.):
+  - **`EmailService`** — one public method,
+    `sendTemplatedEmail(to, subject, templateName, Map<String,String>
+    templateVars)`. Loads `classpath:email-templates/{templateName}.html`,
+    replaces every `{{key}}` with the matching value from `templateVars`
+    via simple string substitution, and sends the result as an HTML email
+    through `JavaMailSender`/`MimeMessageHelper`. Deliberately **no
+    template engine dependency** (Thymeleaf, etc.) — the substitution
+    need here is flat key/value with no conditionals or loops, so a
+    second dependency for that felt like the wrong tradeoff against
+    "build a *simple* EmailService." `mail.from`/`mail.from-name` are
+    `@Value`-injected fields, matching the existing convention elsewhere
+    in this codebase (e.g. `PaymentService.paystackSecretKey`) rather
+    than constructor injection.
+  - **`email-templates/password-reset.html`** — the one required
+    template. Takes `{{fullName}}`, `{{resetLink}}`, `{{expiryMinutes}}`
+    as caller-supplied variables. The sender-identity footer (org name +
+    contact) is **baked into the template as static placeholder text**,
+    not a template variable — deliberate, so it can't be forgotten or
+    get out of sync if a future caller forgets to pass it; one line to
+    edit in the template file once real copy exists.
+  - **Two new exceptions**: `EmailSendException` (mail server unreachable
+    or rejects the message) → 502, matching the existing
+    `PaymentFailedException`/`CloudinaryUploadException` convention for
+    "we tried to reach an external service and it failed";
+    `EmailTemplateNotFoundException` (unknown `templateName`) → 500,
+    explicit rather than relying on `GlobalExceptionHandler`'s generic
+    catch-all, for a clearer message during development.
+  - **SMTP timeouts set explicitly** (`connectiontimeout`/`timeout`/
+    `writetimeout`, 5s each) in `application.properties` — applied
+    proactively to this *new* outbound-call infrastructure, following the
+    same reasoning as the still-open audit finding #62 about the
+    Paystack `HttpClient` having no timeout at all (that finding itself
+    is untouched — this is a new call path, not a fix to #62).
+
+- **Manual test endpoint: `POST /api/admin/email/test?to={address}`**
+  (ADMIN only, new `EmailTestController`). Sends the password-reset
+  template with placeholder values to whatever address is given — lets
+  the user verify real SMTP delivery end-to-end once `MAIL_*` env vars
+  point at real credentials, without anything real depending on this
+  yet. Not part of any documented public API surface, purely a
+  verification tool.
+
+- **Config added** — `application.properties` (`spring.mail.host/port/
+  username/password`, defaulting host to `smtp.gmail.com` since that's
+  the easiest to test against locally with a Google App Password;
+  `mail.from`/`mail.from-name`) and `.env.example`
+  (`MAIL_HOST/PORT/USERNAME/PASSWORD/FROM/FROM_NAME`, with a note that
+  Gmail requires an App Password, not the real account password).
+
+- **NOT wired into forgot-password**, exactly as scoped — no
+  `PasswordResetService`, no reset-token generation/storage, no change
+  to `AuthController`/`AuthService`. This is infrastructure only.
+
+- **DNS/deliverability — flagging explicitly, not a code task:**
+  **SPF, DKIM, and DMARC still need to be configured on whichever domain
+  `MAIL_FROM` ends up using**, before this goes live with real users.
+  Without them, password-reset (and any other) email sent through this
+  service is likely to land in spam or get rejected outright by major
+  providers (Gmail/Outlook/Yahoo all enforce sender authentication as of
+  2024+). This is entirely DNS-side — TXT records on the sending
+  domain — outside this codebase and outside what any amount of
+  application code can fix. Needs the user to configure it with
+  whichever real domain gets used, whenever that's decided.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run (51 + 2 new `EmailServiceTest` cases),
+    same 4 pre-existing failures as every prior session logged in this
+    file (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1,
+    `AdminServiceTest` ×1). **No new failures.** `EmailServiceTest`
+    itself: 2/2 passing, confirmed via its own surefire report —
+    (1) sends the password-reset template, captures the resulting
+    `MimeMessage` via Mockito's `ArgumentCaptor`, and asserts the
+    subject/recipient/body all match, with no leftover `{{...}}` tokens;
+    (2) confirms an unknown template name throws
+    `EmailTemplateNotFoundException`. `JavaMailSender` is fully mocked —
+    no real SMTP connection is made, so this test runs with no `MAIL_*`
+    env vars configured at all.
+  - Confirmed via the Hibernate DDL log during `./mvnw test`: `alter
+    table if exists users add column email_opt_in boolean not null
+    default true` and `add column email_verified boolean not null
+    default false` — both applied cleanly, no backfill issue.
+  - **Not verified — needs real credentials:** actual SMTP delivery
+    end-to-end (the unit test mocks `JavaMailSender` entirely). Once
+    `MAIL_USERNAME`/`MAIL_PASSWORD` point at a real Gmail App Password (or
+    another SMTP provider), `POST /api/admin/email/test?to=...` is the
+    way to check a real email actually arrives, renders correctly, and
+    doesn't land in spam (though spam placement specifically won't be
+    meaningful until SPF/DKIM/DMARC above are configured).
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`emailservice/exception/EmailSendException.java`,
+`emailservice/exception/EmailTemplateNotFoundException.java`,
+`emailservice/service/EmailService.java`,
+`emailservice/controller/EmailTestController.java`,
+`email-templates/password-reset.html` (resource),
+`emailservice/service/EmailServiceTest.java` (test).
+
+**Files modified:**
+`pom.xml` (`spring-boot-starter-mail`), `entity/User.java`
+(`emailVerified`, `emailOptIn`), `application.properties` (SMTP config),
+`.env.example` (`MAIL_*` vars), `exception/GlobalExceptionHandler.java`
+(two new handlers).
+
+---
+
+## 2026-07-19 — Backend: forgot-password wired to EmailService (real flow, not just infrastructure)
+
+Scope: `backend/printforge` only. Wires the standalone `EmailService`/
+`password-reset.html` template from the previous entry into a real
+`POST /api/auth/forgot-password` → `POST /api/auth/reset-password` flow.
+`emailVerified`/`emailOptIn` untouched, exactly as scoped.
+
+- **New `PasswordResetToken` entity** (`entity/` — alongside `User`,
+  not a dedicated feature package, since this extends the existing
+  `AuthService`/`AuthController` rather than standing up a new
+  feature). `userId` is a plain `Long` FK, matching the
+  `designerId`/`reporterId`/`actorId` convention everywhere else in this
+  codebase (never a real JPA relationship). `token` is
+  `UUID.randomUUID().toString().replace("-", "")` — 32 hex chars,
+  unguessable, DB-unique — same reference-generation pattern
+  `PaymentService` already uses for Paystack references. `used`
+  (boolean) + `expiresAt` (30 minutes from issue). New
+  `PasswordResetTokenRepository` (`findByToken`,
+  `findByUserIdAndUsedFalse` — the latter used to invalidate old tokens).
+
+- **`POST /api/auth/forgot-password`** (public — added to
+  `SecurityConfig`'s permitAll list, same reasoning as `/register`/
+  `/login`: a user who forgot their password can't authenticate).
+  `AuthService.forgotPassword(email)`: looks up the user; if none
+  exists, returns silently — **never throws for "not found."** If found:
+  marks every previous unused token for that user `used=true` first
+  (so an old reset link stops working the instant a new one is
+  requested), issues a fresh token, then calls
+  `EmailService.sendTemplatedEmail(...)` with `fullName`/`resetLink`
+  (`app.frontend.reset-password-url` + `?token=`)/`expiryMinutes`.
+  **The email send is wrapped in a swallowed try/catch** — same
+  best-effort pattern as `FileStorageService.deleteImage()`. This
+  wasn't optional: without it, an SMTP failure would make
+  `forgotPassword()` throw, and the controller would return something
+  other than the uniform 200 for a *registered* email whose send failed
+  — reopening exactly the account-enumeration gap the "always return
+  the same response" requirement exists to close. The controller itself
+  always returns `200 {"message": "If an account exists, a reset link
+  has been sent"}` regardless of any of this.
+
+- **`POST /api/auth/reset-password`** (public, same `SecurityConfig`
+  reasoning). `AuthService.resetPassword(token, newPassword)`: looks up
+  the token and rejects with one generic `InvalidPasswordResetTokenException`
+  → 400 ("Invalid or expired reset link") whether the token is unknown,
+  already used, or expired — never distinguishes which, so a caller
+  can't use the error message to fish for valid-but-expired tokens.
+  Hashes the new password with the same `PasswordEncoder` used at
+  registration, saves the user, marks the token used.
+
+- **Password rule reuse, not duplication — new `PasswordPolicy`
+  constant class** (`dto/PasswordPolicy.java`: `MIN_LENGTH = 6`,
+  `MESSAGE`). `RegisterRequest.password` and the new
+  `ResetPasswordRequest.newPassword` both reference it via
+  `@Size(min = PasswordPolicy.MIN_LENGTH, message =
+  PasswordPolicy.MESSAGE)`, so the two can't silently drift apart (e.g.
+  a reset accepting a weaker password than registration requires) the
+  way two independently-hardcoded `6`s could. Deliberately **not** a
+  composed Bean Validation annotation (`@ValidPassword` or similar) —
+  this codebase has no precedent for that pattern anywhere, and a single
+  shared constant fully closes the actual drift risk without introducing
+  a new validation-authoring style for a two-line rule.
+  `ForgotPasswordRequest.email` — `@NotBlank` + `@Email`, matching
+  `RegisterRequest.email`'s existing annotations exactly.
+
+- **Response body field naming**: `ResetPasswordRequest` uses plain
+  camelCase (`newPassword`, no `@JsonProperty` override) — matching the
+  task's own literal `{ token, newPassword }` spec, and
+  `UpdateProfileRequest`'s existing camelCase convention, **not**
+  `RegisterRequest`'s snake_case one (`@JsonProperty("full_name")` etc.).
+  This codebase already has both conventions coexisting depending on
+  which endpoint you're looking at — not something this session
+  introduced or reconciled, just picked correctly per the task's literal
+  spec for this one endpoint.
+
+- **Gap flagged, not fixed: no rate limiting on the new endpoints.**
+  `RateLimitFilter` only covers `/api/auth/login` (5/15min) and
+  `/api/auth/register` (10/4min) — `/forgot-password` and
+  `/reset-password` are unprotected. This is a real abuse vector (mail-
+  bombing a victim's inbox with reset links, or bulk-probing many
+  emails) that the uniform-200-response design does *not* address —
+  that design stops an attacker from **distinguishing** which emails
+  are registered via the response, but doesn't stop them from
+  **requesting** at volume. Noted in a comment at the `SecurityConfig`
+  permitAll line and here rather than silently extending
+  `RateLimitFilter` — that filter is shared, security-sensitive
+  infrastructure, and adding a third bucket type to it felt like it
+  deserved its own explicit ask rather than a scope-creep add-on to a
+  password-reset task.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2 — line
+    numbers shifted from the new mocked dependencies in `setUp()`, same
+    root cause as always; `FileStorageServiceTest` ×1;
+    `AdminServiceTest` ×1). **No new failures.** `AuthServiceTest` was
+    the only test file needing a change — its direct `new
+    AuthService(...)` call updated with 2 more mocks
+    (`PasswordResetTokenRepository`, `EmailService`) to compile, no
+    assertion logic touched.
+  - Confirmed via the Hibernate DDL log during `./mvnw test`:
+    `create table password_reset_tokens (...)` applied cleanly, including
+    the `unique (token)` constraint.
+  - **Not verified — needs a live check:** the actual end-to-end flow
+    (forgot-password → real email arrives via SMTP once real `MAIL_*`
+    creds are set → click link → reset-password succeeds), the 400 path
+    for an expired/used/unknown token, and that the uniform 200 really
+    is indistinguishable in practice for a registered vs. unregistered
+    email (timing-wise, an existing email now does more work — token
+    invalidation + issuance + an email send attempt — before responding,
+    which is its own, smaller side-channel this design doesn't address
+    either).
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`entity/PasswordResetToken.java`,
+`repository/PasswordResetTokenRepository.java`,
+`dto/PasswordPolicy.java`,
+`dto/ForgotPasswordRequest.java`,
+`dto/ResetPasswordRequest.java`,
+`exception/InvalidPasswordResetTokenException.java`.
+
+**Files modified:**
+`dto/RegisterRequest.java` (uses `PasswordPolicy` instead of a
+hardcoded `6`), `service/AuthService.java` (`forgotPassword`,
+`resetPassword`, new dependencies), `controller/AuthController.java`
+(two new endpoints), `exception/GlobalExceptionHandler.java` (new
+handler), `config/SecurityConfig.java` (permitAll additions),
+`application.properties` / `.env.example`
+(`app.frontend.reset-password-url` / `FRONTEND_RESET_PASSWORD_URL`),
+`test/.../service/AuthServiceTest.java` (constructor call updated to
+compile — not a behavior change).
+
+**Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: rate limiting extended to forgot-password/reset-password
+
+Scope: `backend/printforge` only. Extends `RateLimitFilter` to cover the
+two new auth endpoints from the previous entry, plus an honest answer to
+the specific question this task asked me to check rather than assume.
+
+- **`/api/auth/forgot-password`** — two independent Bucket4j limits, both
+  must pass: (a) 3 requests/hour keyed by `ip:email` (same key-construction
+  approach as the existing login bucket) — the per-target limit, stricter
+  than login's per-target limit (5/15min) since mail-bombing a victim's
+  inbox costs *them* more than a failed login attempt costs the account
+  owner; (b) 10 requests/15min keyed by IP alone — a ceiling the per-email
+  bucket can't provide on its own, since one source requesting resets for
+  many *different* emails would otherwise get a fresh, unthrottled bucket
+  for every email tried. Reuses the existing `extractEmailFromCachedBody()`
+  helper unchanged — forgot-password's body is `{"email": "..."}`, the
+  exact same key name login's body uses, so no new extraction logic was
+  needed.
+- **`/api/auth/reset-password`** — 10 requests/15min keyed by IP alone.
+  No email in this body (`{token, newPassword}`), so there's no per-target
+  bucket to key on. This is deliberately just a generic scripted-abuse
+  ceiling, not a meaningful brute-force defense — the reset token itself
+  is a 128-bit UUID (dashes stripped), so no realistic request rate makes
+  guessing it feasible regardless of what this filter allows through.
+- Five independent `ConcurrentHashMap<String, Bucket>` fields now exist
+  in total (`loginBuckets`, `registerBuckets`, `forgotPasswordEmailBuckets`,
+  `forgotPasswordIpBuckets`, `resetPasswordBuckets`) — kept separate per
+  endpoint/keying-scheme rather than sharing maps across concerns, so
+  each limit's numbers can be tuned independently without cross-talk.
+- Confirmed (not assumed) that `CachedBodyHttpServletRequest` needed no
+  changes to work for the new path: read its full implementation — it's
+  a generic body-caching wrapper with zero path-specific logic, already
+  proven by the existing login branch. Reused it as-is for
+  forgot-password's body peek.
+
+- **Item 3's premise — checked and found FALSE, flagging rather than
+  confirming something that isn't true.** The task asked me to "confirm
+  the existing X-Forwarded-For bypass fix (already applied elsewhere per
+  the earlier audit) covers these new paths too." Read `resolveClientIp()`
+  in full and grepped this entire file's history for any prior
+  X-Forwarded-For/spoofing/trusted-proxy work — **no such fix exists
+  anywhere in this codebase.** `resolveClientIp()` takes the first
+  comma-separated value of the `X-Forwarded-For` header **completely
+  unvalidated** — any client can set that header to an arbitrary value on
+  every request, and every IP-keyed bucket in this filter (this
+  includes the pre-existing login and register buckets, not just the two
+  added today) will trust it. A single attacker can spoof a fresh
+  `X-Forwarded-For` value per request and get an unlimited number of
+  fresh, empty buckets — for login, register, forgot-password's IP
+  ceiling, and reset-password alike — completely bypassing every
+  IP-keyed rate limit in this file. This is **not new** and **not
+  something this session introduced** — it's a pre-existing gap that
+  predates all of this session's work, just never previously surfaced or
+  written down anywhere in this file until this task's item 3 asked me
+  to check.
+  **Not fixed here** — closing it properly requires knowing this app's
+  actual deployment topology (is there a trusted reverse proxy/CDN in
+  front of it whose IP should be the only one allowed to set
+  `X-Forwarded-For`? Railway's own edge? Nothing, in which case the
+  header should probably be ignored entirely and only
+  `request.getRemoteAddr()` trusted?) — a decision, not a guess I should
+  make silently inside a task scoped to extending coverage to two new
+  paths.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run (unchanged from the previous entry — no
+    new entity/schema this time, pure filter logic), same 4 pre-existing
+    failures as every prior session logged in this file (`AuthServiceTest`
+    ×2, `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures.** No test file constructs `RateLimitFilter` directly
+    (confirmed — none exists), so nothing needed updating to compile.
+  - **Not verified — needs a live check:** actually triggering each new
+    429 path (forgot-password per-email, forgot-password per-IP,
+    reset-password per-IP) and confirming the response shape/message
+    text. No automated test exists for `RateLimitFilter` at all (login/
+    register aren't covered by one either) — consistent with the
+    existing gap, not something newly introduced.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files modified:**
+`security/RateLimitFilter.java` (three new bucket maps, two new
+`else if` branches, three new bucket-factory methods, updated class
+javadoc).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: fixed spoofable X-Forwarded-For in RateLimitFilter
+
+Scope: `backend/printforge` only. Closes the gap flagged (not fixed) in
+the entry immediately above — one change, in the one shared method every
+rate limit already goes through.
+
+- **The fix:** `resolveClientIp()` used to take `xff.split(",")[0]` — the
+  *first* entry in `X-Forwarded-For`. Since this app runs on Railway,
+  which sits in front of it as the single reverse proxy, the header is
+  built left-to-right: whatever a client puts in the header themselves
+  first, then Railway's own edge appends the real connecting IP as the
+  *last* entry. Taking the first entry meant trusting whatever the
+  client claimed, completely unvalidated — anyone could prepend a fake
+  IP and every IP-keyed bucket in this filter would treat it as gospel.
+  Now takes `hops[hops.length - 1]` instead — the entry Railway itself
+  appended, which a client cannot forge before their request reaches
+  Railway's edge. Falls back to `request.getRemoteAddr()` when the
+  header is absent entirely (unchanged — still correct for local dev
+  with no proxy in front).
+- **Applied once**, in `resolveClientIp()` only — every rate-limited
+  path (login, register, and the forgot-password/reset-password work
+  from the entry above) calls this same method, so all four benefit
+  from the fix with no per-endpoint duplication.
+  Added a long comment directly on the method explaining *why* the last
+  entry is the trustworthy one (single trusted proxy == Railway) and
+  explicitly warning against "fixing" it back to the first entry later —
+  the first-entry mistake is the natural-looking wrong answer here (it
+  reads as "the original request's IP" if you don't think through how
+  the header actually gets built), so the comment spells out the
+  reasoning rather than just stating the rule.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures.** No test exercises `resolveClientIp()` directly (no
+    `RateLimitFilter` test exists at all, per the prior entry), so
+    nothing needed updating to compile.
+  - **Not verified — needs a live check against the real Railway
+    deployment:** that `X-Forwarded-For` in production actually looks
+    the way this fix assumes (single hop appended by Railway's edge,
+    nothing else in front). If Railway's edge ever changes how it
+    populates this header, or if another proxy/CDN is ever added in
+    front of Railway, `hops[hops.length - 1]` may need to become
+    `hops[hops.length - 2]` or similar — the comment on the method flags
+    this explicitly so it isn't a silent trap later.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files modified:**
+`security/RateLimitFilter.java` (`resolveClientIp()` — last-entry
+instead of first-entry, plus explanatory comment).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: hardcoded local DB credentials replaced with env var placeholders
+
+Scope: `backend/printforge` only. `application.properties`'s
+`spring.datasource.*` block now follows the same `${VAR:default}`
+pattern already used for `JWT_SECRET`/`PAYSTACK_SECRET_KEY` in the same
+file, instead of three literal hardcoded values.
+
+- **The change:** `spring.datasource.url`/`.username`/`.password` now
+  read `${DB_URL:jdbc:postgresql://localhost:5432/printforge_db}`,
+  `${DB_USERNAME:postgres}`, `${DB_PASSWORD:admin}` — same defaults as
+  before, so local dev with zero env vars set behaves identically to
+  today. `.env.example`'s DB section updated to document `DB_URL`/
+  `DB_USERNAME`/`DB_PASSWORD` as the new template default.
+
+- **Checked the production-Neon premise rather than assuming it — and
+  it's not quite what the task described, though the requested change
+  is safe either way.** The task's framing was "production presumably
+  already sets DB_URL/DB_USERNAME/DB_PASSWORD via Railway env vars, or
+  uses differently-named properties entirely; check before assuming."
+  Read this machine's actual gitignored `backend/printforge/.env` (confirmed
+  gitignored first via `git check-ignore`, then read it) — it sets the
+  real Neon connection via the **literal** `spring.datasource.url`/
+  `.username`/`.password` keys directly, not `DB_URL` etc.:
+  `spring.datasource.url=jdbc:postgresql://ep-polished-union-....neon.tech/neondb?sslmode=require`
+  plus matching username/password. This works via `spring-dotenv`
+  (already a `pom.xml` dependency), which loads `.env` and passes any
+  key straight through as-is, at a property-source priority higher than
+  `application.properties`. `.env.example` already documented this exact
+  direct-key form before this change (lines 10-12, matching the real
+  `.env`'s structure) — this predates this session, not something
+  introduced today.
+  **Why the requested `DB_URL`-placeholder change is safe regardless:**
+  Spring Boot resolves a property by checking every configured source in
+  priority order and using the first one that has a value for that key —
+  `application.properties` is always the lowest-priority source. A
+  higher-priority source that already sets `spring.datasource.url`
+  directly (the `.env` file via spring-dotenv, or a real OS env var named
+  `SPRING_DATASOURCE_URL` if Railway's dashboard uses Spring Boot's own
+  relaxed-binding convention) answers the query for that key outright —
+  `application.properties`'s own fallback text is never even consulted in
+  that case, whether it's a hardcoded literal or a `${DB_URL:...}`
+  placeholder. So this change cannot disturb whatever already overrides
+  the value elsewhere; it only changes what happens when *nothing else*
+  does.
+  **What this means concretely:** `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`
+  are a **new, additional** override path — they are not what's
+  currently wiring this developer's machine to Neon (that's the direct
+  `.env` keys above), and I have no visibility into Railway's own
+  dashboard env var configuration from here to confirm what (if
+  anything) it sets for a deployed instance. If Railway's production
+  deployment doesn't yet have its own DB env vars configured at all, it
+  would need either the direct `SPRING_DATASOURCE_*` names or these new
+  `DB_*` names set there — that's a Railway-dashboard action outside
+  this codebase, not something this change does for you.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures.**
+  - **Went beyond just "tests still pass" here, since a silent fallback
+    to the wrong database would still show green tests.** Checked
+    `netstat` for live TCP connections to port 5432 during two
+    independent `./mvnw test` runs: both showed fresh connections to a
+    remote AWS IP (`54.147.180.180:5432`, consistent with Neon's
+    `us-east-1` region) — not to `127.0.0.1:5432`/`localhost:5432`,
+    even though this machine also has a local Postgres server actually
+    listening on port 5432 (confirmed via `netstat`), which could have
+    masked a silent wrong-fallback with a "successful" connection to the
+    wrong database. This is real confirmation the app is still reaching
+    the same Neon database as before, not just a passing test suite.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files modified:**
+`application.properties` (`spring.datasource.*` placeholders),
+`.env.example` (`DB_URL`/`DB_USERNAME`/`DB_PASSWORD` documented).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: Paystack HTTP timeouts + HikariCP pool tuning
+
+Scope: `backend/printforge` only. `PaymentService`'s two outbound
+Paystack calls (`callPaystackInitialize`, `verifyWithPaystack`) now have
+explicit timeouts and explicit timeout handling; HikariCP's implicit
+defaults are now explicit in `application.properties`.
+
+- **Connect timeout on the shared `HttpClient`** — was
+  `HttpClient.newHttpClient()` (no timeout at all), now
+  `HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()`.
+  Commented directly on the constructor: a connect timeout only bounds
+  *establishing* the connection — it does nothing once connected, which
+  is why a per-request timeout was still needed on top.
+- **Per-request timeout, `.timeout(Duration.ofSeconds(10))`**, added to
+  both the `POST /transaction/initialize` request in
+  `callPaystackInitialize()` and the `GET /transaction/verify/{ref}`
+  request in `verifyWithPaystack()`. This is the one that actually
+  bounds "Paystack accepted the connection but is slow/hung to respond,"
+  which a connect timeout alone can't catch.
+- **Explicit `HttpTimeoutException` handling at each call site** (added
+  `@Slf4j` to the class — matching the existing `AdminSeeder`/
+  `LabLocationSeeder` logging convention, the only precedent for logging
+  anywhere in this codebase — rather than introducing a different
+  logging style):
+  - `callPaystackInitialize()` — logs a `warn` with the reference and
+    raw exception message, then throws `PaymentFailedException("Payment
+    service is temporarily unavailable, please try again")` — the exact
+    caller-facing message the task specified, deliberately not the raw
+    Java exception text. This is what a slow `POST /api/payments/
+    initiate` or the `/retry` endpoint's `callPaystackInitialize` call
+    now shows the frontend, via the existing `PaymentFailedException` →
+    502 `GlobalExceptionHandler` mapping (unchanged).
+  - `verifyWithPaystack()` — logs a `warn` explaining explicitly that the
+    payment is being left `PENDING` and a Paystack retry is expected,
+    then throws `PaymentFailedException` same as any other verify
+    failure already did. **Did not change the propagation behavior** —
+    `verifyWithPaystack(reference)` in `handleWebhook()` already ran
+    *before* `payment.setStatus("COMPLETED")`, so a thrown exception
+    here (timeout or otherwise) already left the `Payment` row untouched
+    at `PENDING` rather than marking it `FAILED`, and already caused
+    `PaymentController.webhook()` to return a non-2xx status via the
+    same `GlobalExceptionHandler` mapping — which is exactly what should
+    happen for Paystack to treat delivery as failed and retry later.
+    The fix here is purely making the timeout case *loggable and
+    distinguishable* from other failure reasons; the safe "don't mark a
+    real payment as failed" behavior already existed by construction and
+    wasn't at risk.
+- **HikariCP tuning in `application.properties`** — `maximum-pool-size=10`,
+  `connection-timeout=30000`, `minimum-idle=5`, exactly the values
+  specified. Commented that these match Spring Boot's own implicit
+  defaults already in effect (pool size 10, Hikari's internal default
+  connection-timeout is already 30000ms) — this makes them visible/
+  tunable rather than silently inherited, it is not a response to any
+  observed pool exhaustion, and `maximum-pool-size` specifically was
+  left unchanged per the task's explicit instruction not to guess a new
+  number without a specific reason to.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures.** No `PaymentServiceTest` exists (checked — none did
+    before this change either), so nothing needed updating to compile.
+  - Confirmed via the Hikari startup log during `./mvnw test` that the
+    pool still starts and connects successfully with the new
+    `application.properties` settings in place (`HikariPool-1 - Start
+    completed`) — the "Minimum/Maximum pool size: undefined/unknown"
+    lines immediately after are Hibernate's own generic diagnostic
+    logging, which has never reflected Hikari's actual settings in any
+    test run this session (pre-dates this change, not caused by it) —
+    not a sign the config wasn't picked up.
+  - **Happy-path safety (task's point 5) — verified by how HTTP
+    timeouts work, not by a live call.** Adding a connect timeout and a
+    per-request timeout cannot change behavior for a request that
+    completes well inside those bounds — a timeout is a ceiling that
+    only has an effect once *exceeded*; there is no code path here where
+    its mere presence alters a fast, successful response. This doesn't
+    need a live Paystack call to establish, and no live call was made:
+    the real dev `.env` on this machine holds a genuine (if test-mode)
+    Paystack secret key, and using it to make an actual outbound API
+    call for verification purposes wasn't something this task asked
+    for — that would touch a real third-party account (even in test
+    mode) without being explicitly requested, which felt like the wrong
+    call to make unilaterally.
+  - **Not verified — needs a live check, manual steps:** exercising
+    `POST /api/payments/initiate` (and `/retry`) against real Paystack
+    test-mode credentials to confirm the happy path still returns a
+    checkout URL normally; simulating a slow/hung Paystack response
+    (e.g. a local mock server with an artificial delay past 10s) to
+    confirm the `HttpTimeoutException` path actually fires and produces
+    the expected 502 + message; confirming a real webhook redelivery
+    happens after a simulated verify-timeout.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files modified:**
+`paymentservice/service/PaymentService.java` (`HttpClient` connect
+timeout, per-request timeouts, `HttpTimeoutException` handling,
+`@Slf4j` logging), `application.properties` (HikariCP pool settings).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: HTTP response compression enabled
+
+Scope: `backend/printforge` only. Three properties added to
+`application.properties` — no code changes, exactly as the task said
+were needed.
+
+- **Added to the `# ===== Server =====` section** (alongside
+  `server.port`/`server.address`, the natural home for server-level HTTP
+  settings): `server.compression.enabled=true`,
+  `server.compression.mime-types=application/json,text/plain,text/html`,
+  `server.compression.min-response-size=1024`. Added to
+  `application.properties` (the base/production config, always loaded)
+  — confirmed `application-local.properties` (Spring profile "local",
+  only active when `spring.profiles.active=local`) has no `server.*`
+  keys at all, so there's nothing there to conflict with or need
+  updating in parallel.
+
+- **Verified live, not just trusted as Spring Boot default behavior.**
+  Built the jar, ran it locally (`java -jar target/printforge-0.0.1-
+  SNAPSHOT.jar`) against the real dev database, and curled the public
+  `GET /api/labs` endpoint directly (no auth needed — the other
+  candidate list endpoints named in the task, `/api/marketplace` and
+  `/api/print-jobs`, both require a JWT, which added unnecessary steps
+  for what compression itself doesn't care about — the filter applies
+  the same way regardless of which endpoint produces the response):
+  - `curl -H "Accept-Encoding: gzip" -I` (well, `-o /dev/null -v` to see
+    headers cleanly) → response included `Content-Encoding: gzip`.
+  - The same request **without** the `Accept-Encoding` header → no
+    `Content-Encoding` header at all, confirming this is real
+    content-negotiation (compressing only when the client says it can
+    decompress), not something forced unconditionally onto every
+    response.
+  - This is stronger confirmation than the task's own suggested
+    post-deploy check asked for, done locally before leaving this for
+    review.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 53 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures** — expected, since this change touches no code, only a
+    properties file.
+  - Live local check above: `Content-Encoding: gzip` present with
+    `Accept-Encoding: gzip` sent, absent without it.
+  - **Not verified — needs the actual deployed environment:** whether
+    compression provides a *meaningful* size reduction on the real
+    list endpoints (`/api/marketplace`, `/api/print-jobs`) once they
+    have realistic amounts of data — the local dev database's `/api/labs`
+    response is small, so this confirms the compression mechanism
+    works correctly, not the actual bytes-saved impact at production
+    data volumes. That's the post-deploy check the task itself
+    described.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files modified:**
+`application.properties` (`server.compression.*`).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: Hibernate batching enabled for bulk writes, verified live (not just trusted)
+
+Scope: `backend/printforge` only. Three Hibernate properties, one
+JDBC-URL query parameter added in **both** places it's configured, and a
+new integration test that proves batching actually engages rather than
+just checking the properties are present.
+
+- **`application.properties`**: added
+  `spring.jpa.properties.hibernate.jdbc.batch_size=25`,
+  `.order_updates=true`, `.order_inserts=true` — exactly as specified.
+- **`reWriteBatchedInserts=true` added to the datasource URL in *both*
+  places it's set, per the task's explicit instruction to check rather
+  than assume one:**
+  1. `application.properties`'s `${DB_URL:...}` fallback default.
+  2. The actual gitignored `backend/printforge/.env` on this machine —
+     confirmed in the #63 session that *this* file's literal
+     `spring.datasource.url` (pointing at the real Neon instance) is
+     what's actually driving every local test run, via `spring-dotenv`
+     taking priority over `application.properties`. Appended
+     `&reWriteBatchedInserts=true` to the existing `?sslmode=require`
+     query string there.
+  3. `.env.example` updated too, so a fresh clone's template default
+     carries the flag forward.
+
+- **Verified live — ran the actual write path with SQL/batch logging
+  on, not just trusted the properties being present, per the task's
+  explicit instruction.** New `NotificationServiceBatchingTest`
+  (`@SpringBootTest`, real DB — not the mocked-repository style every
+  other `NotificationServiceTest` uses): creates 5 unread notifications
+  for a fake negative test user id, calls `markAllAsRead()`, asserts
+  functional correctness, and cleans up every row in `@AfterEach`
+  regardless of outcome (this hits the real shared Neon dev database).
+  **Getting the log category right took an extra step worth recording:**
+  my first attempt bumped
+  `org.hibernate.engine.jdbc.batch.internal.BatchingBatch` to DEBUG (a
+  Hibernate 5-era class/category name) and produced zero batch-related
+  log output — silently looking like a false negative rather than
+  erroring. Disassembled the actual
+  `hibernate-core-6.6.53.Final.jar` in the local Maven repo
+  (`javap -v` on `JdbcBatchLogging.class`) instead of guessing again,
+  and found the real category via its `@SubSystemLogging` annotation:
+  **`org.hibernate.orm.jdbc.batch`**. Re-ran with that category at
+  TRACE and got unambiguous proof:
+  ```
+  Created Batch (25) - `Notification#UPDATE`
+  Adding to JDBC batch (1) - `Notification#UPDATE`
+  Adding to JDBC batch (2) - `Notification#UPDATE`
+  Adding to JDBC batch (3) - `Notification#UPDATE`
+  Adding to JDBC batch (4) - `Notification#UPDATE`
+  Adding to JDBC batch (5) - `Notification#UPDATE`
+  Executing JDBC batch (5 / 25) - `Notification#UPDATE`
+  ```
+  Exactly **one** `executeBatch()` call for all 5 rows (confirmed by
+  grepping for `Executing JDBC batch.*Notification#UPDATE` — exactly 1
+  match) — before this config, that would have been 5 separate
+  `executeUpdate()` round trips. This is the task's point 3, done.
+
+- **Two precise findings worth flagging (point 4's spirit — being exact
+  about what this does and doesn't touch), found while reading the same
+  batch log rather than assumed:**
+  1. **`reWriteBatchedInserts` has zero observable effect on
+     `markAllAsRead()` specifically, and on every write path in this
+     codebase today.** That flag only rewrites batched **INSERT**
+     statements into multi-row `VALUES (...),(...),(...)` form at the
+     PGJDBC driver level — it does nothing for UPDATE batching, which is
+     handled by the plain JDBC `addBatch()`/`executeBatch()` protocol
+     regardless of that flag. `markAllAsRead()` only ever issues UPDATEs.
+     It's still a correct, harmless, standard flag to have configured
+     for if/when a real bulk-INSERT path appears — just not something
+     that changes anything observable here today.
+  2. **Hibernate cannot batch INSERTs at all for any entity in this
+     codebase, regardless of this config** — confirmed by grepping the
+     same test's full log for `#INSERT` batch activity: zero matches,
+     even though the test's own setup calls `createNotification()` (a
+     `.save()` per call) 5 times. Every entity across this codebase uses
+     `@GeneratedValue(strategy = GenerationType.IDENTITY)`
+     (`Notification` included) — this is a well-documented Hibernate
+     limitation, not a config gap: IDENTITY generation requires the
+     database to assign and return each row's key individually, which
+     Hibernate's batching implementation can't do for a grouped
+     multi-row `executeBatch()` call. `order_inserts=true` is configured
+     correctly per the task, but has no entity in this codebase it can
+     currently help — closing that gap would mean switching entities to
+     a `SEQUENCE` or `TABLE` generator, a materially bigger, unrelated
+     change, correctly out of scope here.
+  3. **Related but separate, not fixed here:** the log also showed 5
+     `SELECT ... where id=?` calls immediately *before* the 5 UPDATEs.
+     `NotificationService.markAllAsRead()` has no `@Transactional`
+     boundary, so the entities `getUnreadNotifications()` fetches are
+     detached by the time `saveAll()` runs moments later in what Spring
+     Data JPA treats as a separate transaction — `saveAll()` on detached
+     entities calls `entityManager.merge()`, which re-selects each row
+     first to reconcile state before the UPDATE. Adding `@Transactional`
+     to `markAllAsRead()` would keep the fetched entities attached and
+     skip these 5 extra round trips entirely, on top of the batching
+     fix here — a real, further optimization, but a different code
+     change than "add Hibernate batch properties," so not made
+     unilaterally in this task.
+
+- **Point 4 (this codebase's own framing) — confirmed distinct from #61:
+  this only benefits `saveAll()`/bulk-write paths (currently just
+  `markAllAsRead()` — the only multi-row write anywhere in this
+  codebase, per the task's own context). It does nothing for the N+1
+  read-side pattern flagged as #61 (`AdminService.getDashboardSummary()`'s
+  per-designer `findById()` loop; `PrintJobFacadeController.getJobs()`/
+  `getQueueView()`'s per-job `safeGetFile()`/`safeGetUser()`/
+  `safeGetEstimate()` calls) — those are reads, this is writes; #61
+  remains untouched and unresolved.**
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 54 tests run (53 + 1 new), same 4 pre-existing
+    failures as every prior session logged in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1,
+    `AdminServiceTest` ×1). **No new failures** —
+    `NotificationServiceBatchingTest` itself passed (2 assertions, both
+    green) in addition to the live batch-log proof above.
+  - Confirmed the test's `@AfterEach` cleanup actually ran (batch DELETE
+    log lines visible for the 5 rows created) — no orphaned rows left in
+    the shared Neon dev database.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`notificationservice/service/NotificationServiceBatchingTest.java`.
+
+**Files modified:**
+`application.properties` (3 Hibernate batch properties +
+`reWriteBatchedInserts` on the `DB_URL` fallback), `.env` (real Neon URL
+— `reWriteBatchedInserts` appended, gitignored, never committed),
+`.env.example` (`DB_URL` template default updated to match).
+
+**Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: @Transactional on markAllAsRead(), verified before/after
+
+Scope: `backend/printforge` only. Closes the "extra per-entity SELECT"
+observation flagged (not fixed) in the prior Hibernate-batching entry —
+one annotation, re-using the exact same verification test to prove it.
+
+- **The change:** `@Transactional` (`org.springframework.transaction.
+  annotation.Transactional` — confirmed there was no existing usage
+  anywhere in this codebase to match, so used exactly the import the
+  task specified) added to `NotificationService.markAllAsRead()`. Kept
+  the entities `getUnreadNotifications()` fetches attached/managed for
+  the rest of the method, instead of each repository call running in
+  its own separate transaction (Spring Data JPA repository methods are
+  individually transactional by default) and detaching them by the time
+  `saveAll()` ran moments later.
+
+- **Verified with an exact before/after comparison, re-running the
+  identical test from the prior entry rather than writing a new one —
+  same `NotificationServiceBatchingTest`, unchanged.** Re-ran it with
+  the same `org.hibernate.orm.jdbc.batch=TRACE` logging from before and
+  compared the fresh log against the one captured in the prior session
+  (still on disk):
+  ```
+  BEFORE (prior entry's log): 5 × `select ... where n1_0.id=?`
+                               immediately before `Created Batch...UPDATE`
+  AFTER (this change's log):  0 × that same select pattern —
+                               straight from the two findByUserId
+                               queries to `Created Batch...UPDATE`
+  ```
+  Quantified precisely with `awk`/`grep` (stop reading each log at the
+  `Created Batch...UPDATE` line, count `n1_0.id=?` occurrences before
+  it): **5 → 0**. This is exactly the merge()-triggered per-entity
+  SELECT the prior entry predicted would disappear, confirmed gone, not
+  just assumed gone because the annotation is theoretically correct.
+
+- **Confirmed no other behavior changed (task's point 3).** The batched
+  UPDATE itself is untouched: still exactly one `Executing JDBC batch
+  (5 / 25) - Notification#UPDATE` line, identical to the prior entry —
+  same batch size, same single `executeBatch()` call for all 5 rows.
+  Functional correctness unchanged: the test's assertions (5 unread →
+  0 unread after `markAllAsRead()`) still pass, and the existing mocked
+  `NotificationServiceTest` (4 tests covering `markAsRead()`'s ownership
+  checks — a different method, untouched) still passes unmodified,
+  confirming `@Transactional` on `markAllAsRead()` didn't ripple into
+  anything else in the class.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 54 tests run, same 4 pre-existing failures as every
+    prior session logged in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1, `AdminServiceTest` ×1). **No new
+    failures.** No test file needed updating to compile — this was a
+    pure annotation addition to an already-tested method.
+  - `NotificationServiceTest` (the mocked-repository unit tests) run in
+    isolation: 4/4 passing, unaffected.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files modified:**
+`notificationservice/service/NotificationService.java` (`@Transactional`
+on `markAllAsRead()`).
+
+**Files created:** none. **Files deleted:** none.
+
+---
+
+## 2026-07-19 — Backend: N+1 queries fixed in AdminService + PrintJobFacadeController, verified before/after
+
+Scope: `backend/printforge` only. Both confirmed N+1 patterns from #61,
+fixed using the exact `findAllById()` + `Collectors.toMap()` shape
+already established in `MarketplaceController.enrichWithDesigner(List)`.
+Unlike the #60 write-batching fix (JDBC `executeBatch()`), this is
+read-side: collapsing N individual `findById()` calls into one
+`findAllById()` → one `SELECT ... WHERE id IN (...)` — verified via the
+standard `spring.jpa.show-sql` output (already on), not the
+`org.hibernate.orm.jdbc.batch` logger, since `findAllById()` never goes
+through the batch executor at all.
+
+- **`AdminService.getDashboardSummary()`** — collects distinct
+  `designerId`s from `sumEarningsByDesigner()`'s rows first, one
+  `userRepository.findAllById(designerIds)`, builds a
+  `Map<Long, User>`, then the existing `.map()` loop reads from that map
+  instead of calling `findById()` per row. Same fallback text preserved
+  exactly (`"Designer #" + designerId` when a designer isn't found).
+
+- **`PrintJobFacadeController.getJobs()` / `getQueueView()`** — new
+  private `record JobLookups(Map<Long,ModelFile>, Map<Long,User>,
+  Map<Long,Estimate>)` and a shared `batchLookupsFor(List<PrintJob>)`
+  helper (collects distinct file/user/estimate ids from the whole job
+  list, one `findAllById()` each, three maps), used by both endpoints
+  instead of their per-job `safeGetFile()`/`safeGetUser()`/
+  `safeGetEstimate()` calls. New `FileService.getFilesByIds(List<Long>)`
+  (`fileRepository.findAllById(ids)`) — added because
+  `PrintJobFacadeController` only had `FileService` injected for files
+  (not `ModelFileRepository` directly, unlike its existing direct access
+  to `UserRepository`/`EstimateRepository`), so this keeps the file
+  lookup consistent with the controller's existing dependency shape
+  instead of adding a second, redundant way to reach the same table.
+  **`safeGetFile()`/`safeGetUser()`/`safeGetEstimate()` themselves are
+  untouched** and still used exactly as before by `getJob()`/
+  `approveJob()`/`rejectJob()` — the single-job endpoints, where N=1 and
+  there's nothing to batch. A missing id in a `JobLookups` map returns
+  `null` from `Map.get()`, reproducing the exact same "not found → null"
+  behavior the old `safeGetX()` helpers already had — per the task's
+  explicit instruction, this only changes how the data is fetched, not
+  what happens when it's absent.
+
+- **Verified with an actual before/after log comparison, not just
+  reasoning about the code** — wrote the test **before** applying the
+  fix, ran it once against the unfixed `PrintJobFacadeController` to
+  capture a real baseline, then applied the fix and re-ran the *same*
+  test:
+
+  **`PrintJobFacadeControllerBatchingTest`** (5 seeded jobs, distinct
+  files/estimates, all owned by one throwaway test student — routes
+  through `getJobs()`'s non-staff `findByUserId()` branch so the result
+  set is exactly these 5 rows):
+  | | BEFORE | AFTER |
+  |---|---|---|
+  | `model_files` queries | 5 individual (`WHERE file_id=?` ×5) | 1 (`WHERE file_id in (?,?,?,?,?)`) |
+  | `estimates` queries | 5 individual | 1 (`WHERE id in (?,?,?,?,?)`) |
+  | per-job `users` queries | 5 individual, all redundantly re-fetching the *same* one user | 1 (`WHERE user_id in (?)`) |
+  | `print_jobs` queries (the list fetch itself) | 2 | 2 — unaffected either way, confirmed identical in both logs |
+
+  Counted precisely with `awk`/`grep` against the isolated test-body log
+  section in both runs (excluding `@AfterEach` cleanup deletes) — not
+  eyeballed. Total relevant queries: **15 → 3** for this 5-job test,
+  matching the task's own stated ratio (would be 30 → 3 at N=10).
+
+  **`AdminServiceBatchingTest`** (3 seeded designers, each with one
+  `DesignListing`): confirmed the designer lookup is exactly one
+  `SELECT ... FROM users WHERE user_id in (?, ?, ?)` — could not capture
+  a clean isolated "before" baseline for this one the same way (the fix
+  was already applied when this second test was written), but it's the
+  exact same `findAllById()` mechanism already proven definitively by
+  the print-jobs comparison above, so re-deriving a separate before/after
+  pair here would have been re-proving already-proven Hibernate
+  behavior, not the fix's correctness. `getDashboardSummary()` has no
+  caller-scoping (admin-global view) — this test can't assert an exact
+  result-set size (`sumEarningsByDesigner()` groups every `DesignListing`
+  row in the whole shared dev database, not just the test's 3 rows), so
+  it asserts its 3 test designers' names appear correctly instead, plus
+  the single-query log evidence.
+
+- **Confirmed no other behavior changed (task's point 4).** Both tests
+  assert functional correctness, not just query counts:
+  `PrintJobFacadeControllerBatchingTest` checks every response's
+  `user_name`/`file_name`/`estimated_cost` resolved correctly through
+  the batch maps; `AdminServiceBatchingTest` checks the expected
+  designer names appear in `designer_earnings`. `PrintJobFacadeController`'s
+  constructor signature is unchanged (`FileService`/`UserRepository`/
+  `EstimateRepository` were already injected) — no other call sites
+  needed updating.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 56 tests run (54 + 2 new), same 4 pre-existing
+    failures as every prior session logged in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1,
+    `AdminServiceTest` ×1 — the latter's existing assertions only cover
+    `totalJobs`/`totalPrinters`/`jobsByStatus`/`printersByStatus`, never
+    `designer_earnings`, so this change doesn't touch what that
+    pre-existing failure is about). **No new failures.** No existing
+    test file needed changes to compile — both fixes were additive
+    (new record, new private method, new `FileService` method), no
+    constructor/signature changes anywhere.
+  - Both new tests' surefire reports confirmed individually: 1/1 passing
+    each.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`facade/PrintJobFacadeControllerBatchingTest.java`,
+`adminservice/service/AdminServiceBatchingTest.java`.
+
+**Files modified:**
+`adminservice/service/AdminService.java` (`getDashboardSummary()`
+batching), `facade/PrintJobFacadeController.java` (`JobLookups` record,
+`batchLookupsFor()`, `getJobs()`/`getQueueView()` updated to use it),
+`fileservice/service/FileService.java` (`getFilesByIds()`).
+
+**Files deleted:** none.
+
+## 2026-07-20 — Backend: Length caps + validation on remaining unbounded text fields (#71)
+
+Report.reason already got a `@Column(length=1000, nullable=false)` cap plus
+a manual service-layer length/blank check during the moderation work. Four
+other fields still had the same unbounded-text gap: `PrintJob.notes`,
+`Notification.message`, `DesignListing.description`, and
+`SuspendUserRequest.reason`. Closed all four, choosing per-field which of
+this codebase's two already-established validation mechanisms actually
+applies, rather than copying Report's exact mechanism everywhere it
+wasn't the right fit:
+
+- **`PrintJob.notes` / `UpdateJobRequest.notes`** (cap: 500).
+  - Entity: `@Column(length = 500)` only — **not** a Jakarta `@Size` on
+    the entity field. Spring Boot auto-wires Hibernate's Bean Validation
+    integration, so a `@Size` directly on a JPA field gets re-checked at
+    `save()`-time too; if that ever fired outside the `@Valid`-checked
+    path it would throw an unhandled `ConstraintViolationException` →
+    the generic `Exception.class` handler → an unlogged 500, exactly
+    what point 3 of this task said to avoid. `@Column(length=...)` alone
+    (matching `Report.reason`'s own precedent) sidesteps that risk
+    entirely.
+  - DTO: `@Size(max = 500)` on `UpdateJobRequest.notes` — this field
+    *is* only ever bound via `@RequestBody` at one controller method, so
+    the standard `@Valid` → `MethodArgumentNotValidException` →
+    `GlobalExceptionHandler` → 400 pipeline (already proven in production
+    by `ForgotPasswordRequest`/`ResetPasswordRequest`) applies cleanly.
+  - Added `@Valid` to `PrintJobController.updatePrintJob()`'s
+    `UpdateJobRequest` parameter — it was missing entirely, so `@Size`
+    would have been silently inert without it.
+  - No `@NotBlank`: confirmed `PrintJobService.updateJobFields()`
+    already treats a `null` `notes` as "leave unchanged" (not "clear
+    it"), so the field is genuinely optional today — added a comment
+    on the DTO documenting why, instead of silently changing that
+    behavior.
+  - Out of scope, flagged not fixed: the raw ADMIN-only
+    `POST /api/job-service/print-jobs` endpoint binds a full `PrintJob`
+    entity directly and has no `@Valid`. It's explicitly commented as an
+    "ops/debugging" bypass endpoint, not primary traffic, and the task
+    named `UpdateJobRequest` specifically — the DB-level `@Column(length=500)`
+    still protects it from ever writing more than 500 chars, just via a
+    DB error rather than a clean 400 if abused (a pre-existing
+    characteristic of every other implicit-VARCHAR(255) field on this
+    entity, not something introduced here).
+
+- **`Notification.message`** (cap: 500) — the one field that didn't fit
+  either existing pattern cleanly, because unlike the other three it has
+  *two* very different callers:
+  - `POST /api/notifications` (`NotificationController.createNotification()`)
+    — the sole external, client-facing entry point (LAB_STAFF/ADMIN
+    only). Added a manual blank/length check here, mirroring
+    `ReportService`'s style, throwing a new
+    `InvalidNotificationInputException` (registered in
+    `GlobalExceptionHandler` → 400).
+  - Roughly a dozen internal call sites across `AdminService`,
+    `PrintQueueService`, `PaymentService`, and `PrintJobFacadeController`
+    — all fire-and-forget notification side-effects of a *different*
+    primary operation (job approval, payment confirmation, user
+    suspension). Rejecting here would mean, e.g., an admin's suspend-user
+    action failing outright because the optional `SuspendUserRequest.reason`
+    they typed pushed the concatenated notification text past 500 chars —
+    a disproportionate failure of the primary action over a cosmetic
+    side-channel field. `NotificationService.createNotification()`
+    instead **truncates silently** to 500 chars for these callers rather
+    than throwing. This is a deliberate deviation from the "reject, don't
+    truncate" pattern used for the other three fields — explained rather
+    than applied automatically, per this task's own point-3 spirit (a
+    clean, predictable outcome, just not a 400 for callers that were
+    never a validation boundary to begin with).
+  - Entity: `@Column(length = 500)` (widens Hibernate's implicit
+    VARCHAR(255) default — same DB-only rationale as `PrintJob.notes`).
+
+- **`DesignListing.description`** (cap: 2000) — bound via `@RequestParam`
+  in `createListing()` and a raw `Map<String,Object>` body in
+  `updateListing()`, neither of which is a `@Valid`-checked DTO. Added a
+  `validateDescription()` helper in `MarketplaceController`, deliberately
+  mirroring the shape of the controller's own existing `validateCategory()`
+  helper (manual check → throw `InvalidListingInputException`, already
+  mapped to 400) rather than introducing a new `@Validated`+constrained-
+  `@RequestParam` pattern that doesn't exist anywhere else in this
+  controller. Applied at both call sites.
+  - Did **not** change the entity's `@Column(columnDefinition = "TEXT")`
+    to `@Column(length = 2000)`. Confirmed this app runs
+    `spring.jpa.hibernate.ddl-auto=update`, which reliably *widens*
+    `VARCHAR` columns (used above for `PrintJob.notes`/
+    `Notification.message`, both 255→500) but does not reliably *narrow*
+    or retype an already-live `TEXT` column — attempting that under
+    `ddl-auto=update` risked either silently not applying or an
+    unpredictable schema change on the shared dev DB, out of proportion
+    for this task. The `validateDescription()` check is the sole
+    enforcement point; the column stays TEXT (still technically
+    unbounded at the DB layer, but no longer reachable with more than
+    2000 chars through the only two write paths).
+
+- **`SuspendUserRequest.reason`** (cap: 500, `@NotBlank` deliberately
+  **not** added).
+  - Added `@Size(max = 500)` and `@Valid` on
+    `AdminController.suspendUser()` (also missing entirely before this).
+  - The task suggested reason "probably shouldn't be blank for an admin
+    action" — but the field's existing code comment documents it as
+    intentionally optional (a "no reason supplied" fallback, same pattern
+    as `PrintJobFacadeController.rejectJob()`). Adding `@NotBlank` would
+    silently flip an already-shipped, documented design choice from
+    optional to required. Flagged instead of guessed: kept `reason`
+    optional, added only the length cap. `@Size` alone still validates
+    correctly when a value is present and passes a null/blank value
+    through untouched.
+  - Not persisted anywhere (unchanged) — only folded into the
+    notification message and the moderation-log entry, both downstream
+    of `NotificationService.createNotification()`'s own 500-char cap
+    above (a full-length 500-char reason plus the notification's ~40-char
+    prefix text would itself exceed 500 chars post-concatenation — this
+    is exactly the scenario `createNotification()`'s truncate-not-throw
+    behavior was chosen to absorb gracefully rather than fail the
+    suspend action over).
+
+- **Verified empirically, not just by reading the annotations** — new
+  test `UnboundedTextFieldValidationTest` (13 tests, all passing):
+  - `UpdateJobRequest`/`SuspendUserRequest`: validated directly against
+    `jakarta.validation.Validation`'s `Validator` (the same engine
+    `@Valid` delegates to) — confirms a 501-char value produces exactly
+    one `ConstraintViolation` on the right property, a 500-char value
+    produces none, and (for `notes`) null/blank produce none either.
+    Separately confirmed via reflection that `@Valid` is actually present
+    on both controller parameters — `@Size` alone would be silently
+    inert without it, and both were missing before this change.
+  - `Notification.message`/`DesignListing.description`: called the real
+    controller methods directly (`NotificationController
+    .createNotification()`, `MarketplaceController.createListing()`/
+    `updateListing()`), matching this codebase's existing
+    `FileControllerTest` convention for controller-level unit tests.
+    Confirmed a 501/2001-char value throws the expected exception with
+    the underlying repository never touched (`verifyNoInteractions`/
+    `verify(..., never())`), and that a value at exactly the cap is
+    accepted.
+  - Did not add a full MockMvc/`@WebMvcTest` harness (no precedent for
+    it anywhere in this codebase) — the generic `@Valid` →
+    `MethodArgumentNotValidException` → `GlobalExceptionHandler` → 400
+    round trip is already proven in production by
+    `ForgotPasswordRequest`/`ResetPasswordRequest`; what needed proving
+    here was narrower (these specific fields are actually wired into
+    that pipeline), which the Validator + reflection checks cover
+    directly.
+
+- **Verification:**
+  - `./mvnw compile`: **BUILD SUCCESS**.
+  - `./mvnw test`: 69 tests run (56 + 13 new), same 4 pre-existing
+    failures as every prior session logged in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1, `AdminServiceTest`
+    ×1 — re-confirmed via `AdminServiceTest.summaryCountsJobsAndPrintersByStatus`'s
+    own source: it mocks `printJobRepository.findAll()`, which
+    `getDashboardSummary()` hasn't called since the pre-existing
+    `countGroupedByStatus()`/`countAllJobs()` change traced to commit
+    `b63f4c1`, unrelated to anything in this task). **No new failures.**
+  - `UnboundedTextFieldValidationTest`'s surefire report confirmed
+    individually: 13/13 passing.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`notificationservice/exception/InvalidNotificationInputException.java`,
+`UnboundedTextFieldValidationTest.java`.
+
+**Files modified:**
+`queueservice/model/PrintJob.java` (`@Column(length=500)` on `notes`),
+`dto/UpdateJobRequest.java` (`@Size(max=500)` on `notes`),
+`controller/PrintJobController.java` (`@Valid` added),
+`notificationservice/model/Notification.java` (`@Column(length=500)` on
+`message`), `notificationservice/service/NotificationService.java`
+(truncation guard in `createNotification()`),
+`notificationservice/controller/NotificationController.java` (reject
+oversized/blank `message`), `exception/GlobalExceptionHandler.java`
+(registered `InvalidNotificationInputException` → 400),
+`marketplaceservice/controller/MarketplaceController.java`
+(`validateDescription()` helper, applied in `createListing()`/
+`updateListing()`), `adminservice/dto/SuspendUserRequest.java`
+(`@Size(max=500)` on `reason`), `adminservice/controller/AdminController.java`
+(`@Valid` added).
+
+**Files deleted:** none.
+
+## 2026-07-20 — Backend: Marketplace order double-charged designer's base price (fixed)
+
+Traced the full marketplace checkout path end to end:
+`PrintJobFacadeController.submitMarketplaceOrder()` (`POST /api/print-jobs`
+with a `listing_id`) → `EstimateService.calculateAndSaveEstimate()` →
+`PaymentService.initiatePayment()` (`POST /api/payments/initiate`) →
+Paystack `/transaction/initialize` → (on success) `handleWebhook()`.
+
+- **Root cause — task's candidate (a), confirmed exactly.**
+  `submitMarketplaceOrder()` computed a fresh `Estimate` (pure
+  machine+material cost, call it `labCost`), then did:
+  ```java
+  estimate.setTotalCost(estimate.getTotalCost() + listing.getBasePrice().doubleValue());
+  estimateRepository.save(estimate);
+  ```
+  — **persisting** `labCost + basePrice` back onto the `Estimate` row.
+  `PaymentService.initiatePayment(estimateId, listingId, ...)` then
+  independently re-fetches that same `Estimate` from the DB and does:
+  ```java
+  double totalCost = estimate.getTotalCost();       // already labCost + basePrice
+  if (listingId != null) { totalCost += listing.getBasePrice().doubleValue(); }
+  ```
+  — adding `basePrice` a **second** time before charging Paystack. Final
+  amount: `labCost + 2×basePrice`. `initiatePayment()`'s own comment
+  ("Total = machine+material cost from estimate + designer's base_price")
+  makes clear *it* is meant to be the one place this addition happens —
+  `submitMarketplaceOrder()`'s mutation was the redundant one.
+  - Side effect of the same bug, also fixed by removing it: the mutation
+    was non-idempotent. Resubmitting the same `estimate_id` to
+    `submitMarketplaceOrder()` a second time (e.g. a retried/duplicate
+    request) would have added `basePrice` again on top of the
+    already-mutated row, compounding further on every repeat call — on
+    top of whatever `initiatePayment()` then added again itself.
+
+- **Also traced and ruled out `MarketplaceController.getListing()`**
+  (`GET /api/marketplace/{id}`, which auto-generates a preview quote and
+  is the endpoint the current mobile UI's listing-detail screen actually
+  calls before `POST /api/payments/initiate` — the frontend never
+  currently calls `submitMarketplaceOrder()`/`POST /api/print-jobs` at
+  all, confirmed by grepping the whole `Frontend/` tree). That method
+  *also* adds `basePrice` on top of a freshly-computed quote, but only
+  mutates the in-memory `Estimate` object returned in the JSON response
+  for display — it never calls `estimateRepository.save()` again after
+  that mutation, and this app runs `spring.jpa.hibernate.open-in-view=false`
+  (confirmed in `application.properties`), so there's no request-spanning
+  persistence context that could silently flush it either. The DB row
+  stays pure `labCost`. So today's actual live checkout path
+  (`getListing()` → `initiatePayment()`) was **not** doubling anything —
+  the bug was only live on the `submitMarketplaceOrder()` →
+  `initiatePayment()` sequence, which exists and is fully reachable via
+  the API (matches the controller's own javadoc description of the
+  intended flow) even though no current screen happens to call it. Left
+  `getListing()`'s display-only addition untouched — it was already
+  correct.
+
+- **Fix:** removed the `estimate.setTotalCost(...); estimateRepository.save(...)`
+  block from `submitMarketplaceOrder()` entirely. `Estimate.totalCost`
+  now stays pure machine+material cost end to end, for both the
+  bring-your-own-file and marketplace paths — `PaymentService
+  .initiatePayment()` remains the single place `basePrice` is folded in,
+  exactly matching what its own comment already said it does.
+
+- **Verified with a real before/after run, not just re-reading the code**
+  — new test `MarketplaceOrderChargeTest` (`@SpringBootTest`, real DB,
+  and a **real** call to Paystack's test-mode `/transaction/initialize`
+  API, since that's the only way to actually observe the "Paystack
+  initialize amount" stage the task asked to trace rather than infer).
+  Seeded a throwaway designer/listing (`basePrice = 15.00`) and a
+  throwaway 500KB file, independently computed the expected pure lab
+  cost from `EstimateService`'s own formula by hand (`34.00`, worked out
+  in the test's own comments), then called
+  `submitMarketplaceOrder()` → `initiatePayment()` in sequence exactly as
+  a real client would chain them:
+  | | BEFORE (unfixed) | AFTER (fixed) |
+  |---|---|---|
+  | `Payment.amount` | **64.00** (34.00 + 15.00 + 15.00) | **49.00** (34.00 + 15.00) |
+  | `Estimate.totalCost` (post-submit, re-read from DB) | 49.00 (already had one basePrice baked in) | 34.00 (pure lab cost) |
+
+  Ran the identical test against the unfixed code first (real failure:
+  `expected: <49.0> but was: <64.0>`), then applied the fix and reran the
+  same test unchanged (passed) — same before/after methodology used for
+  #60/#61 this session. Test cleans up every row it creates
+  (`Payment`/`Estimate`/`DesignListing`/`ModelFile`/2×`User`) in
+  `@AfterEach`.
+
+- **Checked for past overcharges (task point 5)** with a one-off audit
+  (`HistoricalMarketplaceOverchargeAuditTest`, run once against the real
+  dev DB then deleted — not a permanent regression test, it asserts
+  nothing, only reports): for every `Payment` with a non-null
+  `listingId`, independently recomputed pure lab cost from the linked
+  `Estimate`'s stored `estimatedGrams`/`durationMinutes`/`materialType`
+  (set once at estimate-creation time, unaffected by the bug's later
+  mutation) and compared against both the estimate's current
+  `totalCost` and the payment's `amount`. Result: **zero marketplace
+  payments exist in the dev DB at all** (`paymentRepository.findAll()`
+  filtered to `listingId != null` returned an empty list) — consistent
+  with the frontend never having called `submitMarketplaceOrder()` yet.
+  Nothing to remediate; the fix is complete with no historical cleanup
+  needed.
+
+- **Verification:**
+  - `./mvnw test -Dtest=MarketplaceOrderChargeTest`: failed against
+    unfixed code (`64.0` vs expected `49.0`), passed against fixed code —
+    both runs against the real dev DB and real Paystack test-mode API
+    (outbound connectivity to `api.paystack.co` confirmed first via a
+    direct `curl`).
+  - `./mvnw test`: 70 tests run (69 + 1 new), same 4 pre-existing
+    failures logged in every prior entry in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1, `AdminServiceTest`
+    ×1 — all unrelated to payments/marketplace code). **No new
+    failures.**
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:** `MarketplaceOrderChargeTest.java`.
+
+**Files modified:** `facade/PrintJobFacadeController.java` (removed the
+duplicate `basePrice` addition in `submitMarketplaceOrder()`).
+
+**Files deleted:** none (the one-off `HistoricalMarketplaceOverchargeAuditTest.java`
+used for the point-5 audit was created and removed within this same
+session — never left in the tree).
+
+## 2026-07-20 — Backend: Four workflow gaps vs the user story (color/notes, status guard, Queued label, notification deep link)
+
+A user story walking through the full Ama-orders-a-print flow surfaced four
+places the code didn't match the story. Fixed all four.
+
+**Gap 1 — color/notes silently dropped from every marketplace/BYOF print job.**
+`submitMarketplaceOrder()` never read `color`/`notes` at all; `submitJob()`
+(BYOF) read them but had nowhere to put them, since `Estimate` (the only
+thing saved at submission time) has no such fields, and `handleWebhook()`
+builds the `PrintJob` entirely from the `Estimate`.
+- Added `color`/`notes` to `Payment` (`notes` capped at `@Column(length=500)`,
+  matching `PrintJob.notes`'s own #71 cap; `color` left uncapped, matching
+  `PrintJob.color`).
+- Extended `PaymentService.initiatePayment(...)` with `color`/`notes`
+  parameters, set on the `Payment` before save. This — not
+  `submitMarketplaceOrder()`/`submitJob()` themselves — is where the values
+  actually become durable: those two facade endpoints return *before* any
+  `Payment` exists (the frontend calls `POST /api/payments/initiate`
+  separately, later, once the user taps Pay Now), so there's nothing for
+  them to attach color/notes to directly. They now read color/notes from
+  their own request and echo them back on `OrderAwaitingPaymentResponse`
+  (new optional fields) as an explicit, backend-confirmed round trip; the
+  frontend is expected to forward them unchanged as the new optional
+  `color`/`notes` fields on `InitiatePaymentRequest`. **That frontend call
+  site (`src/api/payments.ts`'s `initiatePayment()`) was not updated in this
+  session — out of scope for this backend task — so the capability now
+  exists end-to-end on the backend but needs one small frontend change
+  (pass `color`/`notes` through on that call) to actually reach production
+  traffic.** Flagged rather than silently left incomplete.
+- `handleWebhook()`: `job.setColor(payment.getColor())` /
+  `job.setNotes(payment.getNotes())`, alongside the existing
+  Estimate-sourced fields.
+- **Verified with a real end-to-end run**, not just code review — new test
+  `MarketplaceOrderColorNotesTest`: real `@SpringBootTest`, real DB, a real
+  call to Paystack's test-mode `/transaction/initialize`, a genuinely
+  HMAC-SHA512-signed synthetic `charge.success` webhook payload (same
+  algorithm as `PaymentService.isValidSignature()`), fed into the real
+  `handleWebhook()`. One thing had to be worked around: `handleWebhook()`
+  also calls `verifyWithPaystack()`, a *second*, real outbound call that
+  re-verifies the transaction with Paystack before creating the `PrintJob`
+  — and an initiated-but-never-actually-paid test reference reports
+  `"status":"abandoned"` (confirmed empirically with a raw `curl` against
+  the real API before writing the test, not assumed), which would make
+  `handleWebhook()` throw before ever reaching the PrintJob-creation code
+  this test needs to check. Driving an actual Paystack test-mode charge to
+  completion server-side (their card/OTP simulation flow) would work but is
+  disproportionately complex for what this test needs to prove. Instead,
+  changed `verifyWithPaystack()` from `private` to `protected` (comment
+  explains why directly on the method) specifically so a test can
+  `Mockito.spy()` the real `PaymentService` bean and stub out just that one
+  external call — production behavior is completely unchanged, every real
+  webhook still goes through it unconditionally. Everything else in the
+  test (signature verification, `PrintJob` creation, the actual color/notes
+  copy) runs for real, unmocked. Test lives in
+  `paymentservice.service` (not the root package like `MarketplaceOrderChargeTest`)
+  specifically so `protected` visibility resolves.
+- `MarketplaceOrderChargeTest`'s existing `initiatePayment(...)` call site
+  updated to pass `null, null` for the two new parameters — unaffected in
+  behavior, it's about charge amount, not color/notes.
+
+**Gap 2 — no guard against staff bypassing `/transition` and skipping
+"Ready for Pickup" entirely.** `updateJobStatus()` (the free-form
+`PATCH .../status` endpoint) already couldn't accept `"READY"`/`"COLLECTED"`
+(never in `VALID_STATUSES`), but only via a generic "invalid status"
+rejection that didn't point staff anywhere useful. Added an explicit guard
+ahead of the `VALID_STATUSES` check: `READY`/`COLLECTED` now throw
+`InvalidJobStatusException` with
+`"Use PATCH /api/print-jobs/{id}/transition to advance to READY or COLLECTED."`
+`COMPLETED` is untouched and still valid on this endpoint — the task
+scoped the guard to `READY`/`COLLECTED` specifically, not the older
+`COMPLETED` terminal status. Added
+`updateJobStatusRejectsReadyAndCollectedInFavorOfTransitionEndpoint`
+(parameterized over both values) to `PrintQueueServiceTest`.
+
+**Gap 3 — Orders screen would show "SUBMITTED", story says "Queued".**
+Went with the task's own recommended Option B (frontend display-label
+mapping only) over Option A (changing `PrintJob`'s `@PrePersist` status) —
+Option A would have rippled into `PrintQueueService.VALID_STATUSES`,
+`PrintJobFacadeController.QUEUE_STATUSES`/`getQueueView()`'s grouping, every
+existing `PrintQueueServiceTest` assertion expecting `"SUBMITTED"`, and
+`getJobs()`'s queue-position counter (`"QUEUED".equals(job.getStatus())`,
+which currently never increments for a freshly-created job precisely
+because it starts `SUBMITTED` not `QUEUED` — changing the initial status
+would silently start incrementing that counter for every job, a second
+behavior change beyond the label). All of that risk for what the task
+itself frames as a display-only mismatch.
+- `app/jobs/index.tsx`: its own local `statusVisual()` (student-only,
+  nothing else consumes it) now labels `SUBMITTED` as `"Queued"` directly.
+- `app/jobs/[id].tsx` renders status via the *shared* `StatusBadge`
+  component — also used by `staff/queue.tsx` (via `JobCard`), where
+  `SUBMITTED` vs `QUEUED` is operationally meaningful (needs staff
+  approval vs already approved and waiting for a printer) and must stay
+  distinguishable. Relabeling `StatusBadge` globally would have leaked
+  the customer-facing rename into the staff queue too. Instead added an
+  optional `label` override prop to `StatusBadge` (defaults to `undefined`,
+  zero behavior change for every other caller including staff), and only
+  `[id].tsx` passes `"QUEUED"` when `job.status === 'SUBMITTED'`.
+- Documented the choice with comments at both call sites (tagged `#Gap3`)
+  specifically so a future session doesn't "fix" the apparent SUBMITTED/
+  Queued mismatch by changing the backend status machine instead.
+
+**Gap 4 — no deep-link groundwork for eventual push notifications.**
+Explicitly scoped to NOT build FCM/Expo push token infrastructure (a
+separate project) — just lay the groundwork the task asked for:
+- Added `Notification.deepLink` (String, nullable) with the exact
+  migration comment specified: "Reserved for Expo push token routing once
+  FCM is wired — currently used by the in-app notification card only."
+- `NotificationService.createNotification(...)` — added a 5-arg overload
+  taking `deepLink`; the existing 4-arg version now delegates to it with
+  `null`, so every other call site (there are ~10 across
+  `AdminService`/`PrintQueueService`/`PaymentService`/
+  `PrintJobFacadeController`) is unaffected.
+- `transitionJobStatus()`'s `READY` branch is the only caller that passes
+  one: `"printforge://jobs/" + job.getId()`, alongside the existing
+  lab-location-aware "Ready for Pickup" message (confirmed unchanged —
+  task's point 1 asked to confirm this was already correct, and it was).
+
+**What was deliberately left alone**, matching the task's explicit
+guardrails: `PaymentService.initiatePayment()`'s charge calculation
+(`basePrice` still added exactly once, `Estimate.totalCost` still pure
+machine+material cost); `transitionJobStatus()`'s state machine and
+notification messages; the single-PrintJob-creation-only-in-`handleWebhook()`
+invariant; `PATCH /api/print-jobs/:id/status` still exists for
+approve/reject and free-form staff updates.
+
+- **Verification:**
+  - `./mvnw test-compile`: **BUILD SUCCESS**.
+  - `./mvnw test`: 73 tests run (70 + 1 new `MarketplaceOrderColorNotesTest`
+    + 2 new parameterized `PrintQueueServiceTest` cases), same 4
+    pre-existing failures logged in every prior entry in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1, `AdminServiceTest`
+    ×1 — all unrelated). **No new failures.**
+  - `npx tsc --noEmit` on `Frontend/`: clean, no errors, after the
+    `StatusBadge.tsx`/`[id].tsx`/`index.tsx` changes.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:** `paymentservice/service/MarketplaceOrderColorNotesTest.java`.
+
+**Files modified:**
+`paymentservice/model/Payment.java` (`color`/`notes` fields),
+`paymentservice/service/PaymentService.java` (`initiatePayment()` extended
+with color/notes params; `verifyWithPaystack()` visibility `private`→`protected`;
+`handleWebhook()` copies `payment.color`/`payment.notes` onto the created
+`PrintJob`), `paymentservice/dto/InitiatePaymentRequest.java`
+(`color`/`notes` fields), `paymentservice/controller/PaymentController.java`
+(passes them through), `facade/dto/OrderAwaitingPaymentResponse.java`
+(`color`/`notes` fields + new 4-arg constructor),
+`facade/PrintJobFacadeController.java` (`submitMarketplaceOrder()` reads
+color/notes from body; `submitJob()` echoes its existing color/notes
+params instead of dropping them), `MarketplaceOrderChargeTest.java`
+(updated `initiatePayment(...)` call site for the new parameters),
+`queueservice/service/PrintQueueService.java` (`updateJobStatus()`
+READY/COLLECTED guard; `transitionJobStatus()`'s READY branch passes a
+deepLink), `queueservice/service/PrintQueueServiceTest.java` (new
+parameterized guard test), `notificationservice/model/Notification.java`
+(`deepLink` field), `notificationservice/service/NotificationService.java`
+(5-arg `createNotification()` overload), `Frontend/src/components/StatusBadge.tsx`
+(optional `label` override prop), `Frontend/app/jobs/[id].tsx` (passes the
+SUBMITTED→QUEUED label override), `Frontend/app/jobs/index.tsx`
+(`statusVisual()`'s SUBMITTED label changed to "Queued").
+
+**Files deleted:** none.

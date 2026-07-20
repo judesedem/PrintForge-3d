@@ -45,7 +45,9 @@ public class PaymentController {
                 request.getEstimateId(),
                 request.getListingId(),
                 caller.getUserId(),
-                caller.getEmail()
+                caller.getEmail(),
+                request.getColor(),
+                request.getNotes()
         );
         return ResponseEntity.ok(payment);
     }

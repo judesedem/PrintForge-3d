@@ -58,15 +58,23 @@ public class AdminService {
         Map<String, Long> printersByStatus = allPrinters.stream()
                 .collect(Collectors.groupingBy(Printer::getStatus, Collectors.counting()));
 
-        // Designer earnings summary: how much each designer is owed
+        // Designer earnings summary: how much each designer is owed.
+        // Batched via findAllById() — same pattern as
+        // MarketplaceController.enrichWithDesigner(List) — instead of one
+        // findById() per row, which was N+1 for N distinct designers.
         List<Object[]> rawEarnings = designListingRepository.sumEarningsByDesigner();
+        List<Long> designerIds = rawEarnings.stream()
+                .map(row -> ((Number) row[0]).longValue())
+                .distinct()
+                .toList();
+        Map<Long, User> designersById = userRepository.findAllById(designerIds).stream()
+                .collect(Collectors.toMap(User::getUserId, u -> u));
         List<Map<String, Object>> designerEarnings = rawEarnings.stream().map(row -> {
             Long designerId = ((Number) row[0]).longValue();
             Object totalOwed = row[1];
             Map<String, Object> entry = new LinkedHashMap<>();
-            String designerName = userRepository.findById(designerId)
-                    .map(u -> u.getFullName())
-                    .orElse("Designer #" + designerId);
+            User designer = designersById.get(designerId);
+            String designerName = designer != null ? designer.getFullName() : "Designer #" + designerId;
             entry.put("designer_name", designerName);
             entry.put("total_owed", totalOwed);
             return entry;

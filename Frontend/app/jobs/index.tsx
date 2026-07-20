@@ -62,7 +62,13 @@ type StatusVisual = {
 function statusVisual(status: JobStatus, colors: Colors): StatusVisual {
   switch (status) {
     case 'SUBMITTED':
-      return { label: 'Submitted', stage: 0, fg: colors.mutedFg, bg: colors.muted };
+      // #Gap3 — backend's real initial status is SUBMITTED; displayed as
+      // "Queued" to match the user story's Orders step. This screen is
+      // student-facing only (no staff consumer of this local function),
+      // so unlike StatusBadge.tsx there's no operational-clarity concern
+      // with relabeling it here. Frontend-only (Option B) — deliberately
+      // not a backend status-machine change, see Handoff.md.
+      return { label: 'Queued', stage: 0, fg: colors.mutedFg, bg: colors.muted };
     case 'APPROVED':
       return { label: 'Approved', stage: 1, fg: '#5B8DEF', bg: 'rgba(37, 99, 235, 0.18)' };
     case 'QUEUED':

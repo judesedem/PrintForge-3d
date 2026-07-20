@@ -2,6 +2,7 @@ package com.printforge.printforge.controller;
 
 import java.util.List;
 
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -69,7 +70,7 @@ public class PrintJobController {
     @PutMapping("/{id}")
     public ResponseEntity<PrintJob> updatePrintJob(
             @PathVariable Long id,
-            @RequestBody UpdateJobRequest request,
+            @Valid @RequestBody UpdateJobRequest request,
             Authentication authentication
     ) {
         PrintJob job = printJobService.getPrintJobById(id);

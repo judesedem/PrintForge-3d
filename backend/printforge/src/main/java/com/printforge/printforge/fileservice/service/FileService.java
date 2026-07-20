@@ -67,6 +67,15 @@ public class FileService {
                 .orElseThrow(() -> new ModelFileNotFoundException(id));
     }
 
+    /**
+     * Batch lookup for list endpoints — one query for all ids instead of
+     * one per id. Used by PrintJobFacadeController.getJobs()/
+     * getQueueView() to avoid a per-job findById() (#61).
+     */
+    public List<ModelFile> getFilesByIds(List<Long> ids) {
+        return fileRepository.findAllById(ids);
+    }
+
     public List<ModelFile> getAllFiles() {
         return fileRepository.findAll();
     }

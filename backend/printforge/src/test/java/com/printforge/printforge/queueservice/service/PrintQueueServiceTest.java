@@ -150,6 +150,23 @@ class PrintQueueServiceTest {
                 () -> service.updateJobStatus(5L, "definitely_not_a_status", null, null, null));
     }
 
+    /**
+     * READY/COLLECTED are staff-visible-lifecycle statuses that must go
+     * through transitionJobStatus() (PATCH .../transition) instead, so its
+     * ordering + "Ready for Pickup" notification can't be silently
+     * bypassed via this free-form endpoint.
+     */
+    @ParameterizedTest
+    @ValueSource(strings = {"READY", "COLLECTED"})
+    void updateJobStatusRejectsReadyAndCollectedInFavorOfTransitionEndpoint(String status) {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        assertThrows(InvalidJobStatusException.class,
+                () -> service.updateJobStatus(5L, status, null, null, null));
+    }
+
     @Test
     void updateJobStatusThrowsNotFoundForUnknownJob() {
         Mockito.when(printJobRepository.findById(404L)).thenReturn(Optional.empty());

@@ -3,7 +3,17 @@ import { useTheme } from '../ThemeContext';
 import { JobStatus } from '../data/mockData';
 import { Colors, designTokens } from '../theme';
 
-export default function StatusBadge({ status }: { status: JobStatus }) {
+// label is an optional override for the displayed text — the underlying
+// `status` still drives color/dot via statusMap regardless. Added so a
+// customer-facing screen can show "QUEUED" for a job that's actually
+// SUBMITTED (matching the user story's "Ama checks Orders, sees the job
+// as Queued" step — see app/jobs/[id].tsx's usage) without changing what
+// staff/queue.tsx (via JobCard, the other consumer of this component)
+// shows, where SUBMITTED vs QUEUED is an operationally meaningful
+// distinction (needs-approval vs already-approved-and-waiting-to-print)
+// that must stay visible. Undefined (the default) preserves the exact
+// prior behavior for every other caller.
+export default function StatusBadge({ status, label: labelOverride }: { status: JobStatus; label?: string }) {
   const { colors } = useTheme();
   const s = makeStyles(colors);
 
@@ -21,7 +31,7 @@ export default function StatusBadge({ status }: { status: JobStatus }) {
   };
 
   const visual = statusMap[status];
-  const label = status === 'IN_PROGRESS' ? 'PRINTING' : status.replace(/_/g, ' ');
+  const label = labelOverride ?? (status === 'IN_PROGRESS' ? 'PRINTING' : status.replace(/_/g, ' '));
 
   return (
     <View style={[s.badge, { backgroundColor: visual.bg }]}>

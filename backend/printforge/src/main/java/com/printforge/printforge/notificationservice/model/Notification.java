@@ -16,8 +16,17 @@ public class Notification {
 
     // The actual alert content
     private String title;   // e.g., "Print Started!"
+
+    // #71 — length cap made explicit (widens Hibernate's implicit
+    // VARCHAR(255) default). See NotificationService.createNotification()
+    // for how this is enforced above the DB layer.
+    @Column(length = 500)
     private String message; // e.g., "Your print job for 'Benchy' has begun on Prusa-01."
     private String type;    // e.g., "ORDER_UPDATE", "SYSTEM_ALERT", "PROMO"
+
+    // Reserved for Expo push token routing once FCM is wired — currently
+    // used by the in-app notification card only.
+    private String deepLink;
 
     // Has the user seen it yet?
     private boolean isRead;
@@ -47,6 +56,9 @@ public class Notification {
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
+
+    public String getDeepLink() { return deepLink; }
+    public void setDeepLink(String deepLink) { this.deepLink = deepLink; }
 
     public boolean isRead() { return isRead; }
     public void setRead(boolean read) { isRead = read; }

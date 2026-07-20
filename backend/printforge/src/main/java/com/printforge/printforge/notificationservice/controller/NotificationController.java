@@ -1,6 +1,7 @@
 package com.printforge.printforge.notificationservice.controller;
 
 import com.printforge.printforge.entity.User;
+import com.printforge.printforge.notificationservice.exception.InvalidNotificationInputException;
 import com.printforge.printforge.notificationservice.model.Notification;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.repository.UserRepository;
@@ -29,6 +30,11 @@ public class NotificationController {
     }
 
     // ── Internal/Staff endpoint — create notification ─────────────────────────
+    // #71 — this is the only client-facing entry point for
+    // Notification.message (every other createNotification() caller is
+    // internal, server-constructed text), so it's the one place that
+    // rejects an oversized message outright rather than falling back to
+    // NotificationService's defensive truncation.
     @PreAuthorize("hasAnyRole('LAB_STAFF', 'ADMIN')")
     @PostMapping
     public ResponseEntity<Notification> createNotification(
@@ -36,6 +42,12 @@ public class NotificationController {
             @RequestParam String title,
             @RequestParam String message,
             @RequestParam String type) {
+        if (message == null || message.isBlank()) {
+            throw new InvalidNotificationInputException("message must not be blank");
+        }
+        if (message.length() > 500) {
+            throw new InvalidNotificationInputException("message must be 500 characters or fewer");
+        }
         return ResponseEntity.ok(notificationService.createNotification(userId, title, message, type));
     }
 

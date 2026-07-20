@@ -35,8 +35,10 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
 /**
  * Bridges the frontend's 1-step job submission flow to the backend's
@@ -113,6 +115,11 @@ public class PrintJobFacadeController {
         int quantity = body.containsKey("quantity") ? ((Number) body.get("quantity")).intValue() : 1;
         String infill = body.getOrDefault("infill", "20%").toString();
         String quality = body.getOrDefault("quality", "Standard").toString();
+        // color/notes (both optional) have no home on Estimate — echoed
+        // back in the response below and carried onto the PrintJob via
+        // Payment (see PaymentService.initiatePayment()/handleWebhook()).
+        String color = body.get("color") != null ? body.get("color").toString() : null;
+        String notes = body.get("notes") != null ? body.get("notes").toString() : null;
 
         // 4. Reuse existing estimate or calculate fresh one
         Estimate estimate;
@@ -128,11 +135,14 @@ public class PrintJobFacadeController {
             estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
         }
 
-        // Add designer's base_price on top of machine+material cost
-        if (listing.getBasePrice() != null) {
-            estimate.setTotalCost(estimate.getTotalCost() + listing.getBasePrice().doubleValue());
-            estimateRepository.save(estimate);
-        }
+        // basePrice is deliberately NOT added to the estimate's totalCost
+        // here. Estimate.totalCost is meant to stay pure machine+material
+        // cost end to end — PaymentService.initiatePayment() is the single
+        // place basePrice gets folded in, to compute the actual amount
+        // charged. Adding it here too used to double-charge the customer:
+        // this mutation was persisted (estimateRepository.save()), so by
+        // the time initiatePayment() read the same Estimate row and added
+        // basePrice again, the total already had one copy baked in.
 
         // 5. No PrintJob here — PaymentService.handleWebhook is the only place
         // a PrintJob gets created, gated on payment actually clearing (#58).
@@ -153,7 +163,7 @@ public class PrintJobFacadeController {
                 "info"
         );
 
-        return ResponseEntity.ok(new OrderAwaitingPaymentResponse(estimate, listingId));
+        return ResponseEntity.ok(new OrderAwaitingPaymentResponse(estimate, listingId, color, notes));
     }
 
     // ── Bring-Your-Own-File Upload (backward compat) ──────────────────────────
@@ -176,11 +186,12 @@ public class PrintJobFacadeController {
 
         // No PrintJob here — PaymentService.handleWebhook is the only place a
         // PrintJob gets created, gated on payment actually clearing (#58).
-        // material/color/quantity/infill/quality/notes are still validated
-        // and folded into the Estimate above; color and notes specifically
-        // have no home on Estimate and are dropped here, same pre-existing
-        // gap already documented in PaymentService.handleWebhook's job-
-        // creation comment for the marketplace path.
+        // material/quantity/infill/quality are folded into the Estimate
+        // above; color/notes have no home on Estimate, so they're echoed
+        // back in the response instead — the frontend forwards them on the
+        // follow-up POST /api/payments/initiate call, which is what
+        // actually carries them onto the Payment row (and from there,
+        // handleWebhook() copies them onto the PrintJob it creates).
 
         notificationService.createNotification(
                 caller.getUserId(),
@@ -189,7 +200,7 @@ public class PrintJobFacadeController {
                 "info"
         );
 
-        return ResponseEntity.ok(new OrderAwaitingPaymentResponse(estimate, null));
+        return ResponseEntity.ok(new OrderAwaitingPaymentResponse(estimate, null, color, notes));
     }
 
     // ── List Jobs ────────────────────────────────────────────────────────────
@@ -213,11 +224,13 @@ public class PrintJobFacadeController {
             }
         }
 
+        JobLookups lookups = batchLookupsFor(jobs);
+
         AtomicInteger position = new AtomicInteger(0);
         List<PrintJobResponse> responses = jobs.stream().map(job -> {
-            ModelFile file = safeGetFile(job.getFileId());
-            User owner = safeGetUser(job.getUserId());
-            Estimate estimate = safeGetEstimate(job.getEstimateId());
+            ModelFile file = lookups.files().get(job.getFileId());
+            User owner = lookups.users().get(job.getUserId());
+            Estimate estimate = lookups.estimates().get(job.getEstimateId());
             int pos = "QUEUED".equals(job.getStatus()) ? position.incrementAndGet() : 0;
             return toResponse(job, file, owner, estimate, pos);
         }).toList();
@@ -241,7 +254,7 @@ public class PrintJobFacadeController {
             grouped.put(status, new ArrayList<>());
         }
 
-        printJobRepository.findAll().stream()
+        List<PrintJob> queueJobs = printJobRepository.findAll().stream()
                 .filter(job -> QUEUE_STATUSES.contains(job.getStatus()))
                 // Sorting the flat list first (rather than sorting each group
                 // separately) and then appending into buckets preserves FIFO
@@ -249,12 +262,16 @@ public class PrintJobFacadeController {
                 .sorted(Comparator.comparing(
                         PrintJob::getSubmittedAt,
                         Comparator.nullsLast(Comparator.naturalOrder())))
-                .forEach(job -> {
-                    ModelFile file = safeGetFile(job.getFileId());
-                    User owner = safeGetUser(job.getUserId());
-                    Estimate estimate = safeGetEstimate(job.getEstimateId());
-                    grouped.get(job.getStatus()).add(toResponse(job, file, owner, estimate));
-                });
+                .toList();
+
+        JobLookups lookups = batchLookupsFor(queueJobs);
+
+        queueJobs.forEach(job -> {
+            ModelFile file = lookups.files().get(job.getFileId());
+            User owner = lookups.users().get(job.getUserId());
+            Estimate estimate = lookups.estimates().get(job.getEstimateId());
+            grouped.get(job.getStatus()).add(toResponse(job, file, owner, estimate));
+        });
 
         return ResponseEntity.ok(grouped);
     }
@@ -432,6 +449,38 @@ public class PrintJobFacadeController {
         } catch (NumberFormatException e) {
             return 20;
         }
+    }
+
+    /** Batched file/user/estimate lookups for a job list — see batchLookupsFor(). */
+    private record JobLookups(Map<Long, ModelFile> files, Map<Long, User> users, Map<Long, Estimate> estimates) {}
+
+    /**
+     * Batch lookup for list endpoints (getJobs(), getQueueView()) — one
+     * findAllById() per entity type covering every job in the list,
+     * instead of safeGetFile()/safeGetUser()/safeGetEstimate() called
+     * once per job per entity type (#61 — was 3×N queries for N jobs).
+     * Same collect-ids-then-findAllById-then-toMap shape as
+     * MarketplaceController.enrichWithDesigner(List). A missing id in the
+     * resulting map (key not found → Map.get returns null) reproduces
+     * the exact same "not found = null" behavior safeGetX() already had —
+     * this only changes how the data is fetched, not what happens when
+     * an entity is absent. getJob()/approveJob()/rejectJob() (single-job
+     * endpoints, N=1, nothing to batch) keep calling safeGetFile()/
+     * safeGetUser()/safeGetEstimate() directly, unchanged.
+     */
+    private JobLookups batchLookupsFor(List<PrintJob> jobs) {
+        List<Long> fileIds = jobs.stream().map(PrintJob::getFileId).filter(Objects::nonNull).distinct().toList();
+        List<Long> userIds = jobs.stream().map(PrintJob::getUserId).filter(Objects::nonNull).distinct().toList();
+        List<Long> estimateIds = jobs.stream().map(PrintJob::getEstimateId).filter(Objects::nonNull).distinct().toList();
+
+        Map<Long, ModelFile> files = fileService.getFilesByIds(fileIds).stream()
+                .collect(Collectors.toMap(ModelFile::getFileId, f -> f));
+        Map<Long, User> users = userRepository.findAllById(userIds).stream()
+                .collect(Collectors.toMap(User::getUserId, u -> u));
+        Map<Long, Estimate> estimates = estimateRepository.findAllById(estimateIds).stream()
+                .collect(Collectors.toMap(Estimate::getId, e -> e));
+
+        return new JobLookups(files, users, estimates);
     }
 
     private ModelFile safeGetFile(Long fileId) {

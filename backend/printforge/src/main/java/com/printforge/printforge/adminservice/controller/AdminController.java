@@ -9,6 +9,7 @@ import com.printforge.printforge.entity.User;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.service.AuthService;
+import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -95,7 +96,7 @@ public class AdminController {
     @PatchMapping("/users/{id}/suspend")
     public ResponseEntity<UserDto> suspendUser(
             @PathVariable Long id,
-            @RequestBody SuspendUserRequest request,
+            @Valid @RequestBody SuspendUserRequest request,
             Authentication authentication) {
 
         return ResponseEntity.ok(adminService.suspendUser(

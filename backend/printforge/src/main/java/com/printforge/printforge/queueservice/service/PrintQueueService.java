@@ -142,6 +142,22 @@ public class PrintQueueService {
                 .orElseThrow(() -> new PrintJobNotFoundException(jobId));
 
         String normalizedStatus = newStatus == null ? "" : newStatus.trim().toUpperCase();
+
+        // READY/COLLECTED are the ordered, student-visible lifecycle steps
+        // that belong exclusively to transitionJobStatus() (PATCH
+        // .../transition) — that's the path enforcing APPROVED->PRINTING->
+        // READY->COLLECTED order and firing the correct "Ready for Pickup"
+        // notification (with lab location) on READY. This free-form
+        // endpoint has no such ordering guard, so letting a status jump
+        // straight here would silently skip READY and its notification
+        // entirely. Rejected explicitly rather than just relying on
+        // VALID_STATUSES not containing them, so staff get a clear pointer
+        // to the right endpoint instead of a generic "invalid status".
+        if ("READY".equals(normalizedStatus) || "COLLECTED".equals(normalizedStatus)) {
+            throw new InvalidJobStatusException(
+                    "Use PATCH /api/print-jobs/{id}/transition to advance to READY or COLLECTED.");
+        }
+
         if (!VALID_STATUSES.contains(normalizedStatus)) {
             throw new InvalidJobStatusException(
                     "Invalid status '" + newStatus + "'. Must be one of: " + VALID_STATUSES);
@@ -263,7 +279,8 @@ public class PrintQueueService {
                     job.getUserId(),
                     "Ready for Pickup",
                     readyForPickupMessage(job, jobName),
-                    "success");
+                    "success",
+                    "printforge://jobs/" + job.getId());
             case "COLLECTED" -> notificationService.createNotification(
                     job.getUserId(),
                     "Collected",
