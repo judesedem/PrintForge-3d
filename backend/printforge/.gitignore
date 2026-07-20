@@ -4,6 +4,10 @@ target/
 !**/src/main/**/target/
 !**/src/test/**/target/
 
+### Uploaded files (created at runtime, not part of the repo) ###
+uploads/
+
+
 ### STS ###
 .apt_generated
 .classpath
@@ -31,3 +35,10 @@ build/
 
 ### VS Code ###
 .vscode/
+
+###cloudinary keys
+.env
+
+### Local secrets profile (jwt.secret, paystack.secret-key, cloudinary.*) ###
+### Was untracked but NOT actually covered by any pattern before this line ###
+application-local.properties

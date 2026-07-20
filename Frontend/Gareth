@@ -1,0 +1,28 @@
+# Local secrets — gitignored, never commit this file.
+
+# TODO: fill in your backend URL (e.g. http://localhost:8080, or your LAN IP for a physical device)
+EXPO_PUBLIC_API_URL=http://10.77.119.189:8080
+
+EXPO_PUBLIC_FIREBASE_API_KEY=AIzaSyANs8DSOcv6NxU9tIHXSbXxHD4ZknXYg6M
+EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=printforge-3d-df816.firebaseapp.com
+EXPO_PUBLIC_FIREBASE_PROJECT_ID=printforge-3d-df816
+EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=printforge-3d-df816.firebasestorage.app
+EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=622197178619
+EXPO_PUBLIC_FIREBASE_APP_ID=1:622197178619:web:c7b92940b9f9797135b05e
+
+
+# TODO: fill in your Google OAuth Web client ID (needed for Google sign-in)
+EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=622197178619-mp2t90ci9k29br286ct39av75d5th6hh.apps.googleusercontent.com
+
+EXPO_PUBLIC_PAYSTACK_KEY=pk_test_9d3c202062d74ef0624d280e68b23bd32b45e182
+
+
+CLOUDINARY_CLOUD_NAME=dewjtgiv1
+CLOUDINARY_API_KEY=544717653243894
+CLOUDINARY_API_SECRET=i46qAuN2e5vAdKWRsZe666lNqEM
+PAYSTACK_SECRET_KEY=sk_test_f35544c3ff3b55c10553c74bdc4720a1e9d1d8c5
+JWT_SECRET=4b6250655368566d597133743677397a244226452948404d6351665468576d5a
+
+spring.datasource.url=${DATASOURCE_URL:jdbc:postgresql://ep-polished-union-atblvpsn.c-9.us-east-1.aws.neon.tech/neondb?sslmode=require}
+spring.datasource.username=${DATASOURCE_USERNAME:neondb_owner}
+spring.datasource.password=${DATASOURCE_PASSWORD:npg_MmGXB4AQ9jUY}

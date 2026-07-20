@@ -1,6 +1,5 @@
 package com.printforge.printforge.entity;
 
 public enum Role {
-    USER,
-    ADMIN
+    STUDENT, DESIGNER, LAB_STAFF, ADMIN
 }

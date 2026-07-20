@@ -1,0 +1,41 @@
+{
+  "expo": {
+    "name": "PrintForge RN",
+    "slug": "printforge-rn",
+    "version": "1.0.0",
+    "scheme": "printforge",
+    "platforms": [
+      "ios",
+      "android"
+    ],
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FF5803"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.printforge.rn",
+      "deploymentTarget": "16.4"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/icon.png",
+        "backgroundColor": "#FF5803"
+      },
+      "package": "com.printforge.rn"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-web-browser",
+      "expo-secure-store"
+    ],
+    "userInterfaceStyle": "automatic"
+  }
+}

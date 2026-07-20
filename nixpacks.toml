@@ -1,0 +1,11 @@
+[phases.setup]
+cmds = ["apt-get update && apt-get install -y maven"]
+
+[phases.build]
+dependsOn = ["setup"]
+cwd = "backend/printforge"
+cmds = ["mvn clean package -DskipTests"]
+
+[phases.start]
+cwd = "backend/printforge"
+cmd = "java -Xmx400m -Xss512k -XX:+UseContainerSupport -Dserver.port=$PORT -jar target/*.jar"

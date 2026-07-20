@@ -1,0 +1,14 @@
+# Backend
+**/target/
+
+# Environment
+.env
+
+#zip 
+*.zip
+
+# IDE
+.vscode/
+.idea/
+
+nodemodules/
