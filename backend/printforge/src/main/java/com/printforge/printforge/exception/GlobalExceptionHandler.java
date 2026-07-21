@@ -3,6 +3,7 @@ package com.printforge.printforge.exception;
 
 import com.printforge.printforge.dto.ErrorResponse;
 import com.printforge.printforge.fileservice.exception.CloudinaryUploadException;
+import com.printforge.printforge.fileservice.exception.FileDeleteException;
 import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
 import com.printforge.printforge.fileservice.exception.ModelFileNotFoundException;
@@ -20,6 +21,7 @@ import com.printforge.printforge.printerservice.exception.PrinterBusyException;
 import com.printforge.printforge.marketplaceservice.exception.AlreadyFavoritedException;
 import com.printforge.printforge.marketplaceservice.exception.FavoriteNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
+import com.printforge.printforge.marketplaceservice.exception.ListingDeleteException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
 import com.printforge.printforge.labservice.exception.LabLocationNotFoundException;
@@ -28,7 +30,11 @@ import com.printforge.printforge.moderationservice.exception.InvalidReportInputE
 import com.printforge.printforge.moderationservice.exception.ReportNotFoundException;
 import com.printforge.printforge.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.printforge.paymentservice.exception.PaymentFailedException;
+import com.printforge.printforge.paymentservice.exception.DuplicatePaymentException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
+import com.printforge.printforge.socialservice.exception.AlreadyFollowingException;
+import com.printforge.printforge.socialservice.exception.CannotFollowSelfException;
+import com.printforge.printforge.socialservice.exception.NotFollowingException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -93,6 +99,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ModelFileNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleModelFileNotFound(ModelFileNotFoundException ex) {
         return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(FileDeleteException.class)
+    public ResponseEntity<ErrorResponse> handleFileDelete(FileDeleteException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(NotificationNotFoundException.class)
@@ -160,6 +171,11 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
+    @ExceptionHandler(ListingDeleteException.class)
+    public ResponseEntity<ErrorResponse> handleListingDelete(ListingDeleteException ex) {
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(AlreadyFavoritedException.class)
     public ResponseEntity<ErrorResponse> handleAlreadyFavorited(AlreadyFavoritedException ex) {
         return buildError(HttpStatus.CONFLICT, ex.getMessage());
@@ -168,6 +184,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(FavoriteNotFoundException.class)
     public ResponseEntity<ErrorResponse> handleFavoriteNotFound(FavoriteNotFoundException ex) {
         return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(AlreadyFollowingException.class)
+    public ResponseEntity<ErrorResponse> handleAlreadyFollowing(AlreadyFollowingException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(NotFollowingException.class)
+    public ResponseEntity<ErrorResponse> handleNotFollowing(NotFollowingException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(CannotFollowSelfException.class)
+    public ResponseEntity<ErrorResponse> handleCannotFollowSelf(CannotFollowSelfException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(LabLocationNotFoundException.class)
@@ -203,6 +234,11 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(PaymentFailedException.class)
     public ResponseEntity<ErrorResponse> handlePaymentFailed(PaymentFailedException ex) {
         return buildError(HttpStatus.BAD_GATEWAY, ex.getMessage());
+    }
+
+    @ExceptionHandler(DuplicatePaymentException.class)
+    public ResponseEntity<ErrorResponse> handleDuplicatePayment(DuplicatePaymentException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
     }
 
     @ExceptionHandler(IllegalStateException.class)

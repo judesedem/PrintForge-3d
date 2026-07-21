@@ -4240,3 +4240,1033 @@ SUBMITTED→QUEUED label override), `Frontend/app/jobs/index.tsx`
 (`statusVisual()`'s SUBMITTED label changed to "Queued").
 
 **Files deleted:** none.
+
+## 2026-07-20 — Backend: Real STL geometry replaces file-size cost heuristic (STL only)
+
+`EstimateService.calculateAndSaveEstimate()` computed `estimatedGrams` as
+`fileSizeKb * 0.8` — file byte size (mesh detail/triangle count) treated as
+a proxy for physical print weight, which it isn't. Verified against the
+task's own real test case (17,960 triangles, 877 KB, actual enclosed
+volume 98.09 cm³): the old formula produced ~₵54–60 for a print that
+should realistically cost a few GHS — roughly an order of magnitude off.
+Replaced it with real geometry parsed from the STL file itself, for STL
+uploads only; every other accepted extension (obj/3mf/step/stp/gcode/amf/
+ply) keeps the old file-size formula unchanged — parsing those formats is
+explicitly out of scope here, not an oversight.
+
+- **New `StlGeometryParser`** (`fileservice/geometry/`, a `@Component`
+  injected into `FileStorageService`). Detects binary vs ASCII STL from
+  the file's byte length against the binary header's declared triangle
+  count (`length == 84 + N*50`), parses triangles in a single pass
+  (nothing beyond one triangle's data retained at a time), and computes:
+  - **Volume** via the signed-tetrahedron method, summed per triangle and
+    `abs()`'d at the end — algebraically verified this session to be
+    exactly the standard `v1·(v2×v3)/6` divergence-theorem volume
+    identity (worked the term-by-term expansion by hand to confirm before
+    trusting it), which is why a consistently-wound closed mesh's triangle
+    sum equals its true enclosed volume.
+  - **Surface area** via `0.5 * |edge1 × edge2|` per triangle.
+  - Bounding box (mm, for validation only — not used in the cost formula).
+  - STL-declared normals are read but ignored (not trusted; some exporters
+    get winding/normals wrong) — only vertex positions drive the math.
+  - Never throws: any parse exception, a triangle count that doesn't match
+    either format, fewer than 4 triangles, non-positive volume, or a
+    volume exceeding its own bounding box (impossible geometrically, a
+    sign of a bad parse — 5% float-tolerance slack allowed) all come back
+    as `GeometryResult.failed()` (`parseSucceeded=false`), logged as a
+    warning with the filename, never propagated. A declared triangle count
+    over 2,000,000 is rejected before any attempt to read triangle data
+    (protects against huge/malicious files).
+
+- **`ModelFile`** gained `volumeCm3`/`surfaceAreaCm2` (nullable) and
+  `geometryParsed` (default `false`). Computed once, at upload time, in
+  `FileStorageService.store()` — reuses the same byte array already read
+  for the Cloudinary upload call, no second file read. Only attempted for
+  `.stl` extensions (case-insensitive); every other extension, and any STL
+  that fails to parse, leaves these fields at their nullable/false
+  defaults. A failed parse never blocks the upload itself — confirmed by
+  construction (`StlGeometryParser.parse()` never throws) and by the
+  existing `rejectsEmptyFile`/`rejectsDisallowedExtension` tests still
+  passing unchanged.
+  - `store()`'s return type changed from a bare `String` URL to a new
+    `StoreResult(String url, GeometryResult geometryResult)` record (same
+    shape as the existing `CloudinaryImageResult` precedent for
+    `storeImage()`), so the geometry result can travel back to the two
+    callers. Purely an internal Java signature change — not a REST
+    endpoint, nothing the frontend calls directly. Both call sites
+    updated: `FileService.saveFileMetadata()` (populates the new
+    `ModelFile` fields when `parseSucceeded()`) and
+    `MarketplaceController.createListing()`'s thumbnail upload (just reads
+    `.url()` — a thumbnail is always an image, `geometryResult` there is
+    always `failed()` and unused).
+
+- **`EstimateService`** — added `PLA_DENSITY_G_CM3=1.24`,
+  `RESIN_DENSITY_G_CM3=1.10`, `ABS_DENSITY_G_CM3=1.04`,
+  `WALL_THICKNESS_MM=1.2`, and a `densityForMaterial()` helper matching
+  the existing `baseMinutesPerGram`/`costPerGram` if/else style. Replaced
+  the `fileSizeKb * 0.8` line with a branch on
+  `file.getGeometryParsed()`:
+  - **True**: splits the mesh's total volume into a solid shell
+    (`surfaceAreaCm2 * wallThicknessMm / 10`, clamped to never exceed
+    total volume) plus an infill-percentage-scaled interior, sums them,
+    multiplies by the material's density. Implemented exactly as
+    specified including the shell/interior ordering (interior computed
+    from the *unclamped* shell estimate, shell clamped only afterward for
+    the final sum) — worked through why this ordering is intentional
+    rather than a bug before implementing it verbatim: it's what makes a
+    mesh whose raw shell estimate exceeds its own volume (a very
+    thin-walled, high-surface-area shape) correctly floor interior/infill
+    at zero rather than going negative.
+  - **False** (non-STL, or STL that failed to parse): unchanged
+    `fileSizeKb * 0.8`, plus a new `log.warn(...)` noting the fileId used
+    the fallback, so these can be spotted/monitored later.
+  - Rest of the method (duration/cost math from `estimatedGrams`) is
+    untouched — only how `estimatedGrams` is derived changed.
+
+- **Real, code-computed before/after comparison** (not by hand) — a
+  one-off test (created, run, then deleted, same pattern as this
+  session's marketplace-overcharge audit): a cube built with the *same*
+  98.09 cm³ volume as the task's real test file (its actual surface area
+  isn't available without the literal file, so a cube is a reasonable
+  stand-in — this is a representative comparison, not a literal
+  reproduction), same STANDARD/20%/qty1/PLA params, 877 KB file size for
+  the "before" run:
+  | | BEFORE (file-size heuristic) | AFTER (real geometry, cube ≈98.09cm³) |
+  |---|---|---|
+  | `estimatedGrams` | 701.6 g | 39.52 g |
+  | `totalCost` | **₵59.64** | **₵3.36** |
+
+  ~17.8x reduction — same order of magnitude as the task's own reported
+  ~20x (the exact figure differs because surface area, which the new
+  formula also depends on, isn't reproducible without the literal file —
+  a cube's surface-to-volume ratio isn't the same as an arbitrary
+  17,960-triangle mesh's).
+
+- **Tests** — `StlGeometryParserTest` (8 tests, pure unit, no Spring
+  context): a right-angle tetrahedron (`O`, and unit vertices along each
+  axis, edge 6mm) as the known-good shape rather than an external fixture
+  file, since its volume (`edge³/6=36mm³`) and surface area
+  (`54+18√3≈85.18mm²`) are hand-computable exactly — parser output matched
+  both to within float tolerance, for both binary and ASCII encodings of
+  the identical shape. Also covers: truncated file, random-noise bytes,
+  a binary header lying about its triangle count relative to actual file
+  length, an empty file, a declared count genuinely over the 2,000,000
+  cap (constructed a real ~95MB zero-filled array of the exact matching
+  length so the cap-check branch is actually exercised, not just assumed
+  reached), and a degenerate flat (zero-volume) mesh — all confirmed to
+  fail cleanly via `parseSucceeded()==false` with `assertDoesNotThrow`,
+  never an exception. `EstimateServiceTest` gained 4 tests: fallback
+  formula unchanged when `geometryParsed` is false/absent, real-geometry
+  formula when true (hand-verified arithmetic in the test's own
+  comments), the shell/volume clamp guard for a pathological
+  high-surface-area/low-volume shape, and that material density is
+  actually applied (RESIN vs PLA on identical geometry).
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 85 tests run (73 + 8 new `StlGeometryParserTest` + 4 new
+    `EstimateServiceTest` cases), same 4 pre-existing failures logged in
+    every prior entry in this file (`AuthServiceTest` ×2,
+    `FileStorageServiceTest` ×1 — `wrapsCloudinaryExceptionInFileStorageException`,
+    unrelated to this change, still exercises the same pre-existing
+    Cloudinary-exception-wrapping gap — `AdminServiceTest` ×1). **No new
+    failures.**
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`fileservice/geometry/StlGeometryParser.java`,
+`fileservice/geometry/StlGeometryParserTest.java`.
+
+**Files modified:**
+`fileservice/model/ModelFile.java` (`volumeCm3`/`surfaceAreaCm2`/
+`geometryParsed` fields), `fileservice/storage/FileStorageService.java`
+(`StoreResult` record; `store()` return type changed; `StlGeometryParser`
+injected), `fileservice/storage/FileStorageServiceTest.java` (constructor
++ `StoreResult` return type updates), `fileservice/service/FileService.java`
+(`saveFileMetadata()` populates the new `ModelFile` geometry fields),
+`marketplaceservice/controller/MarketplaceController.java` (thumbnail
+upload call site updated for the new `store()` return type),
+`estimateservice/service/EstimateService.java` (density constants,
+`densityForMaterial()`, geometry-aware `estimatedGrams` branch),
+`estimateservice/service/EstimateServiceTest.java` (4 new tests).
+
+**Files deleted:** none (the one-off `ScratchCostComparisonTest.java` used
+for the before/after numbers above was created and removed within this
+same session — never left in the tree).
+
+## 2026-07-20 — Backend: Real geometry extended to OBJ uploads (shared math with STL)
+
+Extended the STL real-geometry approach (previous entry) to OBJ files, on
+the same downstream flow — no ModelFile/EstimateService changes needed,
+only a new parsing step. 3mf/step/stp/gcode/amf/ply remain on the
+file-size fallback, unchanged — out of scope here, not an oversight.
+
+- **Refactor first, as instructed**: extracted the volume (signed
+  tetrahedron sum), surface area (cross-product sum), bounding box, and
+  validation logic out of `StlGeometryParser` into a new shared
+  `TriangleMeshGeometry` class (`GeometryResult`/`Vertex` records, a
+  stateful `Accumulator` — `addTriangle(v1,v2,v3)` per triangle,
+  `build()` once at the end — plus the shared `MAX_ELEMENTS=2_000_000`
+  cap value). `StlGeometryParser` now only contains STL-specific logic
+  (binary/ASCII detection, byte/line parsing) and calls into the shared
+  `Accumulator` — the actual math is untouched, moved verbatim, not
+  reimplemented. Confirmed this didn't change STL behavior at all:
+  re-ran the existing `StlGeometryParserTest` unchanged after the
+  refactor — still 8/8 passing, same hand-computed tetrahedron values as
+  before.
+  - `StlGeometryParser.GeometryResult` is now `TriangleMeshGeometry.GeometryResult`
+    — an internal Java type move, not a REST endpoint change. Updated the
+    two places that referenced the old nested-in-`StlGeometryParser` name:
+    `FileStorageService.StoreResult`'s field type, and
+    `StlGeometryParserTest`'s type references (import + find/replace,
+    behavior unchanged).
+
+- **New `ObjGeometryParser`** (`fileservice/geometry/`, same package,
+  same `@Component`-injected-into-`FileStorageService` pattern as
+  `StlGeometryParser`). Plain-text line parser:
+  - `v X Y Z` → vertex, appended to a 1-indexed list (OBJ convention).
+  - `vt`/`vn` lines ignored entirely (texture coords irrelevant here;
+    normals not trusted, same reasoning as the STL parser).
+  - `f ...` → face. Each token resolved via `split("/")[0]` to extract
+    only the vertex index, handling all four OBJ reference forms
+    (`5`, `5/2`, `5/2/1`, `5//1`) — texture/normal indices in the other
+    slots are never looked up.
+  - Negative (relative) indices resolved as `vertices.size() + 1 + rawIndex`.
+  - `o`/`g`/`s`/`#`/blank lines ignored — the whole file is treated as
+    one combined mesh regardless of grouping.
+  - Faces with exactly 3 indices → one triangle. 4+ → fan-triangulated
+    (triangle i = `(v1, v[i+1], v[i+2])`) — verified this reduces
+    correctly to a single triangle for the 3-vertex case with no special
+    casing needed (the same loop naturally produces exactly one
+    iteration). Faces with fewer than 3 resolved indices are skipped,
+    not fatal to the rest of the parse.
+  - Malformed face references (non-numeric token, out-of-range index)
+    throw, caught by the parser's own outer try/catch → whole-file
+    `parseSucceeded=false` — deliberately different from a malformed `v`
+    line (too few tokens), which is skipped defensively per-line instead,
+    matching the prompt's explicit distinction between the two failure
+    modes.
+  - Vertex-count cap (`MAX_ELEMENTS`, same 2,000,000 value as STL's
+    triangle cap) checked before each new vertex is appended — OBJ has
+    no upfront declared count the way binary STL's header does, so the
+    cap is enforced incrementally instead of up front.
+  - Never throws externally: every failure path (parse exception, fewer
+    than 4 triangles, non-positive volume, volume exceeding its own
+    bounding box) comes back as `GeometryResult.failed()`, logged as a
+    warning with the filename — identical validation rules to STL, since
+    both funnel through the same shared `Accumulator.build()`.
+
+- **`FileStorageService.store()`**: extended the existing
+  stl-only-if-branch to also handle `obj` (case-insensitive), calling
+  `ObjGeometryParser` instead. Same behavior as STL: parses the bytes
+  already read for the Cloudinary upload (no second file read), never
+  blocks the upload on a parse failure. `EstimateService` required zero
+  changes — confirmed by re-reading `calculateAndSaveEstimate()`: it
+  already branches purely on `ModelFile.geometryParsed`, with no
+  awareness of which parser set it.
+
+- **Tests** — `ObjGeometryParserTest` (10 tests): the *exact same*
+  tetrahedron shape as `StlGeometryParserTest` (same vertices, same face
+  winding, same hand-computed volume/surface area) parsed from OBJ text
+  instead of STL bytes, confirming the shared math produces identical
+  results regardless of source format. Plus: `vt`/`vn`/`o`/`g`/`s`/`#`
+  lines ignored; all four face-token forms (`v`, `v/vt`, `v/vt/vn`,
+  `v//vn`) extract only the vertex index; a quad-faced square pyramid
+  parsed two ways — once with the quad left as one `f` line (relying on
+  fan-triangulation) and once with that same quad pre-split into the
+  exact two triangles fan-triangulation is defined to produce — asserted
+  numerically identical (volume/area/bounding-box/triangleCount) between
+  the two, not just "both succeed"; negative relative indices resolving
+  to the same result as the equivalent positive-indexed file; an
+  out-of-range index and a non-numeric face token both failing cleanly
+  via `assertDoesNotThrow`; random-noise bytes and an empty file failing
+  cleanly; a degenerate 2-vertex face skipped without failing the rest
+  of the parse.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 95 tests run (85 + 10 new `ObjGeometryParserTest`),
+    same 4 pre-existing failures logged in every prior entry in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1, `AdminServiceTest`
+    ×1 — all unrelated). **No new failures.**
+  - Specifically re-ran `StlGeometryParserTest` in isolation after the
+    `TriangleMeshGeometry` extraction: still 8/8 passing, same assertions,
+    same expected values — the refactor changed where the math lives, not
+    what it computes.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created:**
+`fileservice/geometry/TriangleMeshGeometry.java`,
+`fileservice/geometry/ObjGeometryParser.java`,
+`fileservice/geometry/ObjGeometryParserTest.java`.
+
+**Files modified:**
+`fileservice/geometry/StlGeometryParser.java` (refactored to use the
+shared `TriangleMeshGeometry` — STL-specific parsing logic only, math
+extracted out), `fileservice/geometry/StlGeometryParserTest.java` (type
+reference updates for the `GeometryResult` move, no behavior change),
+`fileservice/storage/FileStorageService.java` (`ObjGeometryParser`
+injected; `store()` branches stl/obj/other; `StoreResult`'s field type
+updated), `fileservice/storage/FileStorageServiceTest.java` (constructor
+updated for the new `ObjGeometryParser` dependency).
+
+**Files deleted:** none.
+
+## 2026-07-20 — Backend: Real geometry/weight parsing extended to 3MF, AMF, PLY, and G-code
+
+Extended real-weight handling to four more accepted formats: 3mf, amf, ply
+(all real mesh geometry, same downstream flow as STL/OBJ) and gcode (a
+different case — already-sliced, so it extracts a pre-computed weight/time
+instead of measuring geometry). step/stp remain on the file-size
+fallback **permanently** — confirmed explicitly, not just left alone: it's
+a parametric CAD format, not a triangle mesh, and correctly parsing it
+needs a full CAD kernel (e.g. OpenCascade), out of scope for this
+mesh-math-based approach. **All 8 of the app's accepted 3D-model
+extensions now have a defined real-vs-fallback status**: stl, obj, 3mf,
+amf, ply, gcode → real parsing; step, stp → file-size fallback, by design.
+
+- **Shared math extended, not duplicated further.** Extracted
+  `ObjGeometryParser`'s fan-triangulation loop into
+  `TriangleMeshGeometry.Accumulator.addFace(List<Vertex>)` (fan-out +
+  add, silently no-ops for <3 vertices) before writing the new parsers,
+  per the task's explicit ask to reuse rather than reimplement it. Both
+  `ObjGeometryParser` and the new `PlyGeometryParser` call this one
+  method now.
+
+- **New `ThreeMfGeometryParser`.** 3MF is a zip archive; opened with
+  `java.util.zip.ZipInputStream` (no new dependency), looking for the
+  spec-fixed `3D/3dmodel.model` entry. That entry's contents are parsed
+  as XML via `javax.xml.parsers.DocumentBuilder` (also no new
+  dependency), hardened against XXE for this untrusted, user-uploaded
+  content (`disallow-doctype-decl`, entity expansion disabled — not
+  explicitly asked for in the prompt, but a standard, low-cost
+  precaution for any XML parser fed unauthenticated file uploads).
+  Iterates every `<mesh>` in the document (3MF's `<resources>` can
+  hold multiple `<object>` entries) — each mesh's `<triangle v1/v2/v3>`
+  indices are 0-indexed and scoped to *that mesh's own* `<vertices>`
+  list, so each is resolved independently before feeding a single shared
+  `Accumulator` (the whole file is one print job).
+
+- **New `AmfGeometryParser`.** Plain uncompressed XML, same
+  `DocumentBuilder` approach (same XXE hardening). Walks
+  `<vertices><vertex><coordinates><x>/<y>/<z>` and
+  `<volume><triangle><v1>/<v2>/<v3>` (0-indexed, per-mesh-scoped —
+  same multi-mesh handling as 3MF). Per the task's explicit instruction,
+  multiple `<object>` elements are summed into one combined result — a
+  dedicated test seeds two identical tetrahedra as separate objects and
+  confirms the combined volume/area/triangleCount are exactly double one
+  alone, not just that both "succeed".
+
+- **New `PlyGeometryParser`** — the most involved of the four. PLY always
+  has a plain-text header ending in `end_header`, parsed line-by-line to
+  extract: ascii vs binary_little/big_endian, declared vertex/face
+  counts, the *ordered* list of vertex properties (needed to correctly
+  skip non-x/y/z properties like normals/colour in binary mode, and to
+  pick the right token positions in ascii mode), and the face element's
+  list-property types (count-type + index-type, e.g. `uchar`/`int`).
+  Rejects anything it doesn't recognize — an unrecognized property type,
+  a non-list face property, or a missing `end_header` — as a clean
+  header-parse failure rather than guessing, matching the task's
+  explicit instruction. Binary bodies are read via a
+  byte-size-per-declared-type lookup (1/2/4/8 bytes as appropriate);
+  ASCII bodies read the same declared property order as whitespace
+  tokens. Faces reuse the same `Accumulator.addFace()` fan-triangulation
+  as OBJ. Tested with **both** ascii and binary encodings of the
+  identical tetrahedron, asserting the two produce numerically identical
+  volume/area/triangleCount — not just that both parse successfully.
+
+- **New `GCodeWeightParser`** — genuinely different from the other four:
+  g-code is already sliced, there's no mesh left to measure, so this
+  extracts an already-computed weight/time from slicer comment lines
+  instead of computing geometry. Returns its own result shape
+  (`weightGrams`/`durationMinutes`/`parseSucceeded`) rather than being
+  forced into `TriangleMeshGeometry.GeometryResult`, per the task's
+  explicit instruction. Tries, in the order specified: PrusaSlicer/
+  SuperSlicer `filament used [g]` (direct), `filament used [mm]`
+  (converted via assumed 1.75mm filament diameter + material density),
+  Cura `Filament used: Xm` (meters, converted the same way), PrusaSlicer
+  `estimated printing time = XhYmZs`, Cura `;TIME:X` (seconds). Succeeds
+  if *either* weight or time is found (matching the task's explicit "one
+  without the other is fine" rule) — only fails if neither pattern
+  matches anywhere in the file.
+  - **Flagged tension, resolved and documented rather than silently
+    picked**: the task's own worked example for the mm/m-length→weight
+    conversion needs a material density, explicitly noting "material
+    comes from the caller (EstimateService already has it from the
+    request)" — but this parser is wired into `FileStorageService
+    .store()`, which runs at **upload** time, before the customer has
+    chosen a material for their estimate. There is no real material to
+    pass at the one production call site. Resolved by giving
+    `parse()` a `materialType` parameter (nullable, defaulting to PLA
+    density internally) — the method itself is fully material-aware and
+    tested per-material (a dedicated test confirms RESIN vs PLA produce
+    different weights from the identical filament length), but
+    `FileStorageService.store()`'s call passes `null`, so a gcode file
+    using the mm/m-length path gets a PLA-based pre-sliced weight
+    regardless of what material the customer later selects. A direct
+    `[g]` weight line is unaffected by this (already fully resolved,
+    no density needed). Documented directly in the class's javadoc as a
+    known limitation of the wiring, not the parsing logic.
+
+- **`ModelFile`** gained `preSlicedWeightGrams`/`preSlicedDurationMinutes`
+  (nullable) and `preSliced` (default false) — a separate signal from
+  `volumeCm3`/`surfaceAreaCm2`/`geometryParsed`, not a variant of it,
+  since a gcode file has no mesh to report a volume/area for.
+
+- **`FileStorageService.store()`** dispatch extended: `3mf` →
+  `ThreeMfGeometryParser`, `amf` → `AmfGeometryParser`, `ply` →
+  `PlyGeometryParser`, `gcode` → `GCodeWeightParser` (passing `null` for
+  material, per the tension noted above). `StoreResult` gained a third
+  field (`GCodeResult gcodeResult`) alongside the existing
+  `geometryResult` — every extension populates whichever one applies and
+  leaves the other at its own `...failed()` default, so
+  `FileService.saveFileMetadata()` can check both unconditionally.
+  Same rule as every parser before it: parsing never blocks the upload,
+  a failure just leaves the new fields null/false.
+
+- **`EstimateService`** — confirmed by re-reading
+  `calculateAndSaveEstimate()` that the existing `geometryParsed` branch
+  needed zero changes to pick up 3mf/amf/ply automatically (it was
+  already format-agnostic). Added one new higher-priority branch, checked
+  *before* `geometryParsed`: if `file.getPreSliced()` and
+  `preSlicedWeightGrams` is non-null, `estimatedGrams` is taken directly,
+  skipping the geometry/file-size formula entirely. `durationMinutes` is
+  now resolved independently right before the existing time formula: if
+  `preSlicedDurationMinutes` is non-null, used directly; otherwise the
+  unchanged formula runs using whatever `estimatedGrams` was resolved to
+  by *either* branch above. This correctly covers a gcode file that only
+  has one of the two slicer comment lines — confirmed with a dedicated
+  test per combination (both present, weight-only, duration-only, and
+  pre-sliced weight taking priority even when geometryParsed is also
+  true on the same file). No pricing formula itself
+  (cost-per-gram/machine-time-cost) was touched — only how its two
+  inputs are sourced, same category of change as the existing
+  geometryParsed branch.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 123 tests run (95 + 4 `ThreeMfGeometryParserTest` + 4
+    `AmfGeometryParserTest` + 7 `PlyGeometryParserTest` + 9
+    `GCodeWeightParserTest` + 4 new `EstimateServiceTest` preSliced
+    cases), same 4 pre-existing failures logged in every prior entry in
+    this file (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1,
+    `AdminServiceTest` ×1 — all unrelated). **No new failures.**
+  - Explicitly re-ran `StlGeometryParserTest` (8/8) and
+    `ObjGeometryParserTest` (10/10) — both unchanged, confirming the
+    `addFace()` extraction didn't disturb either existing parser.
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+- **Noted but out of scope for this task, flagged rather than silently
+  acted on**: while re-reading `EstimateService.java` before editing it
+  (per this task's explicit "read every affected file" instruction),
+  `VALID_MATERIALS` was found to already include `"PETG"` and
+  `"CARBON_FIBER"` (not added by this task), with no corresponding
+  branches in the `baseMinutesPerGram`/`costPerGram`/`densityForMaterial`
+  logic — those two materials currently pass validation but silently get
+  PLA's rates. Left untouched, since this task's own constraints require
+  stopping to ask before changing anything money-affecting.
+
+**Files created:**
+`fileservice/geometry/ThreeMfGeometryParser.java`,
+`fileservice/geometry/AmfGeometryParser.java`,
+`fileservice/geometry/PlyGeometryParser.java`,
+`fileservice/geometry/GCodeWeightParser.java`,
+`fileservice/geometry/ThreeMfGeometryParserTest.java`,
+`fileservice/geometry/AmfGeometryParserTest.java`,
+`fileservice/geometry/PlyGeometryParserTest.java`,
+`fileservice/geometry/GCodeWeightParserTest.java`.
+
+**Files modified:**
+`fileservice/geometry/TriangleMeshGeometry.java` (`Accumulator.addFace()`
+added), `fileservice/geometry/ObjGeometryParser.java` (uses the new
+shared `addFace()` instead of its own inline fan-triangulation),
+`fileservice/model/ModelFile.java` (`preSlicedWeightGrams`/
+`preSlicedDurationMinutes`/`preSliced` fields),
+`fileservice/storage/FileStorageService.java` (4 new parsers injected;
+`store()` dispatch extended; `StoreResult` gained `gcodeResult`),
+`fileservice/storage/FileStorageServiceTest.java` (constructor updated
+for the 4 new dependencies), `fileservice/service/FileService.java`
+(`saveFileMetadata()` populates the new preSliced fields),
+`estimateservice/service/EstimateService.java` (preSliced branch for
+`estimatedGrams` and `durationMinutes`),
+`estimateservice/service/EstimateServiceTest.java` (4 new preSliced
+tests).
+
+**Files deleted:** none.
+
+## 2026-07-20 — Backend: Follow entity (net new) + real user stats + DesignListing spec fields
+
+Two unrelated pieces of work bundled in one prompt: Part A built a
+missing `Follow` entity end-to-end (model → repository → exceptions →
+controller → wired into `UserStatsResponse`); Part B added four
+designer-editable spec fields to `DesignListing` and confirmed (no code
+change needed) that no stale `POST /api/payments` route reference exists
+anywhere in the codebase.
+
+### Part A — Follow entity
+
+Modeled directly on `Favorite`/`FavoriteRepository`/`MarketplaceController`'s
+favorite endpoints, per the task's explicit reference pattern — same
+package-per-service layout, plain getters/setters (matching `Favorite`,
+not the Lombok `@Data` style `ModelFile` uses), `@PreAuthorize`-free
+(follow/unfollow only need normal authentication, same as favoriting —
+`SecurityConfig`'s `.anyRequest().authenticated()` default already
+covers `/api/users/{id}/follow*`, no config change needed).
+
+- **A1 `Follow`** (`socialservice/model/`): `id`/`followerId`/`followingId`/
+  `createdAt`, unique constraint on `(follower_id, following_id)` — exact
+  mirror of `Favorite`'s `(user_id, listing_id)` constraint.
+- **A2 `FollowRepository`**: all five methods the task asked for
+  (`existsByFollowerIdAndFollowingId`, `deleteByFollowerIdAndFollowingId`,
+  `countByFollowingId`, `countByFollowerId`, `findByFollowerId`).
+  - **Real bug found and fixed via empirical testing, not assumed
+    away**: `deleteByFollowerIdAndFollowingId` (a `void`-returning
+    derived delete, no `@Modifying`) threw
+    `InvalidDataAccessApiUsageException: No EntityManager with actual
+    transaction available for current thread` the first time it was
+    actually exercised end-to-end (via `FollowCountsIntegrationTest`,
+    real Spring context + real DB). Root cause: Spring Data JPA's
+    repository proxy defaults query methods to a read-only transaction;
+    a plain (non-`@Modifying`) `deleteByX` derived method is implemented
+    as "load matching entities, then `entityManager.remove()` each",
+    which can't run under a read-only transaction — and
+    `FollowController` (like `MarketplaceController`'s favorite
+    endpoints it's modeled on) has no service layer or `@Transactional`
+    of its own to provide a write transaction. Fixed with `@Transactional`
+    directly on the repository interface method (a standard, documented
+    Spring Data JPA pattern for overriding the read-only default on one
+    method, without needing `@Transactional` on the controller — a
+    genuine anti-pattern most style guides avoid).
+    **Flagged, not fixed**: `FavoriteRepository.deleteByUserIdAndListingId()`
+    has the *exact* same shape (`void deleteByXAndY(Long, Long)`, called
+    directly from a controller with no service layer) and is very likely
+    hitting the identical latent bug in production every time a student
+    unfavorites a listing — discovered as a side effect of building
+    Follow, out of scope to fix here per this task's "don't touch
+    existing endpoints" constraint, but worth a dedicated look.
+  - A leftover consequence of hitting this bug mid-testing: the first
+    (pre-fix) test run got partway through, its own `@AfterEach` cleanup
+    hit the same then-unfixed bug and never finished, leaving two orphaned
+    `User` rows (ids 88/89) and one orphaned `Follow` row in the shared
+    dev DB. Cleaned up via a one-off test (created, run, deleted — same
+    pattern as this session's prior one-off audits) before re-verifying.
+- **A3 exceptions** (`socialservice/exception/`): `AlreadyFollowingException`,
+  `NotFollowingException`, `CannotFollowSelfException`, all mapped to 400
+  in `GlobalExceptionHandler` (matching the task's explicit status codes
+  — note this diverges from `Favorite`'s own 409/404 choices for the
+  equivalent two exceptions; followed the task's literal instruction over
+  the "mirror Favorite" framing where the two conflicted).
+  - **Spec tension flagged and resolved, not silently picked**: A3 lists
+    `NotFollowingException` as if unfollow-when-not-following throws it,
+    but A4's own endpoint spec (and the acceptance criteria) explicitly
+    say that case returns 204, no error. Resolved by creating the
+    exception class + handler (satisfying A3's literal instruction) but
+    never actually throwing it from `FollowController` (satisfying A4's
+    explicit, more detailed behavior spec and the acceptance criteria).
+    Documented directly in `FollowController.unfollowUser()`'s javadoc so
+    a future session doesn't "fix" this as a missing check.
+- **A4 `FollowController`** (`socialservice/controller/`), base path
+  `/api/users`: `POST /{id}/follow` (self-follow → `CannotFollowSelfException`;
+  nonexistent target → `UsernameNotFoundException`, matching this
+  codebase's existing "user not found" convention rather than a new
+  exception type; duplicate → `AlreadyFollowingException`), `DELETE
+  /{id}/follow` (always 204, per the idempotent-unfollow tension above),
+  `GET /{id}/follow/status` → `{isFollowing, followerCount}` exactly as
+  specified; `POST /follow` returns the same shape for consistency (not
+  explicitly specified, no natural "the followed entity" to return the
+  way `Favorite` returns the `DesignListing`).
+- **A5 `UserService.getUserStats()`**: `followerCount`/`followingCount`
+  now real `FollowRepository` calls. `totalLikes` sums
+  `DesignListing.favoriteCount` across a designer's listings — same
+  unfiltered-across-all-listings pattern as the existing `totalEarnings`
+  in the same method (not restricted to `PUBLISHED` like `designCount`
+  is) — and computed unconditionally (no privacy gate), since favorite
+  counts are already public per-listing on the storefront, unlike
+  earnings. `UserStatsResponse`'s stale "no follow or like model yet"
+  javadoc updated.
+- **A6 tests**: `FollowControllerTest` (7, pure Mockito unit test, same
+  direct-invocation convention as `FileControllerTest` — no separate
+  `FollowService` to test, matching `Favorite`'s own no-service-layer
+  design) covers follow/duplicate-follow-400/follow-self-400/nonexistent-
+  target/unfollow-204/unfollow-not-following-204/status. Plus
+  `FollowCountsIntegrationTest` (1, real Spring context + real DB, same
+  pattern as this session's N+1/batching work) specifically for the
+  acceptance criteria's count-*correctness* claim (not just control
+  flow) — seeds two real users, follows, asserts both parties' counts via
+  the real repository AND via `UserService.getUserStats()`, unfollows,
+  confirms both drop back to 0. This is the test that surfaced the
+  `@Transactional` bug above.
+
+### Part B — DesignListing spec fields + payments route comment (confirm only)
+
+- **B1**: added `fileFormat` (String), `polygonCount` (Integer),
+  `estimatedPrintTimeMinutes` (Integer), `layerHeightMm` (BigDecimal,
+  `precision=10, scale=2` matching `basePrice`/`totalEarnings`'s existing
+  convention) to `DesignListing` — all nullable, plain `@Column`
+  annotations, no migration (`ddl-auto=update`). Explicitly **not**
+  auto-extracted from the uploaded file — set manually by the designer.
+  Wired into `MarketplaceController.createListing()` as four new optional
+  `@RequestParam`s (snake_case, matching this endpoint's existing
+  `file_id`/`base_price`/`thumbnail_file_id` naming), persisted if
+  present, `null` otherwise. `updateListing()` (which already existed,
+  contrary to the task's "any *future* updateListing() endpoint"
+  framing) was deliberately **not** touched — the task's own instruction
+  was specific to `createListing()` and explicit that "no other changes
+  to existing endpoint shapes" should happen.
+  - New `MarketplaceControllerTest` (3 tests, direct-invocation, no prior
+    test file existed for this controller) — confirms the four fields
+    persist when provided and stay `null` when omitted.
+  - Updated two pre-existing direct calls to `createListing(...)` in
+    `UnboundedTextFieldValidationTest` (from the #71 session task) for
+    the new 13-parameter signature — behavior unchanged, compile-only fix.
+- **B2**: grepped the whole codebase for `POST /api/payments` (and the
+  bare `/api/payments` route). Every reference already correctly says
+  `/api/payments/initiate` — no stale comment found anywhere. Confirmed,
+  no change made.
+
+- **Verification:**
+  - `./mvnw clean package -DskipTests`: **BUILD SUCCESS**.
+  - `./mvnw test`: 134 tests run (123 + 7 `FollowControllerTest` + 1
+    `FollowCountsIntegrationTest` + 3 `MarketplaceControllerTest`), same
+    4 pre-existing failures logged in every prior entry in this file
+    (`AuthServiceTest` ×2, `FileStorageServiceTest` ×1,
+    `AdminServiceTest` ×1 — all unrelated). **No new failures.**
+  - Not deployed, not committed — per the pattern established this
+    session, leaving the diff for review.
+
+**Files created (Part A):**
+`socialservice/model/Follow.java`,
+`socialservice/repository/FollowRepository.java`,
+`socialservice/exception/AlreadyFollowingException.java`,
+`socialservice/exception/NotFollowingException.java`,
+`socialservice/exception/CannotFollowSelfException.java`,
+`socialservice/controller/FollowController.java`,
+`socialservice/controller/FollowControllerTest.java`,
+`socialservice/controller/FollowCountsIntegrationTest.java`.
+
+**Files modified (Part A):**
+`exception/GlobalExceptionHandler.java` (3 new handlers, all 400),
+`service/UserService.java` (`FollowRepository` injected; real
+follower/following/totalLikes), `dto/UserStatsResponse.java` (javadoc).
+
+**Files created (Part B):**
+`marketplaceservice/controller/MarketplaceControllerTest.java`.
+
+**Files modified (Part B):**
+`marketplaceservice/model/DesignListing.java` (4 new fields + getters/
+setters), `marketplaceservice/controller/MarketplaceController.java`
+(`createListing()` reads/persists the 4 new fields),
+`UnboundedTextFieldValidationTest.java` (2 call sites updated for the
+new parameter count).
+
+**Files deleted:** none (the one-off orphaned-row cleanup test was
+created, run, and removed within this same session — never left in the
+tree).
+
+## 2026-07-20 — Backend: three sequential fixes (Favorite transaction bug, PETG/carbon-fiber pricing, designer-upgrade idempotency)
+
+### Fix 1 — `FavoriteRepository.deleteByUserIdAndListingId()` missing `@Transactional`
+
+Same bug class as `FollowRepository.deleteByFollowerIdAndFollowingId()`
+(fixed earlier this session, see the 2026-07-20 Follow entity entry
+above): a `void`-returning Spring Data derived delete with no
+`@Modifying` is implemented as "load then `entityManager.remove()`
+each," which needs a write transaction — but Spring Data's proxy
+defaults query methods to read-only. `MarketplaceController
+.unfavoriteListing()` calls this repository method directly with no
+service layer of its own, so it was one call away from throwing
+`InvalidDataAccessApiUsageException` in production on every unfavorite.
+Fixed by adding `@Transactional` directly on the repository method,
+matching `FollowRepository`'s fix exactly.
+
+No prior test existed for POST/DELETE `/api/marketplace/{id}/favorite`
+at all. Added `MarketplaceFavoriteIntegrationTest` (1, real Spring
+context + real DB, same rationale as `FollowCountsIntegrationTest` —
+this needs to exercise the real transaction, not a mock) — favorites as
+a student, asserts count=1 and the row exists, then unfavorites (wrapped
+in `assertDoesNotThrow`, since this is the call that was previously one
+step from throwing), asserts count=0, the row is gone, and re-reads the
+listing from the DB to confirm the count persisted for real.
+
+### Fix 2 — PETG and CARBON_FIBER accepted by `EstimateService` but priced as PLA
+
+`VALID_MATERIALS` already listed `"PETG"` and `"CARBON_FIBER"` — both
+selectable at checkout — but the density/cost-per-gram if/else chains
+had no branch for either, so both silently priced at PLA's rate
+(density 1.24, GH₵0.05/g). Added, using the exact values specified for
+this fix (manufacturer spec sheet densities, not derived): PETG density
+1.27 g/cm³, GH₵0.12/g; carbon fiber density 1.30 g/cm³, GH₵0.25/g — one
+new constant pair, one new `costPerGram` branch each, one new
+`densityForMaterial()` branch each. `baseMinutesPerGram` deliberately
+**not** set for either (inherits PLA's 2.5) — only density and
+cost-per-gram were specified for this fix, and the task explicitly
+excluded touching other pricing logic; inventing a print-speed rate
+would've been out of scope. This still guarantees PETG/carbon-fiber
+cost more than the equivalent PLA job on cost-per-gram alone. PLA, ABS,
+RESIN untouched.
+
+Added two tests to `EstimateServiceTest` (one per material), reusing
+the existing geometry-based fixture (`totalPrintVolumeCm3 = 3.92`),
+each computing a fresh PLA result in the same test method (no hardcoded
+baseline) and asserting the new material's `estimatedGrams` matches the
+density math, `totalCost` is a real positive number, and costs strictly
+more than PLA on identical geometry.
+
+### Fix 3 — Designer upgrade endpoint: already existed, was not idempotent
+
+The task described `POST /api/auth/upgrade-to-designer` as entirely
+missing (no endpoint, no service logic). On inspection, both
+`AuthController.upgradeToDesigner()` and
+`AuthService.upgradeToDesigner(String email)` **already existed in
+full** — role-gated correctly (`ROLE_DESIGNER` required on
+`POST /api/marketplace`), auth-required, no request body, returning a
+`UserDto` in the same shape as `/api/auth/me`. Two things about the
+existing implementation didn't match this fix's brief:
+
+- Role storage here is a single `Role` enum field on `User`
+  (`STUDENT`/`DESIGNER`/`LAB_STAFF`/`ADMIN`), not a `Set<String>` or
+  join table, so "additive, don't remove existing roles" isn't
+  literally applicable — upgrading necessarily *replaces* the role.
+  Confirmed no other role-assignment method exists anywhere in
+  `UserService`/`AdminService` to reuse.
+- The existing logic rejected **any** non-STUDENT caller (including one
+  already DESIGNER) with `InvalidRoleException` → 400. That directly
+  contradicts this fix's explicit requirement: "if the user is already
+  a designer, return 200 with no change and no error."
+
+Fixed the idempotency gap only: `upgradeToDesigner()` now short-circuits
+to return the current `UserDto` (200, no `save()` call) when the caller
+is already DESIGNER. Left the LAB_STAFF/ADMIN rejection in place
+deliberately, as a narrower interpretation of "any authenticated user"
+than the brief's literal wording — with a single-role field, letting a
+LAB_STAFF or ADMIN account hit this endpoint would silently *replace*
+their elevated role with DESIGNER (a privilege downgrade disguised as
+an upgrade), which is a real risk the existing design was already
+correctly guarding against. Flagging this deviation explicitly rather
+than silently overriding it.
+
+Added three tests to `AuthServiceTest`: STUDENT → DESIGNER upgrade
+(asserts the saved role and the response's `"designer"` role string),
+already-DESIGNER re-call (asserts `"designer"` in the response and that
+`save()` is never invoked — true no-op), and LAB_STAFF caller rejection
+(asserts `InvalidRoleException`, `save()` never invoked). No
+`AuthControllerTest` exists for this or any other `/api/auth` route —
+consistent with the rest of the package, logic is tested at the service
+layer.
+
+### Final verification
+
+`./mvnw test`: **140 tests run** (134 pre-existing + 1
+`MarketplaceFavoriteIntegrationTest` + 2 `EstimateServiceTest` + 3
+`AuthServiceTest`), **4 failures — the same 4 pre-existing, unrelated
+ones logged in every prior entry in this file**
+(`AdminServiceTest.summaryCountsJobsAndPrintersByStatus`,
+`FileStorageServiceTest.wrapsCloudinaryExceptionInFileStorageException`,
+`AuthServiceTest.registeringWithAdminRoleActuallyCreatesAnAdmin`,
+`AuthServiceTest.registeringWithLabStaffRoleIsCaseInsensitive`). **No
+new failures.** Not deployed, not committed.
+
+**Files created:**
+`marketplaceservice/controller/MarketplaceFavoriteIntegrationTest.java`.
+
+**Files modified:**
+`marketplaceservice/repository/FavoriteRepository.java`
+(`@Transactional` on `deleteByUserIdAndListingId`),
+`estimateservice/service/EstimateService.java` (PETG/CARBON_FIBER
+density constants + cost/density branches),
+`estimateservice/service/EstimateServiceTest.java` (2 new tests),
+`service/AuthService.java` (`upgradeToDesigner()` idempotent for
+already-DESIGNER callers), `service/AuthServiceTest.java` (3 new
+tests).
+
+**Files deleted:** none.
+
+## 2026-07-20 — Backend: marketplace feed (category/trending/pagination), file delete, duplicate-payment guard, profile picture PATCH
+
+### Fix 1–3 — `GET /api/marketplace`: category filter, `?sort=trending|newest`, pagination
+
+All three land together since they reshape the same query. Two real
+discrepancies against the brief, both flagged rather than silently
+resolved:
+
+- Category filtering already existed — as an in-memory `.stream().filter()`
+  in `MarketplaceController.getStorefront()` after fetching every
+  PUBLISHED row, not "ignored" as described. Moved into the repository
+  query since pagination needs it there anyway (can't paginate correctly
+  around a post-fetch filter).
+- The trending formula's `downloadCount` does **not** exist anywhere in
+  this codebase (`favoriteCount` does). Rather than silently dropping the
+  download term from `(downloadCount*1) + (favoriteCount*2)`, added
+  `DesignListing.downloadCount` (Integer, defaults 0, same pattern as
+  `favoriteCount`) — nothing increments it yet, it's wired into the sort
+  formula and ready for a future download-tracking call site.
+
+Implementation: two new `@Query` methods on `DesignListingRepository`
+(`findPublishedNewest`/`findPublishedTrending`), both taking an optional
+`category` and a `Pageable`, matching the `Page<T> find...(..., Pageable)`
+pattern already established by `ReportRepository`/`ReportController`
+(the only prior `Pageable` usage in this codebase). Weights are named
+constants on the controller (`TRENDING_DOWNLOAD_WEIGHT=1`,
+`TRENDING_FAVORITE_WEIGHT=2`) with the required inline rationale comment.
+Default page size 20, clamped to a max of 50 in `clampPageSize()` (no
+`PageableHandlerMethodArgumentResolverCustomizer` bean exists).
+
+Two non-obvious fixes needed to make this actually work, not just compile:
+
+- **`?sort=` collides with Spring Data Web's own `Pageable` sort-parsing
+  convention** — `PageableHandlerMethodArgumentResolver` reads a query
+  param literally named `sort` by default to build `Pageable.getSort()`.
+  With `?sort=trending`, Spring Data Web would parse `Sort.by("trending")`
+  and — since both `@Query` methods already have an explicit `ORDER BY` —
+  Spring Data JPA would try to append `trending`/`newest` as a literal
+  extra ORDER BY column and fail at query time. `clampPageSize()` builds a
+  fresh, sort-less `PageRequest` instead of forwarding `pageable` as-is,
+  which sidesteps this entirely.
+- **`excludeModerated()` (in-memory suspended-designer/admin-unpublished
+  filter) was removed**, not left alongside the new query. Once
+  `Page.totalElements`/`totalPages` are real response fields (Fix 3), a
+  post-fetch filter would silently under-count the visible page while the
+  metadata still claimed the pre-filter total. The suspended-designer
+  check moved into both `@Query`s as a `NOT IN (SELECT ... WHERE
+  suspended = true)` subquery; the `adminUnpublished` half of the old
+  filter is provably redundant once `status = 'PUBLISHED'` is already
+  required — `AdminService.unpublishListing()` always flips status to
+  DRAFT alongside setting the flag, so no admin-unpublished row can ever
+  be PUBLISHED.
+
+**Breaking change** (per the brief): storefront responses now wrap in a
+`Page` envelope (`content`/`totalElements`/`totalPages`/etc.) instead of
+a root array. Left the required `// FRONTEND:` comment on the controller
+method; did not touch `src/api/marketplace.ts`.
+
+Tests: new `MarketplaceStorefrontIntegrationTest` (5, real Spring context
++ real DB — sort order and page counts need real query execution, same
+rationale as `MarketplaceFavoriteIntegrationTest`) — category
+case-insensitivity, trending score ordering (3 listings, distinct
+scores), newest/default ordering, page-0-of-2-with-5-rows metadata, and
+all four combination queries.
+
+### Fix 4 — `DELETE /api/files/{id}`
+
+Guards exactly as specified: `existsByFileIdAndStatus(fileId,
+"PUBLISHED")` on `DesignListingRepository` (added — didn't exist) →
+400, `existsByFileId(fileId)` on `PrintJobRepository` (added) → 400,
+else delete the `ModelFile` row then the Cloudinary asset. New
+`FileDeleteException` (400), registered in `GlobalExceptionHandler`.
+
+One prerequisite gap the brief's "pass the publicId stored on ModelFile"
+didn't account for: **`ModelFile.publicId` was only ever captured for
+image uploads** (`saveImageMetadata()`, profile pictures/thumbnails) —
+the general upload path (`saveFileMetadata()`, i.e. every STL/OBJ/3MF/
+etc. model file, the actual primary use case for this fix) discarded
+Cloudinary's `public_id` from the upload response entirely. Without
+fixing that, `DELETE` would never have anything to pass Cloudinary for
+the files this endpoint is mainly for. Fixed by adding `publicId` to
+`FileStorageService.StoreResult` and capturing it in `saveFileMetadata()`.
+
+Also added `ModelFile.cloudinaryResourceType` + capturing
+`result.get("resource_type")` at upload time. Cloudinary's `destroy()`
+defaults to `resource_type: "image"` when not specified, and silently
+returns "not found" (deletes nothing) against a "raw" asset — which is
+what STL/OBJ uploads actually land as (uploaded with `resource_type:
+"auto"`, auto-detected as raw since they're not a recognized image
+format). Without capturing and passing the real type back at delete
+time, the delete would appear to succeed (204, row gone) while leaving
+the file orphaned in Cloudinary — exactly the bug this fix exists to
+close. New `FileStorageService.deleteAsset(publicId, resourceType)`
+(best-effort/swallows failures, same as the existing `deleteImage()`
+used for profile picture replacement) handles the actual `destroy()`
+call; `FileService.deleteFile()` deletes the DB row first, then calls it,
+per the brief's stated order.
+
+Tests: `FileControllerTest` (+3 — owner/non-owner/staff, mocked
+`FileService`, same direct-invocation convention as the rest of that
+file) and new `FileServiceTest` (+3, pure Mockito — unreferenced file
+deletes and calls Cloudinary with the right publicId/resourceType,
+published-listing attachment rejected with the exact message, print-job
+usage rejected with the exact message).
+
+### Fix 5 — Duplicate payment guard in `initiatePayment()`
+
+Exactly as specified: `PaymentRepository.findByEstimateIdAndStatus`
+(added), checked first in `initiatePayment()` before any Paystack call,
+throwing new `DuplicatePaymentException` (400, registered in
+`GlobalExceptionHandler`) if a PENDING row already exists for the
+estimate. A COMPLETED prior payment doesn't block a new one (legitimate
+retry/re-order case).
+
+Tests: new `PaymentServiceTest` (2, real Spring context + real DB +
+real call to Paystack's test-mode `/transaction/initialize` — same
+established pattern as `MarketplaceOrderColorNotesTest`, which already
+established that `initiatePayment()` is never mocked/spied in this
+codebase, only `verifyWithPaystack()` is, and only for the webhook path).
+Note: Paystack's test-mode API rejects synthetic addresses under a
+`.test` TLD as an invalid email — matched the existing tests' convention
+of `@example.com` instead.
+
+### Fix 6 — Profile picture via `PATCH /api/auth/profile`
+
+Exactly as specified: `profilePictureUrl` added to
+`UpdateProfileRequest`, `AuthService.updateProfile()` sets it after the
+existing fullName/email blocks, blank string rejected via the existing
+`InvalidProfileInputException`. No new endpoint, no `AuthResponse` shape
+change.
+
+Tests: added to the existing `AuthServiceTest` (+2) — URL round-trips
+into the `AuthResponse`'s `UserDto.profile_picture_url`, blank string
+throws and never calls `save()`.
+
+### Final verification
+
+`./mvnw test`: **155 tests run** (140 pre-existing + 5
+`MarketplaceStorefrontIntegrationTest` + 3 `FileControllerTest` + 3
+`FileServiceTest` + 2 `PaymentServiceTest` + 2 `AuthServiceTest`), **4
+failures — the same 4 pre-existing, unrelated ones logged in every prior
+entry in this file** (`AdminServiceTest.summaryCountsJobsAndPrintersByStatus`,
+`FileStorageServiceTest.wrapsCloudinaryExceptionInFileStorageException`,
+`AuthServiceTest.registeringWithAdminRoleActuallyCreatesAnAdmin`,
+`AuthServiceTest.registeringWithLabStaffRoleIsCaseInsensitive`). **No
+new failures.** Not deployed, not committed.
+
+**Files created:**
+`marketplaceservice/controller/MarketplaceStorefrontIntegrationTest.java`,
+`fileservice/exception/FileDeleteException.java`,
+`fileservice/service/FileServiceTest.java`,
+`paymentservice/exception/DuplicatePaymentException.java`,
+`paymentservice/service/PaymentServiceTest.java`.
+
+**Files modified:**
+`marketplaceservice/model/DesignListing.java` (`downloadCount` field),
+`marketplaceservice/repository/DesignListingRepository.java`
+(`findPublishedNewest`/`findPublishedTrending`, `existsByFileIdAndStatus`),
+`marketplaceservice/controller/MarketplaceController.java` (`getStorefront()`
+rewritten for category/sort/pagination, `excludeModerated()` removed),
+`fileservice/model/ModelFile.java` (`cloudinaryResourceType` field),
+`fileservice/storage/FileStorageService.java` (`StoreResult` gains
+publicId/resourceType, new `deleteAsset()`),
+`fileservice/service/FileService.java` (captures publicId/resourceType
+at upload; new `deleteFile()`),
+`fileservice/controller/FileController.java` (`DELETE /{id}`),
+`fileservice/controller/FileControllerTest.java` (3 new tests),
+`queueservice/repository/PrintJobRepository.java` (`existsByFileId`),
+`exception/GlobalExceptionHandler.java` (`FileDeleteException`,
+`DuplicatePaymentException` handlers),
+`paymentservice/repository/PaymentRepository.java`
+(`findByEstimateIdAndStatus`),
+`paymentservice/service/PaymentService.java` (duplicate-payment guard),
+`dto/UpdateProfileRequest.java` (`profilePictureUrl` field),
+`service/AuthService.java` (`updateProfile()` sets profile picture URL),
+`service/AuthServiceTest.java` (2 new tests).
+
+**Files deleted:** none.
+
+## 2026-07-20 — Backend: listing safety (delete-vs-in-flight-payment guard, price lock at quote time)
+
+### Fix 1 — Listing delete race against in-flight payment
+
+Exactly as specified: `PaymentRepository.existsByListingIdAndStatus`
+(added), checked in `MarketplaceController.deleteListing()` right after
+the existing DRAFT/totalOrders==0 guards, throwing new
+`ListingDeleteException` (409, registered in `GlobalExceptionHandler`)
+if a PENDING payment references the listing. `PaymentRepository` is now
+injected into `MarketplaceController` — its constructor grew a
+parameter, so both existing direct-construction call sites
+(`MarketplaceControllerTest`, `UnboundedTextFieldValidationTest`) needed
+a mocked `PaymentRepository` added.
+
+Tests: added to the existing `MarketplaceControllerTest` (+2, same
+mocked-repository direct-invocation convention as the rest of that
+file, no real DB needed — this guard is pure control flow over a
+boolean repository call) — a PENDING payment blocks the delete, no
+PENDING payment (covers both "never had one" and "moved to COMPLETED",
+since the guard only ever checks the PENDING count) lets it through.
+
+### Fix 2 — Lock listing price at quote time
+
+**Premise mismatch, worth flagging**: the brief pointed at
+`EstimateService.createEstimate()` as "already receiving `listingId`" —
+no such method exists. The real estimate-creation method is
+`calculateAndSaveEstimate()`, and none of its three existing overloads
+took a `listingId` at all; the two marketplace call sites
+(`MarketplaceController.getListing()`'s auto-quote,
+`PrintJobFacadeController`'s `submitMarketplaceOrder()`) both already
+know their listing but had no way to pass it through.
+
+Added `Estimate.lockedBasePrice` (`BigDecimal`, nullable, exact
+comment text from the brief) and a new `calculateAndSaveEstimate(...,
+boolean skipOwnershipCheck, Long listingId)` overload (`EstimateService`
+now takes `DesignListingRepository` as a constructor dependency) that
+snapshots `listing.getBasePrice()` onto it when `listingId != null`.
+The existing 6-arg and 7-arg overloads are unchanged in behavior — the
+7-arg one now just delegates to the new one with `listingId=null` — so
+every non-marketplace (BYOF) call site needed no changes at all. Both
+marketplace call sites were updated to pass their listing's id through.
+
+In `PaymentService.initiatePayment()`, replaced the live
+`listingRepository.findById(listingId).getBasePrice()` read with
+`estimate.getLockedBasePrice()`, exactly as specified. `listingRepository`
+stays as a field/constructor param — checked first, per the brief's own
+instruction: `resolveFileId()` and `handleWebhook()`'s
+totalOrders/totalEarnings update both still use it. Only the one
+`DesignListing` import that had become genuinely unused (no more
+explicit `DesignListing listing = ...` local left in the file) was
+removed.
+
+Tests: added to the existing `PaymentServiceTest` (+2, real Spring
+context + real DB + real Paystack test-mode call, same established
+pattern as the rest of that file) — a full quote-then-price-change-then-
+pay flow (real designer/student/file/listing/estimate seeded, listing
+`basePrice` changed from 10.00 to 99.00 after the quote, payment amount
+asserted to reflect 10.00), and a BYOF estimate (no listing at all)
+charging exactly `estimate.getTotalCost()` with `lockedBasePrice` null.
+
+### Final verification
+
+`./mvnw test`: **159 tests run** (155 pre-existing + 2
+`MarketplaceControllerTest` + 2 `PaymentServiceTest`), **4 failures —
+the same 4 pre-existing, unrelated ones logged in every prior entry in
+this file** (`AdminServiceTest.summaryCountsJobsAndPrintersByStatus`,
+`FileStorageServiceTest.wrapsCloudinaryExceptionInFileStorageException`,
+`AuthServiceTest.registeringWithAdminRoleActuallyCreatesAnAdmin`,
+`AuthServiceTest.registeringWithLabStaffRoleIsCaseInsensitive`). **No
+new failures.** Not deployed, not committed.
+
+Process note: partway through this task the machine's C: drive hit 0
+bytes free, failing one file write cleanly (no corruption — verified by
+re-reading before retrying) and forcing a `mvn clean` afterward, since
+Maven's incremental-build staleness check was reporting "nothing to
+compile" against source files that had, in fact, changed (whether that
+was caused by the disk-full incident or coincidental isn't fully
+confirmed — but `mvn clean` before trusting any "nothing to compile"
+result is the safe move going forward in a session that hit this once).
+
+**Files created:**
+`marketplaceservice/exception/ListingDeleteException.java`.
+
+**Files modified:**
+`paymentservice/repository/PaymentRepository.java`
+(`existsByListingIdAndStatus`),
+`marketplaceservice/controller/MarketplaceController.java`
+(`PaymentRepository` injected, delete-race guard, `getListing()` passes
+`listingId` into the quote call),
+`marketplaceservice/controller/MarketplaceControllerTest.java`
+(mocked `PaymentRepository`, 2 new tests),
+`UnboundedTextFieldValidationTest.java` (mocked `PaymentRepository` for
+its own `MarketplaceController` construction — compile-only fix),
+`exception/GlobalExceptionHandler.java` (`ListingDeleteException`
+handler, 409),
+`estimateservice/model/Estimate.java` (`lockedBasePrice` field),
+`estimateservice/service/EstimateService.java` (`DesignListingRepository`
+dependency, new listingId-aware `calculateAndSaveEstimate()` overload),
+`estimateservice/service/EstimateServiceTest.java` (constructor call
+site updated for the new dependency — compile-only fix),
+`facade/PrintJobFacadeController.java` (`calculateMarketplaceEstimate()`
+threads `listingId` through),
+`paymentservice/service/PaymentService.java` (`initiatePayment()` uses
+`lockedBasePrice`, unused `DesignListing` import removed),
+`paymentservice/service/PaymentServiceTest.java` (2 new tests).
+
+**Files deleted:** none.

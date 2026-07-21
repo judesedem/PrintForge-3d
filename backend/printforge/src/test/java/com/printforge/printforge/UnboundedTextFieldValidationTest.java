@@ -16,6 +16,7 @@ import com.printforge.printforge.marketplaceservice.repository.DesignListingRepo
 import com.printforge.printforge.marketplaceservice.repository.FavoriteRepository;
 import com.printforge.printforge.moderationservice.service.ModerationLogService;
 import com.printforge.printforge.notificationservice.controller.NotificationController;
+import com.printforge.printforge.paymentservice.repository.PaymentRepository;
 import com.printforge.printforge.notificationservice.exception.InvalidNotificationInputException;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.repository.UserRepository;
@@ -184,6 +185,7 @@ class UnboundedTextFieldValidationTest {
     private FileStorageService fileStorageService;
     private FavoriteRepository favoriteRepository;
     private ModerationLogService moderationLogService;
+    private PaymentRepository paymentRepository;
     private MarketplaceController marketplaceController;
     private Authentication designerAuth;
 
@@ -195,9 +197,10 @@ class UnboundedTextFieldValidationTest {
         userRepository = Mockito.mock(UserRepository.class);
         favoriteRepository = Mockito.mock(FavoriteRepository.class);
         moderationLogService = Mockito.mock(ModerationLogService.class);
+        paymentRepository = Mockito.mock(PaymentRepository.class);
         marketplaceController = new MarketplaceController(
                 listingRepository, estimateService, fileStorageService,
-                userRepository, favoriteRepository, moderationLogService);
+                userRepository, favoriteRepository, moderationLogService, paymentRepository);
 
         User designer = User.builder()
                 .userId(42L)
@@ -217,7 +220,7 @@ class UnboundedTextFieldValidationTest {
         InvalidListingInputException ex = assertThrows(InvalidListingInputException.class,
                 () -> marketplaceController.createListing(
                         1L, "Title", oversized, java.math.BigDecimal.TEN,
-                        null, null, true, null, designerAuth));
+                        null, null, true, null, null, null, null, null, designerAuth));
 
         assertTrue(ex.getMessage().contains("2000"));
         Mockito.verifyNoInteractions(listingRepository);
@@ -230,7 +233,7 @@ class UnboundedTextFieldValidationTest {
 
         assertDoesNotThrow(() -> marketplaceController.createListing(
                 1L, "Title", maxLength, java.math.BigDecimal.TEN,
-                null, null, true, null, designerAuth));
+                null, null, true, null, null, null, null, null, designerAuth));
     }
 
     @Test

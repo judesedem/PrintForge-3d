@@ -4,6 +4,12 @@ import com.cloudinary.Cloudinary;
 import com.cloudinary.Uploader;
 import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
+import com.printforge.printforge.fileservice.geometry.AmfGeometryParser;
+import com.printforge.printforge.fileservice.geometry.GCodeWeightParser;
+import com.printforge.printforge.fileservice.geometry.ObjGeometryParser;
+import com.printforge.printforge.fileservice.geometry.PlyGeometryParser;
+import com.printforge.printforge.fileservice.geometry.StlGeometryParser;
+import com.printforge.printforge.fileservice.geometry.ThreeMfGeometryParser;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -31,20 +37,25 @@ class FileStorageServiceTest {
         cloudinary = Mockito.mock(Cloudinary.class);
         uploader = Mockito.mock(Uploader.class);
         Mockito.when(cloudinary.uploader()).thenReturn(uploader);
-        storageService = new FileStorageService(cloudinary);
+        storageService = new FileStorageService(cloudinary, new StlGeometryParser(), new ObjGeometryParser(),
+                new ThreeMfGeometryParser(), new AmfGeometryParser(), new PlyGeometryParser(), new GCodeWeightParser());
     }
 
     @Test
     void storeReturnsCloudinarySecureUrl() throws Exception {
+        // Not valid STL geometry (too few triangles) — this test is about
+        // the URL, geometry parsing is covered in StlGeometryParserTest.
         byte[] content = "solid cube\nfacet normal 0 0 0\n".getBytes(StandardCharsets.UTF_8);
         MockMultipartFile upload = new MockMultipartFile("file", "cube.stl", "model/stl", content);
 
         Mockito.when(uploader.upload(Mockito.any(byte[].class), Mockito.anyMap()))
                .thenReturn(Map.of("secure_url", "https://res.cloudinary.com/demo/raw/upload/printforge/cube.stl"));
 
-        String url = storageService.store(upload);
+        FileStorageService.StoreResult result = storageService.store(upload);
 
-        assertEquals("https://res.cloudinary.com/demo/raw/upload/printforge/cube.stl", url);
+        assertEquals("https://res.cloudinary.com/demo/raw/upload/printforge/cube.stl", result.url());
+        assertFalse(result.geometryResult().parseSucceeded(),
+                "malformed/too-small STL content should not parse as valid geometry");
     }
 
     @Test

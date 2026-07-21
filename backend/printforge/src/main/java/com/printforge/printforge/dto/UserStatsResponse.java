@@ -7,9 +7,11 @@ import lombok.Getter;
 import java.math.BigDecimal;
 
 /**
- * Response for GET /api/users/{id}/stats. followerCount/followingCount/
- * totalLikes are hardcoded to 0 for now — there's no follow or like model
- * in the backend yet.
+ * Response for GET /api/users/{id}/stats. followerCount/followingCount
+ * come from FollowRepository (socialservice); totalLikes sums
+ * DesignListing.favoriteCount across the designer's listings — same
+ * unfiltered-across-all-listings pattern as totalEarnings, since likes
+ * are already public per-listing on the storefront.
  */
 @Getter
 @Builder

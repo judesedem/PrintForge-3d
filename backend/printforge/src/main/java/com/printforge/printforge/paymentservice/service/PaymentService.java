@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.printforge.printforge.estimateservice.model.Estimate;
 import com.printforge.printforge.estimateservice.repository.EstimateRepository;
 import com.printforge.printforge.estimateservice.exception.EstimateNotFoundException;
-import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
+import com.printforge.printforge.paymentservice.exception.DuplicatePaymentException;
 import com.printforge.printforge.paymentservice.exception.PaymentFailedException;
 import com.printforge.printforge.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.printforge.paymentservice.model.Payment;
@@ -94,6 +94,20 @@ public class PaymentService {
         Estimate estimate = estimateRepository.findById(estimateId)
                 .orElseThrow(() -> new EstimateNotFoundException(estimateId));
 
+        // Tapping Pay Now twice quickly used to create two separate PENDING
+        // Payment rows (each with its own Paystack reference) for the same
+        // estimate — the webhook's idempotency guard above only protects
+        // against Paystack retrying one already-known reference, not two
+        // distinct PENDING rows. A COMPLETED payment doesn't block a new
+        // one: that's a legitimate retry/re-order case, e.g. after a first
+        // order's job is done and the user wants another.
+        paymentRepository.findByEstimateIdAndStatus(estimateId, "PENDING")
+                .ifPresent(existing -> {
+                    throw new DuplicatePaymentException(
+                            "A pending payment already exists for this estimate. " +
+                                    "Complete or cancel it before initiating a new one.");
+                });
+
         // Previously any authenticated user could pay for someone else's
         // estimate just by guessing/incrementing the id — nothing checked
         // that the estimate actually belonged to the caller.
@@ -101,14 +115,15 @@ public class PaymentService {
             throw new AccessDeniedException("You can only pay for your own estimates");
         }
 
-        // Total = machine+material cost from estimate + designer's base_price (if marketplace)
+        // Total = machine+material cost from estimate + designer's base_price
+        // (if marketplace). Uses the basePrice snapshotted onto the Estimate
+        // at quote time (EstimateService.calculateAndSaveEstimate()'s
+        // listingId overload) rather than re-reading DesignListing.basePrice
+        // live here — a designer changing the price between quote and
+        // payment must not change what the student is actually charged.
         double totalCost = estimate.getTotalCost();
-        if (listingId != null) {
-            DesignListing listing = listingRepository.findById(listingId)
-                    .orElseThrow(() -> new IllegalArgumentException("Listing not found: " + listingId));
-            if (listing.getBasePrice() != null) {
-                totalCost += listing.getBasePrice().doubleValue();
-            }
+        if (estimate.getLockedBasePrice() != null) {
+            totalCost = totalCost + estimate.getLockedBasePrice().doubleValue();
         }
 
         // Paystack expects amount in the smallest currency unit (pesewas for GHS)

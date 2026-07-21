@@ -7,6 +7,7 @@ import com.printforge.printforge.fileservice.storage.FileStorageService;
 import com.printforge.printforge.marketplaceservice.exception.AlreadyFavoritedException;
 import com.printforge.printforge.marketplaceservice.exception.FavoriteNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
+import com.printforge.printforge.marketplaceservice.exception.ListingDeleteException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.model.Favorite;
@@ -15,7 +16,12 @@ import com.printforge.printforge.marketplaceservice.repository.FavoriteRepositor
 import com.printforge.printforge.moderationservice.model.ModerationActionType;
 import com.printforge.printforge.moderationservice.model.ModerationTargetType;
 import com.printforge.printforge.moderationservice.service.ModerationLogService;
+import com.printforge.printforge.paymentservice.repository.PaymentRepository;
 import com.printforge.printforge.repository.UserRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.web.PageableDefault;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -54,38 +60,72 @@ public class MarketplaceController {
     private final UserRepository userRepository;
     private final FavoriteRepository favoriteRepository;
     private final ModerationLogService moderationLogService;
+    private final PaymentRepository paymentRepository;
 
     public MarketplaceController(DesignListingRepository listingRepository,
                                   EstimateService estimateService,
                                   FileStorageService fileStorageService,
                                   UserRepository userRepository,
                                   FavoriteRepository favoriteRepository,
-                                  ModerationLogService moderationLogService) {
+                                  ModerationLogService moderationLogService,
+                                  PaymentRepository paymentRepository) {
         this.listingRepository = listingRepository;
         this.estimateService = estimateService;
         this.fileStorageService = fileStorageService;
         this.userRepository = userRepository;
         this.favoriteRepository = favoriteRepository;
         this.moderationLogService = moderationLogService;
+        this.paymentRepository = paymentRepository;
     }
 
     // ── Public Storefront ────────────────────────────────────────────────────
 
+    // Trending composite score: favorites (weight 2) signal stronger buyer
+    // intent than downloads (weight 1) — a favorite is a deliberate,
+    // repeatable action; a download can be idle browsing.
+    private static final int TRENDING_DOWNLOAD_WEIGHT = 1;
+    private static final int TRENDING_FAVORITE_WEIGHT = 2;
+    private static final int DEFAULT_PAGE_SIZE = 20;
+    private static final int MAX_PAGE_SIZE = 50;
+
+    // FRONTEND: update fetchListings() in src/api/marketplace.ts to read
+    // response.content instead of the root array, and handle totalPages for
+    // pagination controls.
     @GetMapping
-    public ResponseEntity<List<DesignListing>> getStorefront(
+    public ResponseEntity<Page<DesignListing>> getStorefront(
             @RequestParam(required = false) String category,
+            @RequestParam(required = false, defaultValue = "newest") String sort,
+            @PageableDefault(size = DEFAULT_PAGE_SIZE) Pageable pageable,
             Authentication authentication) {
 
-        List<DesignListing> listings = listingRepository.findByStatus("PUBLISHED");
-        if (category != null && !category.isBlank()) {
-            listings = listings.stream()
-                    .filter(l -> category.equalsIgnoreCase(l.getCategory()))
-                    .toList();
-        }
-        listings = excludeModerated(listings);
-        enrichWithDesigner(listings);
-        enrichWithFavoriteStatus(listings, safeCurrentUserId(authentication));
-        return ResponseEntity.ok(listings);
+        Pageable clamped = clampPageSize(pageable);
+
+        Page<DesignListing> page = "trending".equalsIgnoreCase(sort)
+                ? listingRepository.findPublishedTrending(
+                        category, TRENDING_DOWNLOAD_WEIGHT, TRENDING_FAVORITE_WEIGHT, clamped)
+                : listingRepository.findPublishedNewest(category, clamped);
+
+        enrichWithDesigner(page.getContent());
+        enrichWithFavoriteStatus(page.getContent(), safeCurrentUserId(authentication));
+        return ResponseEntity.ok(page);
+    }
+
+    /**
+     * No PageableHandlerMethodArgumentResolverCustomizer bean exists in this
+     * app to cap page size globally, so it's clamped here. Also strips
+     * whatever Sort Spring Data Web parsed from the request — the
+     * PageableHandlerMethodArgumentResolver reads a "sort" query param by
+     * the same default name this endpoint's own ?sort=newest|trending uses
+     * for a completely different purpose, so pageable.getSort() here would
+     * hold nonsense like Sort.by("trending"). Both findPublishedNewest/
+     * Trending already have an explicit ORDER BY in their @Query — forwarding
+     * that bogus Sort would make Spring Data JPA try to append "trending" as
+     * a literal ORDER BY column and fail at query time. Building a fresh,
+     * sort-less PageRequest avoids that entirely.
+     */
+    private Pageable clampPageSize(Pageable pageable) {
+        int size = Math.min(pageable.getPageSize(), MAX_PAGE_SIZE);
+        return PageRequest.of(pageable.getPageNumber(), size);
     }
 
     // ── Single Listing + Auto Quote ──────────────────────────────────────────
@@ -132,7 +172,8 @@ public class MarketplaceController {
                         1,
                         "PLA",
                         caller.getUserId(),
-                        true  // file belongs to the designer, not the browsing customer
+                        true,  // file belongs to the designer, not the browsing customer
+                        listing.getId()  // snapshots basePrice onto lockedBasePrice at quote time
                 );
                 // Add base_price on top of machine+material cost
                 double totalWithBase = quote.getTotalCost()
@@ -255,6 +296,10 @@ public class MarketplaceController {
             @RequestParam(value = "thumbnail_file_id", required = false) String thumbnailFileId,
             @RequestParam(value = "category", required = false) String category,
             @RequestParam(value = "ownership_attested", required = false, defaultValue = "false") boolean ownershipAttested,
+            @RequestParam(value = "file_format", required = false) String fileFormat,
+            @RequestParam(value = "polygon_count", required = false) Integer polygonCount,
+            @RequestParam(value = "estimated_print_time_minutes", required = false) Integer estimatedPrintTimeMinutes,
+            @RequestParam(value = "layer_height_mm", required = false) BigDecimal layerHeightMm,
             @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
             Authentication authentication) {
 
@@ -278,10 +323,19 @@ public class MarketplaceController {
         listing.setThumbnailFileId(thumbnailFileId);
         listing.setCategory(validateCategory(category));
         listing.setOwnershipAttested(true);
+        // Manually designer-supplied spec fields — never auto-extracted
+        // from the uploaded file. All optional; null when not provided,
+        // same as before these fields existed.
+        listing.setFileFormat(fileFormat);
+        listing.setPolygonCount(polygonCount);
+        listing.setEstimatedPrintTimeMinutes(estimatedPrintTimeMinutes);
+        listing.setLayerHeightMm(layerHeightMm);
 
-        // Upload thumbnail to Cloudinary if provided
+        // Upload thumbnail to Cloudinary if provided. A thumbnail is an
+        // image, never an STL, so store()'s geometry result here is always
+        // GeometryResult.failed() — irrelevant, discarded.
         if (thumbnail != null && !thumbnail.isEmpty()) {
-            String thumbnailUrl = fileStorageService.store(thumbnail);
+            String thumbnailUrl = fileStorageService.store(thumbnail).url();
             listing.setThumbnailUrl(thumbnailUrl);
         }
 
@@ -364,6 +418,17 @@ public class MarketplaceController {
         if (listing.getTotalOrders() != null && listing.getTotalOrders() > 0) {
             throw new IllegalStateException("Cannot delete a listing that has existing orders.");
         }
+        // A student can have Paystack's checkout sheet open (payment PENDING)
+        // for this listing even though it's currently DRAFT/no orders yet —
+        // deleting out from under that leaves handleWebhook()'s
+        // resolveFileId() with no listing to read fileId from when the
+        // payment completes, crashing the webhook after the payment is
+        // already marked COMPLETED (money taken, no PrintJob created).
+        if (paymentRepository.existsByListingIdAndStatus(id, "PENDING")) {
+            throw new ListingDeleteException(
+                    "Cannot delete this listing while a payment is in progress. " +
+                            "Try again in a few minutes.");
+        }
 
         listingRepository.delete(listing);
         return ResponseEntity.noContent().build();
@@ -406,28 +471,6 @@ public class MarketplaceController {
             throw new InvalidListingInputException("Description must be 2000 characters or fewer");
         }
         return description;
-    }
-
-    /**
-     * #68 moderation filter for list endpoints (the main storefront feed;
-     * there's no separate search query in this codebase — the storefront's
-     * optional `category` param is the only "search" surface). Excludes
-     * listings an admin has force-unpublished and listings owned by a
-     * since-suspended designer. Deliberately in-memory (matches the
-     * existing `category` filter above, which already post-filters a
-     * fetched list rather than pushing it into the query) rather than a
-     * JPQL join — DesignListing.designerId is a plain FK, not a mapped
-     * association, so there's no association path to join through.
-     */
-    private List<DesignListing> excludeModerated(List<DesignListing> listings) {
-        if (listings.isEmpty()) return listings;
-        Set<Long> suspendedDesignerIds = userRepository.findBySuspendedTrue().stream()
-                .map(User::getUserId)
-                .collect(Collectors.toSet());
-        return listings.stream()
-                .filter(l -> !Boolean.TRUE.equals(l.getAdminUnpublished()))
-                .filter(l -> !suspendedDesignerIds.contains(l.getDesignerId()))
-                .toList();
     }
 
     /** Single-listing variant of the suspended-owner check, for GET /{id}. */

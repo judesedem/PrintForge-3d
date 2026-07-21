@@ -1,6 +1,7 @@
 package com.printforge.printforge.estimateservice.model;
 
 import jakarta.persistence.*;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
@@ -31,6 +32,12 @@ public class Estimate {
 
     private Double estimatedGrams;
     private Double durationMinutes;
+
+    // Snapshot of DesignListing.basePrice at quote time. Ensures the student
+    // pays what they were shown even if the designer changes the price before
+    // payment completes. Null for BYOF (non-marketplace) jobs.
+    @Column(precision = 10, scale = 2)
+    private BigDecimal lockedBasePrice;
 
     private LocalDateTime createdAt;
 
@@ -73,6 +80,9 @@ public class Estimate {
 
     public Double getDurationMinutes() { return durationMinutes; }
     public void setDurationMinutes(Double durationMinutes) { this.durationMinutes = durationMinutes; }
+
+    public BigDecimal getLockedBasePrice() { return lockedBasePrice; }
+    public void setLockedBasePrice(BigDecimal lockedBasePrice) { this.lockedBasePrice = lockedBasePrice; }
 
     public LocalDateTime getCreatedAt() { return createdAt; }
     public void setCreatedAt(LocalDateTime createdAt) { this.createdAt = createdAt; }

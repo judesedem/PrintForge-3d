@@ -175,15 +175,23 @@ public class AuthService {
     }
 
     /**
-     * Self-service upgrade for POST /api/auth/upgrade-to-designer. Only
-     * valid from STUDENT — designers/staff/admins calling this again is
-     * treated as a client error rather than a silent no-op, so the frontend
-     * gets a clear signal instead of a misleadingly-"successful" response
-     * that changed nothing.
+     * Self-service upgrade for POST /api/auth/upgrade-to-designer.
+     * Idempotent for a caller who is already DESIGNER — returns 200 with
+     * no change and no error, so a client that double-submits (or calls
+     * this speculatively to check state) never sees a spurious failure.
+     * LAB_STAFF/ADMIN callers are still rejected: role is a single enum
+     * field here, not an additive collection, so "upgrading" a staff/admin
+     * account would actually *replace* their elevated role with DESIGNER —
+     * a silent privilege downgrade, not an upgrade. Only STUDENT is a safe
+     * starting point for a real replacement.
      */
     public UserDto upgradeToDesigner(String email) {
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        if (user.getRole() == Role.DESIGNER) {
+            return toUserDto(user);
+        }
 
         if (user.getRole() != Role.STUDENT) {
             throw new InvalidRoleException(
@@ -229,6 +237,16 @@ public class AuthService {
                 throw new EmailAlreadyExistsException("Email already registered");
             }
             user.setEmail(normalized);
+        }
+
+        // Frontend flow: POST /api/files/upload/image → get URL →
+        // PATCH /api/auth/profile with { profilePictureUrl: url }
+        if (request.getProfilePictureUrl() != null) {
+            String url = request.getProfilePictureUrl().trim();
+            if (url.isEmpty()) {
+                throw new InvalidProfileInputException("Profile picture URL cannot be blank");
+            }
+            user.setProfilePictureUrl(url);
         }
 
         User saved = userRepository.save(user);

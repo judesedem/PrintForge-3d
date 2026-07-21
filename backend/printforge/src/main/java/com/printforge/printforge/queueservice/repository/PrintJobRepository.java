@@ -14,6 +14,10 @@ public interface PrintJobRepository extends JpaRepository<PrintJob, Long> {
 
     List<PrintJob> findByUserId(Long userId);
 
+    // Used by DELETE /api/files/{id}: a file already used in a print job
+    // (of any status) can't be deleted.
+    boolean existsByFileId(Long fileId);
+
     /**
      * Returns [status, count] pairs directly from the DB.
      * Used by AdminService.getDashboardSummary() instead of findAll()

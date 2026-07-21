@@ -2,9 +2,11 @@ package com.printforge.printforge.service;
 
 import com.printforge.printforge.dto.AuthResponse;
 import com.printforge.printforge.dto.RegisterRequest;
+import com.printforge.printforge.dto.UpdateProfileRequest;
 import com.printforge.printforge.emailservice.service.EmailService;
 import com.printforge.printforge.entity.Role;
 import com.printforge.printforge.entity.User;
+import com.printforge.printforge.exception.InvalidProfileInputException;
 import com.printforge.printforge.exception.InvalidRoleException;
 import com.printforge.printforge.repository.PasswordResetTokenRepository;
 import com.printforge.printforge.repository.UserRepository;
@@ -100,6 +102,76 @@ class AuthServiceTest {
     @Test
     void garbageRoleIsRejectedInsteadOfSilentlyDefaulting() {
         assertThrows(InvalidRoleException.class, () -> authService.register(requestWithRole("doctor")));
+        Mockito.verify(userRepository, Mockito.never()).save(Mockito.any());
+    }
+
+    private User userWithRole(Role role) {
+        User user = User.builder()
+                .userId(1L)
+                .fullName("Test User")
+                .email("test@knust.edu.gh")
+                .password("hashed")
+                .role(role)
+                .build();
+        return user;
+    }
+
+    @Test
+    void upgradingAStudentGrantsTheDesignerRole() {
+        User student = userWithRole(Role.STUDENT);
+        Mockito.when(userRepository.findByEmail("test@knust.edu.gh")).thenReturn(java.util.Optional.of(student));
+        ArgumentCaptor<User> savedUser = ArgumentCaptor.forClass(User.class);
+
+        var response = authService.upgradeToDesigner("test@knust.edu.gh");
+
+        Mockito.verify(userRepository).save(savedUser.capture());
+        assertEquals(Role.DESIGNER, savedUser.getValue().getRole());
+        assertEquals("designer", response.getRole());
+    }
+
+    @Test
+    void upgradingAnAlreadyDesignerUserIsIdempotent() {
+        User designer = userWithRole(Role.DESIGNER);
+        Mockito.when(userRepository.findByEmail("test@knust.edu.gh")).thenReturn(java.util.Optional.of(designer));
+
+        var response = authService.upgradeToDesigner("test@knust.edu.gh");
+
+        assertEquals("designer", response.getRole());
+        // No-op: save() is never called since nothing changed.
+        Mockito.verify(userRepository, Mockito.never()).save(Mockito.any());
+    }
+
+    @Test
+    void upgradingALabStaffAccountIsRejected() {
+        User labStaff = userWithRole(Role.LAB_STAFF);
+        Mockito.when(userRepository.findByEmail("test@knust.edu.gh")).thenReturn(java.util.Optional.of(labStaff));
+
+        assertThrows(InvalidRoleException.class, () -> authService.upgradeToDesigner("test@knust.edu.gh"));
+        Mockito.verify(userRepository, Mockito.never()).save(Mockito.any());
+    }
+
+    @Test
+    void updatingProfilePictureUrlIsReflectedInTheAuthResponse() {
+        User user = userWithRole(Role.STUDENT);
+        Mockito.when(userRepository.findByEmail("test@knust.edu.gh")).thenReturn(java.util.Optional.of(user));
+        UpdateProfileRequest request = new UpdateProfileRequest();
+        request.setProfilePictureUrl("https://res.cloudinary.com/demo/image/upload/printforge/images/avatar.jpg");
+
+        AuthResponse response = authService.updateProfile("test@knust.edu.gh", request);
+
+        assertEquals("https://res.cloudinary.com/demo/image/upload/printforge/images/avatar.jpg",
+                response.getUser().getProfile_picture_url());
+    }
+
+    @Test
+    void blankProfilePictureUrlIsRejected() {
+        User user = userWithRole(Role.STUDENT);
+        Mockito.when(userRepository.findByEmail("test@knust.edu.gh")).thenReturn(java.util.Optional.of(user));
+        UpdateProfileRequest request = new UpdateProfileRequest();
+        request.setProfilePictureUrl("   ");
+
+        assertThrows(InvalidProfileInputException.class,
+                () -> authService.updateProfile("test@knust.edu.gh", request));
         Mockito.verify(userRepository, Mockito.never()).save(Mockito.any());
     }
 }

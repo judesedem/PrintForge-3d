@@ -16,4 +16,8 @@ public class UpdateProfileRequest {
 
     @Email(message = "Email must be valid")
     private String email;
+
+    // Set via the two-step flow: POST /api/files/upload/image returns a
+    // Cloudinary URL, then this field carries it into the user's profile.
+    private String profilePictureUrl;
 }

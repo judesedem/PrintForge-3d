@@ -129,10 +129,10 @@ public class PrintJobFacadeController {
             if (existing.isPresent() && caller.getUserId().equals(existing.get().getUserId())) {
                 estimate = existing.get();
             } else {
-                estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
+                estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId(), listingId);
             }
         } else {
-            estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId());
+            estimate = calculateMarketplaceEstimate(fileId, quality, infill, quantity, material, caller.getUserId(), listingId);
         }
 
         // basePrice is deliberately NOT added to the estimate's totalCost
@@ -389,14 +389,17 @@ public class PrintJobFacadeController {
     /**
      * Used for marketplace submissions — the file belongs to the designer, not
      * the customer. skipOwnershipCheck=true is safe here because the listing
-     * has already been verified as PUBLISHED before this is called.
+     * has already been verified as PUBLISHED before this is called. Passing
+     * listingId snapshots the listing's current basePrice onto
+     * Estimate.lockedBasePrice, which PaymentService.initiatePayment() charges
+     * instead of re-reading a possibly-since-changed live basePrice.
      */
     private Estimate calculateMarketplaceEstimate(Long fileId, String quality, String infill,
-                                                   int quantity, String material, Long userId) {
+                                                   int quantity, String material, Long userId, Long listingId) {
         String mappedQuality = mapQuality(quality);
         int infillPercent = parseInfill(infill);
         return estimateService.calculateAndSaveEstimate(
-                fileId, mappedQuality, infillPercent, quantity, material.toUpperCase(), userId, true);
+                fileId, mappedQuality, infillPercent, quantity, material.toUpperCase(), userId, true, listingId);
     }
 
     private PrintJobResponse toResponse(PrintJob job, ModelFile file, User owner, Estimate estimate) {

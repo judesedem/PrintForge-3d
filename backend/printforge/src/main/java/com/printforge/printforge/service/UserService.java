@@ -7,6 +7,7 @@ import com.printforge.printforge.fileservice.storage.FileStorageService;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.repository.UserRepository;
+import com.printforge.printforge.socialservice.repository.FollowRepository;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
@@ -29,13 +30,16 @@ public class UserService {
     private final UserRepository userRepository;
     private final FileStorageService fileStorageService;
     private final DesignListingRepository listingRepository;
+    private final FollowRepository followRepository;
 
     public UserService(UserRepository userRepository,
                         FileStorageService fileStorageService,
-                        DesignListingRepository listingRepository) {
+                        DesignListingRepository listingRepository,
+                        FollowRepository followRepository) {
         this.userRepository = userRepository;
         this.fileStorageService = fileStorageService;
         this.listingRepository = listingRepository;
+        this.followRepository = followRepository;
     }
 
     public UserDto updateProfilePicture(Long userId, MultipartFile file) {
@@ -92,6 +96,16 @@ public class UserService {
                 .filter(l -> "PUBLISHED".equals(l.getStatus()))
                 .count();
 
+        // Public — favoriteCount is already visible per-listing on the
+        // storefront, so aggregating it here doesn't expose anything new.
+        // Same unfiltered-across-all-listings pattern as totalEarnings
+        // below (not restricted to PUBLISHED like designCount above).
+        int totalLikes = listings.stream()
+                .map(DesignListing::getFavoriteCount)
+                .filter(Objects::nonNull)
+                .mapToInt(Integer::intValue)
+                .sum();
+
         boolean canSeeEarnings = callerIsAdmin || userId.equals(callerId);
         BigDecimal totalEarnings = null;
         if (canSeeEarnings) {
@@ -104,9 +118,9 @@ public class UserService {
         return UserStatsResponse.builder()
                 .userId(userId)
                 .designCount((int) designCount)
-                .followerCount(0)
-                .followingCount(0)
-                .totalLikes(0)
+                .followerCount((int) followRepository.countByFollowingId(userId))
+                .followingCount((int) followRepository.countByFollowerId(userId))
+                .totalLikes(totalLikes)
                 .totalEarnings(totalEarnings)
                 .build();
     }

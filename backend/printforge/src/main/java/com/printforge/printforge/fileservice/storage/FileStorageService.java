@@ -6,6 +6,14 @@ import com.cloudinary.utils.ObjectUtils;
 import com.printforge.printforge.fileservice.exception.CloudinaryUploadException;
 import com.printforge.printforge.fileservice.exception.FileStorageException;
 import com.printforge.printforge.fileservice.exception.InvalidFileException;
+import com.printforge.printforge.fileservice.geometry.AmfGeometryParser;
+import com.printforge.printforge.fileservice.geometry.GCodeWeightParser;
+import com.printforge.printforge.fileservice.geometry.GCodeWeightParser.GCodeResult;
+import com.printforge.printforge.fileservice.geometry.ObjGeometryParser;
+import com.printforge.printforge.fileservice.geometry.PlyGeometryParser;
+import com.printforge.printforge.fileservice.geometry.StlGeometryParser;
+import com.printforge.printforge.fileservice.geometry.ThreeMfGeometryParser;
+import com.printforge.printforge.fileservice.geometry.TriangleMeshGeometry.GeometryResult;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.stereotype.Service;
@@ -33,9 +41,24 @@ public class FileStorageService {
     );
 
     private final Cloudinary cloudinary;
+    private final StlGeometryParser stlGeometryParser;
+    private final ObjGeometryParser objGeometryParser;
+    private final ThreeMfGeometryParser threeMfGeometryParser;
+    private final AmfGeometryParser amfGeometryParser;
+    private final PlyGeometryParser plyGeometryParser;
+    private final GCodeWeightParser gCodeWeightParser;
 
-    public FileStorageService(Cloudinary cloudinary) {
+    public FileStorageService(Cloudinary cloudinary, StlGeometryParser stlGeometryParser,
+                               ObjGeometryParser objGeometryParser, ThreeMfGeometryParser threeMfGeometryParser,
+                               AmfGeometryParser amfGeometryParser, PlyGeometryParser plyGeometryParser,
+                               GCodeWeightParser gCodeWeightParser) {
         this.cloudinary = cloudinary;
+        this.stlGeometryParser = stlGeometryParser;
+        this.objGeometryParser = objGeometryParser;
+        this.threeMfGeometryParser = threeMfGeometryParser;
+        this.amfGeometryParser = amfGeometryParser;
+        this.plyGeometryParser = plyGeometryParser;
+        this.gCodeWeightParser = gCodeWeightParser;
     }
 
     /** Result of an image-specific Cloudinary upload — url plus the public_id needed to manage/delete the asset later. */
@@ -94,12 +117,49 @@ public class FileStorageService {
     }
 
     /**
-     * Uploads the file to Cloudinary and returns the secure public URL.
-     * This URL is what gets stored in model_files.file_url and
-     * design_listings.thumbnail_url — it loads directly in the mobile app
-     * without any backend download endpoint.
+     * Deletes the Cloudinary asset backing a removed ModelFile
+     * (DELETE /api/files/{id}, see FileService.deleteFile()). Unlike
+     * deleteImage() above, this needs an explicit resource_type: general
+     * uploads (STL/OBJ/etc, via store()) land in Cloudinary as "raw", and
+     * destroy() defaults to "image" when resource_type is omitted — against
+     * a raw asset that silently returns "not found" and deletes nothing.
+     * Best-effort for the same reason as deleteImage(): the ModelFile row
+     * is already gone by the time this runs, so a Cloudinary-side failure
+     * shouldn't surface as a failed delete to the caller.
      */
-    public String store(MultipartFile file) {
+    public void deleteAsset(String publicId, String resourceType) {
+        if (publicId == null || publicId.isBlank()) return;
+        try {
+            cloudinary.uploader().destroy(publicId, ObjectUtils.asMap(
+                    "resource_type", resourceType != null ? resourceType : "image"));
+        } catch (Exception e) {
+            // best-effort — see deleteImage() above.
+        }
+    }
+
+    /**
+     * Result of store() — the Cloudinary URL, plus parsed geometry
+     * (stl/obj/3mf/amf/ply) or pre-sliced weight/duration (gcode), if
+     * applicable. geometryResult is GeometryResult.failed() and
+     * gcodeResult is GCodeResult.failed() for every extension/case that
+     * doesn't apply — callers only need to check the one relevant to the
+     * extension they uploaded. publicId/resourceType are Cloudinary's own
+     * identifiers for the uploaded asset — needed later by
+     * deleteAsset()/DELETE /api/files/{id}; previously discarded here, so
+     * general (non-image) uploads had no way to ever be removed from
+     * Cloudinary again.
+     */
+    public record StoreResult(String url, String publicId, String resourceType,
+                               GeometryResult geometryResult, GCodeResult gcodeResult) {}
+
+    /**
+     * Uploads the file to Cloudinary and returns the secure public URL
+     * (plus parsed geometry, for STL/OBJ uploads). The URL is what gets
+     * stored in model_files.file_url and design_listings.thumbnail_url —
+     * it loads directly in the mobile app without any backend download
+     * endpoint.
+     */
+    public StoreResult store(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new InvalidFileException("No file was attached to the request.");
         }
@@ -117,16 +177,43 @@ public class FileStorageService {
         }
 
         try {
+            byte[] bytes = file.getBytes();
+
+            // Geometry/weight parsing happens against the same bytes
+            // already read for the upload below — no second read of the
+            // file. A failed parse never blocks the upload: none of these
+            // parsers ever throw, all always return a ...failed() result
+            // on any problem.
+            GeometryResult geometryResult = GeometryResult.failed();
+            GCodeResult gcodeResult = GCodeResult.failed();
+            switch (extension.toLowerCase()) {
+                case "stl" -> geometryResult = stlGeometryParser.parse(bytes, file.getOriginalFilename());
+                case "obj" -> geometryResult = objGeometryParser.parse(bytes, file.getOriginalFilename());
+                case "3mf" -> geometryResult = threeMfGeometryParser.parse(bytes, file.getOriginalFilename());
+                case "amf" -> geometryResult = amfGeometryParser.parse(bytes, file.getOriginalFilename());
+                case "ply" -> geometryResult = plyGeometryParser.parse(bytes, file.getOriginalFilename());
+                case "gcode" -> {
+                    // materialType is null — it isn't known yet at upload
+                    // time (chosen later, at estimate time); the parser
+                    // defaults to PLA density for the length-based
+                    // conversion in that case. See GCodeWeightParser's
+                    // javadoc for the full tradeoff.
+                    gcodeResult = gCodeWeightParser.parse(bytes, file.getOriginalFilename(), null);
+                }
+                default -> { /* step/stp and every other accepted extension stay on the file-size fallback */ }
+            }
+
             // resource_type "auto" handles both images and raw files (STL, OBJ etc.)
             Map<?, ?> result = cloudinary.uploader().upload(
-                    file.getBytes(),
+                    bytes,
                     ObjectUtils.asMap(
                             "resource_type", "auto",
                             "folder",        "printforge"
                     )
             );
-            return (String) result.get("secure_url");
-        
+            return new StoreResult((String) result.get("secure_url"), (String) result.get("public_id"),
+                    (String) result.get("resource_type"), geometryResult, gcodeResult);
+
       } catch (Exception e) {
     System.out.println("=== CLOUDINARY ERROR ===");
     System.out.println("Message: " + e.getMessage());

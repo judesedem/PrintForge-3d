@@ -52,6 +52,15 @@ public class DesignListing {
 
     private Integer favoriteCount = 0;
 
+    // Trending-sort input (GET /api/marketplace?sort=trending). No existing
+    // "download" concept exists anywhere in this codebase to back this —
+    // added specifically so the trending composite score
+    // (downloadCount*1 + favoriteCount*2) is real and seedable, rather than
+    // silently dropping the download term from that formula. Nothing
+    // currently increments this; it starts and stays at 0 until a download-
+    // tracking call site is added elsewhere.
+    private Integer downloadCount = 0;
+
     // Designer's attestation at creation time that they own the rights to
     // sell this design (#67). Not-null with a DB-level default so existing
     // rows backfill to false via ddl-auto=update instead of failing the
@@ -102,6 +111,25 @@ public class DesignListing {
     @Transient
     private Boolean isFavorited;
 
+    // Set manually by the designer at listing creation/edit time — NOT
+    // auto-extracted from the uploaded file (that's a separate concern
+    // handled by StlGeometryParser/etc. against ModelFile, not this
+    // entity). Nullable: listings created before these fields existed,
+    // and any listing where the designer didn't fill them in, return
+    // null rather than a fabricated default — the frontend already
+    // handles null display (e.g. "—").
+    @Column(name = "file_format")
+    private String fileFormat;
+
+    @Column(name = "polygon_count")
+    private Integer polygonCount;
+
+    @Column(name = "estimated_print_time_minutes")
+    private Integer estimatedPrintTimeMinutes;
+
+    @Column(name = "layer_height_mm", precision = 10, scale = 2)
+    private BigDecimal layerHeightMm;
+
     @PrePersist
     protected void onCreate() {
         this.createdAt = LocalDateTime.now();
@@ -109,6 +137,7 @@ public class DesignListing {
         if (this.totalOrders == null) this.totalOrders = 0;
         if (this.totalEarnings == null) this.totalEarnings = BigDecimal.ZERO;
         if (this.favoriteCount == null) this.favoriteCount = 0;
+        if (this.downloadCount == null) this.downloadCount = 0;
     }
 
     // Getters and setters
@@ -163,6 +192,9 @@ public class DesignListing {
     public Integer getFavoriteCount() { return favoriteCount; }
     public void setFavoriteCount(Integer favoriteCount) { this.favoriteCount = favoriteCount; }
 
+    public Integer getDownloadCount() { return downloadCount; }
+    public void setDownloadCount(Integer downloadCount) { this.downloadCount = downloadCount; }
+
     public Boolean getIsFavorited() { return isFavorited; }
     public void setIsFavorited(Boolean isFavorited) { this.isFavorited = isFavorited; }
 
@@ -174,4 +206,16 @@ public class DesignListing {
 
     public LocalDateTime getAdminUnpublishedAt() { return adminUnpublishedAt; }
     public void setAdminUnpublishedAt(LocalDateTime adminUnpublishedAt) { this.adminUnpublishedAt = adminUnpublishedAt; }
+
+    public String getFileFormat() { return fileFormat; }
+    public void setFileFormat(String fileFormat) { this.fileFormat = fileFormat; }
+
+    public Integer getPolygonCount() { return polygonCount; }
+    public void setPolygonCount(Integer polygonCount) { this.polygonCount = polygonCount; }
+
+    public Integer getEstimatedPrintTimeMinutes() { return estimatedPrintTimeMinutes; }
+    public void setEstimatedPrintTimeMinutes(Integer estimatedPrintTimeMinutes) { this.estimatedPrintTimeMinutes = estimatedPrintTimeMinutes; }
+
+    public BigDecimal getLayerHeightMm() { return layerHeightMm; }
+    public void setLayerHeightMm(BigDecimal layerHeightMm) { this.layerHeightMm = layerHeightMm; }
 }

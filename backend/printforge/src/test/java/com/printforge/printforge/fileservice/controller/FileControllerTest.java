@@ -94,6 +94,41 @@ class FileControllerTest {
     }
 
     @Test
+    void ownerCanDeleteTheirOwnFile() {
+        ModelFile file = fileUploadedBy(7L);
+        Mockito.when(fileService.getFileById(1L)).thenReturn(file);
+        Mockito.when(userRepository.findByEmail("alice@knust.edu.gh"))
+                .thenReturn(Optional.of(userWithId(7L, "alice@knust.edu.gh", Role.STUDENT)));
+
+        var response = controller.deleteFile(1L, authAs("alice@knust.edu.gh"));
+
+        assertEquals(204, response.getStatusCode().value());
+        Mockito.verify(fileService).deleteFile(file);
+    }
+
+    @Test
+    void nonOwnerCannotDeleteSomeoneElsesFile() {
+        Mockito.when(fileService.getFileById(1L)).thenReturn(fileUploadedBy(7L));
+        Mockito.when(userRepository.findByEmail("bob@knust.edu.gh"))
+                .thenReturn(Optional.of(userWithId(8L, "bob@knust.edu.gh", Role.STUDENT)));
+
+        assertThrows(AccessDeniedException.class,
+                () -> controller.deleteFile(1L, authAs("bob@knust.edu.gh")));
+        Mockito.verify(fileService, Mockito.never()).deleteFile(Mockito.any());
+    }
+
+    @Test
+    void staffCanDeleteAnyUsersFile() {
+        ModelFile file = fileUploadedBy(7L);
+        Mockito.when(fileService.getFileById(1L)).thenReturn(file);
+
+        var response = controller.deleteFile(1L, authAs("staff@knust.edu.gh", "ROLE_LAB_STAFF"));
+
+        assertEquals(204, response.getStatusCode().value());
+        Mockito.verify(fileService).deleteFile(file);
+    }
+
+    @Test
     void nonStaffListEndpointOnlyReturnsOwnFiles() {
         Mockito.when(userRepository.findByEmail("alice@knust.edu.gh"))
                 .thenReturn(Optional.of(userWithId(7L, "alice@knust.edu.gh", Role.STUDENT)));

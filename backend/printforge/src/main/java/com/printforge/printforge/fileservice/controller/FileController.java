@@ -90,6 +90,18 @@ public class FileController {
                 .body(resource);
     }
 
+    // DELETE /api/files/{id} — removes the ModelFile row and the backing
+    // Cloudinary asset. Same ownership check as GET/download. Blocked
+    // (400) if the file is still attached to a published listing or has
+    // been used in a print job — see FileService.deleteFile().
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteFile(@PathVariable Long id, Authentication authentication) {
+        ModelFile metadata = fileService.getFileById(id);
+        requireOwnerOrStaff(metadata, authentication);
+        fileService.deleteFile(metadata);
+        return ResponseEntity.noContent().build();
+    }
+
     // GET /api/files — staff/admin get every file (ops/debugging view).
     // Everyone else only sees their own uploads.
     @GetMapping

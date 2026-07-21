@@ -43,7 +43,20 @@ public class MaterialsController {
                 List.of("Black", "White", "Grey"),
                 0.08, "low",
                 "Engineering-grade plastic. More durable and heat-resistant than PLA. Low stock."
-            )
+            ),
+            new MaterialDto(
+                "mat-4", "PETG",
+                List.of("Clear", "White", "Black", "Grey", "Blue", "Red"),
+                0.09, "available",
+                "Durable and impact-resistant with better temperature resistance than PLA. Good for functional parts."
+            ),
+
+            new MaterialDto(
+                "mat-5", "CARBON_FIBER",
+                List.of("Black"),
+                0.20, "available",
+                "Carbon-fiber-reinforced filament. Extra stiffness and strength — ideal for drone mounts, brackets, and load-bearing parts."
+)
         ));
     }
 
