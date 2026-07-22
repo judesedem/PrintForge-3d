@@ -1,5 +1,6 @@
 package com.printforge.printforge.adminservice.service;
 
+import com.printforge.printforge.adminservice.dto.RevenueHistoryEntry;
 import com.printforge.printforge.dto.UserDto;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
@@ -10,6 +11,8 @@ import com.printforge.printforge.moderationservice.model.ModerationActionType;
 import com.printforge.printforge.moderationservice.model.ModerationTargetType;
 import com.printforge.printforge.moderationservice.service.ModerationLogService;
 import com.printforge.printforge.notificationservice.service.NotificationService;
+import com.printforge.printforge.paymentservice.model.Payment;
+import com.printforge.printforge.paymentservice.repository.PaymentRepository;
 import com.printforge.printforge.printerservice.model.Printer;
 import com.printforge.printforge.printerservice.repository.PrinterRepository;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
@@ -17,6 +20,8 @@ import com.printforge.printforge.repository.UserRepository;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -30,19 +35,22 @@ public class AdminService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final ModerationLogService moderationLogService;
+    private final PaymentRepository paymentRepository;
 
     public AdminService(PrintJobRepository printJobRepository,
                         PrinterRepository printerRepository,
                         DesignListingRepository designListingRepository,
                         UserRepository userRepository,
                         NotificationService notificationService,
-                        ModerationLogService moderationLogService) {
+                        ModerationLogService moderationLogService,
+                        PaymentRepository paymentRepository) {
         this.printJobRepository = printJobRepository;
         this.printerRepository = printerRepository;
         this.designListingRepository = designListingRepository;
         this.userRepository = userRepository;
         this.notificationService = notificationService;
         this.moderationLogService = moderationLogService;
+        this.paymentRepository = paymentRepository;
     }
 
     public Map<String, Object> getDashboardSummary() {
@@ -87,6 +95,42 @@ public class AdminService {
         summary.put("printersByStatus", printersByStatus);
         summary.put("designer_earnings", designerEarnings);
         return summary;
+    }
+
+    private static final int MAX_REVENUE_HISTORY_DAYS = 90;
+
+    /**
+     * GET /api/admin/dashboard/revenue-history — completed-payment revenue,
+     * bucketed by calendar day using Payment.completedAt (when the payment
+     * actually cleared), not initiatedAt. Always returns exactly `days`
+     * entries in ascending date order ending today, including days with
+     * zero revenue — the dashboard chart needs a continuous series, not a
+     * sparse one it has to fill in itself. days is clamped to
+     * [1, MAX_REVENUE_HISTORY_DAYS] so an unbounded or non-positive value
+     * from the client can't force scanning an unreasonably large row set.
+     */
+    public List<RevenueHistoryEntry> getRevenueHistory(int days) {
+        int clampedDays = Math.max(1, Math.min(days, MAX_REVENUE_HISTORY_DAYS));
+
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(clampedDays - 1L);
+
+        List<Payment> completedPayments = paymentRepository.findByStatusAndCompletedAtGreaterThanEqual(
+                "COMPLETED", startDate.atStartOfDay());
+
+        Map<LocalDate, BigDecimal> revenueByDay = new HashMap<>();
+        for (Payment payment : completedPayments) {
+            if (payment.getCompletedAt() == null) continue;
+            LocalDate day = payment.getCompletedAt().toLocalDate();
+            BigDecimal amount = payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO;
+            revenueByDay.merge(day, amount, BigDecimal::add);
+        }
+
+        List<RevenueHistoryEntry> series = new ArrayList<>();
+        for (LocalDate day = startDate; !day.isAfter(endDate); day = day.plusDays(1)) {
+            series.add(new RevenueHistoryEntry(day.toString(), revenueByDay.getOrDefault(day, BigDecimal.ZERO)));
+        }
+        return series;
     }
 
     /**

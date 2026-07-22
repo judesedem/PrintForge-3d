@@ -22,6 +22,9 @@ import com.printforge.printforge.marketplaceservice.exception.AlreadyFavoritedEx
 import com.printforge.printforge.marketplaceservice.exception.FavoriteNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
 import com.printforge.printforge.marketplaceservice.exception.ListingDeleteException;
+import com.printforge.printforge.marketplaceservice.exception.ListingImageDeleteException;
+import com.printforge.printforge.marketplaceservice.exception.ListingImageLimitExceededException;
+import com.printforge.printforge.marketplaceservice.exception.ListingImageNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotPublishedException;
 import com.printforge.printforge.labservice.exception.LabLocationNotFoundException;
@@ -32,6 +35,9 @@ import com.printforge.printforge.paymentservice.exception.PaymentNotFoundExcepti
 import com.printforge.printforge.paymentservice.exception.PaymentFailedException;
 import com.printforge.printforge.paymentservice.exception.DuplicatePaymentException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
+import com.printforge.printforge.materialservice.exception.MaterialNotFoundException;
+import com.printforge.printforge.settingsservice.exception.FeatureDisabledException;
+import com.printforge.printforge.settingsservice.exception.FeatureToggleNotFoundException;
 import com.printforge.printforge.socialservice.exception.AlreadyFollowingException;
 import com.printforge.printforge.socialservice.exception.CannotFollowSelfException;
 import com.printforge.printforge.socialservice.exception.NotFollowingException;
@@ -176,6 +182,21 @@ public class GlobalExceptionHandler {
         return buildError(HttpStatus.CONFLICT, ex.getMessage());
     }
 
+    @ExceptionHandler(ListingImageNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleListingImageNotFound(ListingImageNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(ListingImageLimitExceededException.class)
+    public ResponseEntity<ErrorResponse> handleListingImageLimitExceeded(ListingImageLimitExceededException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, ex.getMessage());
+    }
+
+    @ExceptionHandler(ListingImageDeleteException.class)
+    public ResponseEntity<ErrorResponse> handleListingImageDelete(ListingImageDeleteException ex) {
+        return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
     @ExceptionHandler(AlreadyFavoritedException.class)
     public ResponseEntity<ErrorResponse> handleAlreadyFavorited(AlreadyFavoritedException ex) {
         return buildError(HttpStatus.CONFLICT, ex.getMessage());
@@ -249,6 +270,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(PrinterBusyException.class)
     public ResponseEntity<ErrorResponse> handlePrinterBusy(PrinterBusyException ex) {
         return buildError(HttpStatus.CONFLICT, ex.getMessage());
+    }
+
+    @ExceptionHandler(FeatureDisabledException.class)
+    public ResponseEntity<ErrorResponse> handleFeatureDisabled(FeatureDisabledException ex) {
+        return buildError(HttpStatus.SERVICE_UNAVAILABLE, ex.getMessage());
+    }
+
+    @ExceptionHandler(MaterialNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleMaterialNotFound(MaterialNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
+    }
+
+    @ExceptionHandler(FeatureToggleNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleFeatureToggleNotFound(FeatureToggleNotFoundException ex) {
+        return buildError(HttpStatus.NOT_FOUND, ex.getMessage());
     }
     @ExceptionHandler(CloudinaryUploadException.class)
     public ResponseEntity<ErrorResponse> handleCloudinaryUpload(CloudinaryUploadException ex) {

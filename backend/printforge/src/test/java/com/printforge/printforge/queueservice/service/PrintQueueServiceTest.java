@@ -7,6 +7,7 @@ import com.printforge.printforge.fileservice.exception.ModelFileNotFoundExceptio
 import com.printforge.printforge.fileservice.model.ModelFile;
 import com.printforge.printforge.fileservice.repository.ModelFileRepository;
 import com.printforge.printforge.labservice.service.LabLocationService;
+import com.printforge.printforge.notificationservice.model.NotificationType;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.printerservice.exception.PrinterBusyException;
 import com.printforge.printforge.printerservice.exception.PrinterNotFoundException;
@@ -338,5 +339,183 @@ class PrintQueueServiceTest {
 
         assertEquals("COMPLETED", updated.getStatus());
         Mockito.verify(printerRepository, Mockito.never()).save(Mockito.any());
+    }
+
+    // --- updateJobStatus: FAILED only allowed from PRINTING ---
+
+    @Test
+    void updateJobStatusAllowsFailedFromPrinting() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setStatus("PRINTING");
+        existing.setAssignedPrinter("Prusa-01");
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+        Mockito.when(printerRepository.findByPrinterName("Prusa-01"))
+                .thenReturn(Optional.of(printerNamed("Prusa-01", "BUSY")));
+
+        PrintJob updated = service.updateJobStatus(5L, "FAILED", null, null, null);
+
+        assertEquals("FAILED", updated.getStatus());
+        assertNotNull(updated.getCompletedAt());
+        ArgumentCaptor<Printer> savedPrinter = ArgumentCaptor.forClass(Printer.class);
+        Mockito.verify(printerRepository).save(savedPrinter.capture());
+        assertEquals("AVAILABLE", savedPrinter.getValue().getStatus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SUBMITTED", "APPROVED", "QUEUED", "COMPLETED", "REJECTED"})
+    void updateJobStatusRejectsFailedFromAnyStatusOtherThanPrinting(String currentStatus) {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setStatus(currentStatus);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        assertThrows(InvalidJobStatusException.class,
+                () -> service.updateJobStatus(5L, "FAILED", null, null, null));
+    }
+
+    @Test
+    void updateJobStatusRejectsFailedWhenJobHasNoCurrentStatus() {
+        // Guards against the FAILED precondition NPE-ing if a job's status
+        // is ever null instead of comparing false-and-rejecting cleanly.
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        assertThrows(InvalidJobStatusException.class,
+                () -> service.updateJobStatus(5L, "FAILED", null, null, null));
+    }
+
+    // --- transitionJobStatus: FAILED only allowed from PRINTING ---
+
+    @Test
+    void transitionJobStatusAllowsFailedFromPrinting() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setStatus("PRINTING");
+        existing.setAssignedPrinter("Prusa-01");
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+        Mockito.when(printerRepository.findByPrinterName("Prusa-01"))
+                .thenReturn(Optional.of(printerNamed("Prusa-01", "BUSY")));
+
+        PrintJob updated = service.transitionJobStatus(5L, "FAILED");
+
+        assertEquals("FAILED", updated.getStatus());
+        assertNotNull(updated.getCompletedAt());
+        ArgumentCaptor<Printer> savedPrinter = ArgumentCaptor.forClass(Printer.class);
+        Mockito.verify(printerRepository).save(savedPrinter.capture());
+        assertEquals("AVAILABLE", savedPrinter.getValue().getStatus());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"SUBMITTED", "APPROVED", "QUEUED", "READY", "COLLECTED", "COMPLETED", "REJECTED"})
+    void transitionJobStatusRejectsFailedFromAnyStatusOtherThanPrinting(String currentStatus) {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setStatus(currentStatus);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        assertThrows(InvalidJobStatusException.class,
+                () -> service.transitionJobStatus(5L, "FAILED"));
+    }
+
+    // --- notification type granularity ---
+
+    @Test
+    void printingViaUpdateJobStatusSendsJobStartedNotificationType() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.updateJobStatus(5L, "PRINTING", null, null, null);
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(), Mockito.eq(NotificationType.JOB_STARTED));
+    }
+
+    @Test
+    void completingViaUpdateJobStatusSendsJobCompletedNotificationType() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.updateJobStatus(5L, "COMPLETED", null, null, null);
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(), Mockito.eq(NotificationType.JOB_COMPLETED));
+    }
+
+    @Test
+    void rejectingViaUpdateJobStatusSendsJobRejectedNotificationType() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.updateJobStatus(5L, "REJECTED", null, null, null);
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(), Mockito.eq(NotificationType.JOB_REJECTED));
+    }
+
+    @Test
+    void failingViaUpdateJobStatusSendsJobFailedNotificationType() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        existing.setStatus("PRINTING");
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.updateJobStatus(5L, "FAILED", null, null, null);
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(), Mockito.eq(NotificationType.JOB_FAILED));
+    }
+
+    @Test
+    void printingViaTransitionSendsJobStartedNotificationType() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        existing.setStatus("APPROVED");
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.transitionJobStatus(5L, "PRINTING");
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(), Mockito.eq(NotificationType.JOB_STARTED));
+    }
+
+    @Test
+    void failingViaTransitionSendsJobFailedNotificationType() {
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        existing.setStatus("PRINTING");
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.transitionJobStatus(5L, "FAILED");
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(), Mockito.eq(NotificationType.JOB_FAILED));
+    }
+
+    @Test
+    void readyViaTransitionStillUsesTheGenericSuccessType() {
+        // READY isn't one of the specific categories Stage 2 introduced —
+        // it must keep using the generic "success" type, unchanged.
+        PrintJob existing = new PrintJob();
+        existing.setId(5L);
+        existing.setUserId(42L);
+        existing.setStatus("PRINTING");
+        Mockito.when(printJobRepository.findById(5L)).thenReturn(Optional.of(existing));
+
+        service.transitionJobStatus(5L, "READY");
+
+        Mockito.verify(notificationService).createNotification(
+                Mockito.eq(42L), Mockito.anyString(), Mockito.anyString(),
+                Mockito.eq(NotificationType.SUCCESS), Mockito.anyString());
     }
 }

@@ -4,20 +4,29 @@ import com.printforge.printforge.entity.User;
 import com.printforge.printforge.estimateservice.model.Estimate;
 import com.printforge.printforge.estimateservice.service.EstimateService;
 import com.printforge.printforge.fileservice.storage.FileStorageService;
+import com.printforge.printforge.marketplaceservice.dto.ReorderImagesRequest;
 import com.printforge.printforge.marketplaceservice.exception.AlreadyFavoritedException;
 import com.printforge.printforge.marketplaceservice.exception.FavoriteNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.InvalidListingInputException;
 import com.printforge.printforge.marketplaceservice.exception.ListingDeleteException;
+import com.printforge.printforge.marketplaceservice.exception.ListingImageDeleteException;
+import com.printforge.printforge.marketplaceservice.exception.ListingImageLimitExceededException;
+import com.printforge.printforge.marketplaceservice.exception.ListingImageNotFoundException;
 import com.printforge.printforge.marketplaceservice.exception.ListingNotFoundException;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.model.Favorite;
+import com.printforge.printforge.marketplaceservice.model.ListingImage;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.marketplaceservice.repository.FavoriteRepository;
+import com.printforge.printforge.marketplaceservice.repository.ListingImageRepository;
 import com.printforge.printforge.moderationservice.model.ModerationActionType;
 import com.printforge.printforge.moderationservice.model.ModerationTargetType;
 import com.printforge.printforge.moderationservice.service.ModerationLogService;
 import com.printforge.printforge.paymentservice.repository.PaymentRepository;
 import com.printforge.printforge.repository.UserRepository;
+import com.printforge.printforge.settingsservice.exception.FeatureDisabledException;
+import com.printforge.printforge.settingsservice.model.FeatureToggleKeys;
+import com.printforge.printforge.settingsservice.service.SettingsService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
@@ -32,6 +41,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +59,9 @@ import java.util.stream.Collectors;
  * PATCH /api/marketplace/{id}/publish   → DRAFT → PUBLISHED (DESIGNER only)
  * PATCH /api/marketplace/{id}/unpublish → PUBLISHED → DRAFT (DESIGNER only)
  * DELETE /api/marketplace/{id}       → delete DRAFT listing (DESIGNER only)
+ * POST /api/marketplace/{id}/images            → add a gallery photo (DESIGNER only)
+ * DELETE /api/marketplace/{id}/images/{imageId} → remove a gallery photo (DESIGNER only)
+ * PATCH /api/marketplace/{id}/images/reorder    → reorder the gallery (DESIGNER only)
  */
 @RestController
 @RequestMapping("/api/marketplace")
@@ -61,6 +74,8 @@ public class MarketplaceController {
     private final FavoriteRepository favoriteRepository;
     private final ModerationLogService moderationLogService;
     private final PaymentRepository paymentRepository;
+    private final ListingImageRepository listingImageRepository;
+    private final SettingsService settingsService;
 
     public MarketplaceController(DesignListingRepository listingRepository,
                                   EstimateService estimateService,
@@ -68,7 +83,9 @@ public class MarketplaceController {
                                   UserRepository userRepository,
                                   FavoriteRepository favoriteRepository,
                                   ModerationLogService moderationLogService,
-                                  PaymentRepository paymentRepository) {
+                                  PaymentRepository paymentRepository,
+                                  ListingImageRepository listingImageRepository,
+                                  SettingsService settingsService) {
         this.listingRepository = listingRepository;
         this.estimateService = estimateService;
         this.fileStorageService = fileStorageService;
@@ -76,6 +93,23 @@ public class MarketplaceController {
         this.favoriteRepository = favoriteRepository;
         this.moderationLogService = moderationLogService;
         this.paymentRepository = paymentRepository;
+        this.listingImageRepository = listingImageRepository;
+        this.settingsService = settingsService;
+    }
+
+    /**
+     * Gate for the marketplace's "front door" endpoints (browse, view,
+     * create) — lets an admin pause new marketplace activity via
+     * PATCH /api/admin/settings/features/marketplace without touching a
+     * designer's ability to manage listings they already have (publish/
+     * unpublish/delete/images/favorites are intentionally NOT gated: those
+     * are management actions on existing data, not new marketplace
+     * activity).
+     */
+    private void requireMarketplaceEnabled() {
+        if (!settingsService.isFeatureEnabled(FeatureToggleKeys.MARKETPLACE)) {
+            throw new FeatureDisabledException(FeatureToggleKeys.MARKETPLACE);
+        }
     }
 
     // ── Public Storefront ────────────────────────────────────────────────────
@@ -98,6 +132,7 @@ public class MarketplaceController {
             @PageableDefault(size = DEFAULT_PAGE_SIZE) Pageable pageable,
             Authentication authentication) {
 
+        requireMarketplaceEnabled();
         Pageable clamped = clampPageSize(pageable);
 
         Page<DesignListing> page = "trending".equalsIgnoreCase(sort)
@@ -135,6 +170,7 @@ public class MarketplaceController {
             @PathVariable Long id,
             Authentication authentication) {
 
+        requireMarketplaceEnabled();
         DesignListing listing = listingRepository.findById(id)
                 .orElseThrow(() -> new ListingNotFoundException(id));
 
@@ -161,6 +197,11 @@ public class MarketplaceController {
         // Auto-generate a quote with default params (Standard, 20% infill, qty 1)
         Map<String, Object> response = new LinkedHashMap<>();
         response.put("listing", listing);
+        // Never empty for a listing with a thumbnail: createListing() and
+        // ListingImageBackfillRunner both guarantee a displayOrder=0 row
+        // exists wherever thumbnailUrl does. Only a listing that was
+        // created with no thumbnail at all (optional) has zero images here.
+        response.put("images", listingImageRepository.findByListingIdOrderByDisplayOrderAsc(id));
 
         if (listing.getFileId() != null) {
             try {
@@ -303,6 +344,8 @@ public class MarketplaceController {
             @RequestPart(value = "thumbnail", required = false) MultipartFile thumbnail,
             Authentication authentication) {
 
+        requireMarketplaceEnabled();
+
         // #67 — a design listed without confirmed rights is exactly the
         // "this design isn't theirs to sell" gap this attestation closes.
         // Same clean-400 pattern as validateCategory() below, not an
@@ -340,6 +383,20 @@ public class MarketplaceController {
         }
 
         DesignListing saved = listingRepository.save(listing);
+
+        // Mirror the thumbnail into the gallery as the displayOrder=0 image,
+        // so thumbnailUrl is a real (if derived) member of the images list
+        // from the moment a listing exists, same as every listing backfilled
+        // by ListingImageBackfillRunner.
+        if (saved.getThumbnailUrl() != null) {
+            ListingImage thumbnailImage = new ListingImage();
+            thumbnailImage.setListingId(saved.getId());
+            thumbnailImage.setImageUrl(saved.getThumbnailUrl());
+            thumbnailImage.setImageFileId(saved.getThumbnailFileId());
+            thumbnailImage.setDisplayOrder(0);
+            listingImageRepository.save(thumbnailImage);
+        }
+
         saved.setDesignerName(designer.getFullName());
         saved.setDesignerAvatar(designer.getProfilePictureUrl());
         return ResponseEntity.ok(saved);
@@ -430,8 +487,140 @@ public class MarketplaceController {
                             "Try again in a few minutes.");
         }
 
+        listingImageRepository.deleteByListingId(id);
         listingRepository.delete(listing);
         return ResponseEntity.noContent().build();
+    }
+
+    // ── Gallery Images ───────────────────────────────────────────────────────
+
+    private static final int MAX_IMAGES_PER_LISTING = 8;
+
+    /**
+     * Adds one photo to a listing's gallery — entirely optional and separate
+     * from listing creation; a designer calls this whenever they want, as
+     * many times as they want up to MAX_IMAGES_PER_LISTING. Reuses
+     * FileStorageService.storeImage() (content-type-validated) rather than
+     * the extension-based store() createListing() uses for the thumbnail,
+     * since this path is images-only.
+     */
+    @PreAuthorize("hasRole('DESIGNER')")
+    @PostMapping(value = "/{id}/images", consumes = "multipart/form-data")
+    public ResponseEntity<ListingImage> addListingImage(
+            @PathVariable Long id,
+            @RequestPart("image") MultipartFile image,
+            @RequestParam(value = "caption", required = false) String caption,
+            Authentication authentication) {
+
+        DesignListing listing = getOwnedListing(id, authentication);
+
+        long currentCount = listingImageRepository.countByListingId(id);
+        if (currentCount >= MAX_IMAGES_PER_LISTING) {
+            throw new ListingImageLimitExceededException(
+                    "A listing can have at most " + MAX_IMAGES_PER_LISTING + " images.");
+        }
+
+        FileStorageService.CloudinaryImageResult result = fileStorageService.storeImage(image);
+
+        ListingImage listingImage = new ListingImage();
+        listingImage.setListingId(id);
+        listingImage.setImageUrl(result.url());
+        listingImage.setImageFileId(result.publicId());
+        listingImage.setDisplayOrder((int) currentCount);
+        listingImage.setCaption(caption);
+        ListingImage saved = listingImageRepository.save(listingImage);
+
+        // A listing created with no thumbnail (optional at creation time)
+        // gets its first-ever image promoted to the thumbnail here.
+        if (currentCount == 0) {
+            syncThumbnail(listing, saved);
+        }
+
+        return ResponseEntity.ok(saved);
+    }
+
+    /**
+     * Removes one gallery photo, owner-only. Blocked when it's the
+     * listing's last remaining image: a listing must always have at least
+     * one (the thumbnail), and replacing that final image is the job of
+     * the thumbnail-replacement flow, not this endpoint. Deleting a
+     * non-last displayOrder=0 image is allowed — the next image is promoted
+     * to displayOrder 0 and thumbnailUrl is re-derived from it.
+     */
+    @PreAuthorize("hasRole('DESIGNER')")
+    @DeleteMapping("/{id}/images/{imageId}")
+    public ResponseEntity<Void> deleteListingImage(
+            @PathVariable Long id,
+            @PathVariable Long imageId,
+            Authentication authentication) {
+
+        DesignListing listing = getOwnedListing(id, authentication);
+
+        ListingImage image = listingImageRepository.findByIdAndListingId(imageId, id)
+                .orElseThrow(() -> new ListingImageNotFoundException(imageId));
+
+        List<ListingImage> current = listingImageRepository.findByListingIdOrderByDisplayOrderAsc(id);
+        if (current.size() <= 1) {
+            throw new ListingImageDeleteException(
+                    "Cannot delete the last remaining image. Replace the thumbnail instead.");
+        }
+
+        listingImageRepository.delete(image);
+        fileStorageService.deleteImage(image.getImageFileId());
+
+        List<ListingImage> survivors = current.stream()
+                .filter(i -> !i.getId().equals(imageId))
+                .sorted(Comparator.comparingInt(ListingImage::getDisplayOrder))
+                .toList();
+        for (int i = 0; i < survivors.size(); i++) {
+            survivors.get(i).setDisplayOrder(i);
+        }
+        listingImageRepository.saveAll(survivors);
+        syncThumbnail(listing, survivors.get(0));
+
+        return ResponseEntity.noContent().build();
+    }
+
+    /** Reorders a listing's gallery; the request must name exactly its current set of image ids. */
+    @PreAuthorize("hasRole('DESIGNER')")
+    @PatchMapping("/{id}/images/reorder")
+    public ResponseEntity<List<ListingImage>> reorderImages(
+            @PathVariable Long id,
+            @RequestBody ReorderImagesRequest request,
+            Authentication authentication) {
+
+        DesignListing listing = getOwnedListing(id, authentication);
+
+        List<Long> requestedIds = request.getImageIds();
+        if (requestedIds == null || requestedIds.isEmpty()) {
+            throw new InvalidListingInputException("imageIds is required");
+        }
+
+        List<ListingImage> existing = listingImageRepository.findByListingIdOrderByDisplayOrderAsc(id);
+        Map<Long, ListingImage> byId = existing.stream()
+                .collect(Collectors.toMap(ListingImage::getId, i -> i));
+
+        if (requestedIds.size() != existing.size() || !byId.keySet().containsAll(requestedIds)
+                || new java.util.HashSet<>(requestedIds).size() != requestedIds.size()) {
+            throw new InvalidListingInputException(
+                    "imageIds must contain exactly this listing's current image ids, each once");
+        }
+
+        for (int i = 0; i < requestedIds.size(); i++) {
+            byId.get(requestedIds.get(i)).setDisplayOrder(i);
+        }
+        List<ListingImage> saved = listingImageRepository.saveAll(existing);
+        saved.sort(Comparator.comparingInt(ListingImage::getDisplayOrder));
+        syncThumbnail(listing, saved.get(0));
+
+        return ResponseEntity.ok(saved);
+    }
+
+    /** Keeps thumbnailUrl/thumbnailFileId (the derived convenience copy) equal to the displayOrder=0 image. */
+    private void syncThumbnail(DesignListing listing, ListingImage displayOrderZeroImage) {
+        listing.setThumbnailUrl(displayOrderZeroImage.getImageUrl());
+        listing.setThumbnailFileId(displayOrderZeroImage.getImageFileId());
+        listingRepository.save(listing);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
