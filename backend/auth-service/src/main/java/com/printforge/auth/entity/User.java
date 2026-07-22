@@ -69,4 +69,8 @@ public class User {
     // a real opt-in signal to check instead of retrofitting one.
     @Column(name = "email_opt_in", columnDefinition = "boolean not null default true")
     private boolean emailOptIn;
+
+    // Premium Designer status
+    @Column(name = "is_premium", columnDefinition = "boolean not null default false")
+    private boolean isPremium;
 }

@@ -1,5 +1,5 @@
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -19,7 +19,7 @@ import GhsAmount from '@/components/GhsAmount';
 import MonoText from '@/components/MonoText';
 import PaystackWebView from '@/components/PaystackWebView';
 import { Material, Quality } from '@/data/mockData';
-import { fetchListing, MarketplaceListing, Quote } from '@/api/marketplace';
+import { fetchListing, fetchCustomQuote, MarketplaceListing, Quote } from '@/api/marketplace';
 import { initiatePayment, Payment } from '@/api/payments';
 import { useTheme } from '@/ThemeContext';
 import { useSession } from '@/SessionContext';
@@ -38,7 +38,6 @@ const QUALITIES: Array<{ value: Quality; label: string; detail: string }> = [
   { value: 'STANDARD', label: 'Standard', detail: 'Balanced' },
   { value: 'HIGH', label: 'High', detail: 'Detailed' },
 ];
-const INFILL_LEVELS = [10, 20, 40, 60];
 
 export default function ListingDetail() {
   const router = useRouter();
@@ -59,6 +58,8 @@ export default function ListingDetail() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [paymentPhase, setPaymentPhase] = useState<'idle' | 'initiating' | 'checkout'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
+  const hasFile = useRef<boolean | null>(null);
   const styles = makeStyles(colors);
   const controls = makeControlStyles(colors);
   const materialVisual = getMaterialChipColors(colors, material);
@@ -74,6 +75,7 @@ export default function ListingDetail() {
       const data = await fetchListing(token, String(id));
       setListing(data.listing);
       setQuote(data.quote);
+      hasFile.current = data.quote !== null;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load this listing');
     } finally {
@@ -89,8 +91,38 @@ export default function ListingDetail() {
     load();
   }, [authLoading, load]);
 
+  useEffect(() => {
+    if (loading || !listing || !token || id == null) return;
+    if (hasFile.current === false) return; // seeded listing, no file
+
+    const timeoutId = setTimeout(async () => {
+      setIsQuoting(true);
+      try {
+        const newQuote = await fetchCustomQuote(token, String(id), {
+          quality,
+          infillPercent: infill,
+          quantity: qty,
+          materialType: material,
+        });
+        setQuote(newQuote);
+      } catch (err) {
+        // failed to fetch custom quote
+      } finally {
+        setIsQuoting(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [qty, quality, infill, material, listing, token, id, loading]);
+
   const handlePay = async () => {
-    if (!token || !listing || !quote || paymentPhase !== 'idle') return;
+    if (!token || !listing || paymentPhase !== 'idle') return;
+
+    if (!quote) {
+      showToast('This listing does not have a 3D file attached and cannot be ordered.');
+      return;
+    }
+
     setPaymentError(null);
     setPaymentPhase('initiating');
     try {
@@ -171,7 +203,7 @@ export default function ListingDetail() {
   // quote total here (instead of the old listing.price × qty guess) so the
   // number on screen always matches what Paystack will actually charge,
   // since this is now wired to real payment.
-  const estimatedTotal = quote?.totalCost ?? listing.price;
+  const estimatedTotal = quote?.totalCost ?? (listing.price * qty);
 
   return (
     <View style={styles.screen}>
@@ -358,26 +390,27 @@ export default function ListingDetail() {
             })}
           </View>
 
-          <Text style={styles.fieldLabel}>Infill density</Text>
-          <View style={styles.infillRow}>
-            {INFILL_LEVELS.map(value => {
-              const selected = infill === value;
-              return (
-                <Pressable
-                  key={value}
-                  onPress={() => setInfill(value)}
-                  style={({ pressed }) => [
-                    styles.infillOption,
-                    selected && styles.infillOptionSelected,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.infillText, selected && styles.infillTextSelected]}>
-                    {value}%
-                  </Text>
-                </Pressable>
-              );
-            })}
+          <View style={styles.infillHeaderRow}>
+            <Text style={styles.fieldLabelNoMargin}>Infill density</Text>
+            <View style={styles.infillInputWrapper}>
+              <TextInput
+                style={styles.infillInput}
+                keyboardType="numeric"
+                value={infill === 0 ? '' : String(infill)}
+                onChangeText={(text) => {
+                  if (text === '') {
+                    setInfill(0);
+                    return;
+                  }
+                  const num = parseInt(text.replace(/[^0-9]/g, ''), 10);
+                  if (!isNaN(num)) {
+                    setInfill(Math.min(100, Math.max(0, num)));
+                  }
+                }}
+                maxLength={3}
+              />
+              <Text style={styles.infillPercentSign}>%</Text>
+            </View>
           </View>
 
           <View style={styles.quantitySection}>
@@ -447,7 +480,9 @@ export default function ListingDetail() {
             <View>
               <Text style={styles.totalLabel}>Total to pay</Text>
               <Text style={styles.totalHint}>
-                {quote ? 'Reflects this listing’s standard quoted configuration' : 'No quote available for this listing'}
+                {quote 
+                  ? 'Reflects selected print settings and quantity' 
+                  : 'Cannot order this listing (no 3D file attached)'}
               </Text>
             </View>
             <GhsAmount amount={estimatedTotal} size="xl" style={styles.totalAmount} />
@@ -462,19 +497,19 @@ export default function ListingDetail() {
 
         <Pressable
           accessibilityRole="button"
-          disabled={!quote || paymentPhase !== 'idle'}
+          disabled={isQuoting || paymentPhase !== 'idle'}
           style={({ pressed }) => [
             controls.primaryButton,
             styles.orderButton,
-            (!quote || paymentPhase !== 'idle') && styles.orderButtonDisabled,
-            pressed && quote && paymentPhase === 'idle' && controls.primaryButtonPressed,
+            (isQuoting || paymentPhase !== 'idle') && styles.orderButtonDisabled,
+            pressed && !isQuoting && paymentPhase === 'idle' && controls.primaryButtonPressed,
           ]}
           onPress={handlePay}
         >
           <Text style={controls.primaryButtonText}>
-            {paymentPhase === 'initiating' ? 'Starting payment...' : 'Pay Now'}
+            {paymentPhase === 'initiating' ? 'Starting payment...' : isQuoting ? 'Calculating...' : 'Pay Now'}
           </Text>
-          {paymentPhase === 'idle' ? (
+          {paymentPhase === 'idle' && !isQuoting ? (
             <Text style={styles.orderPrice}>• GH₵ {estimatedTotal.toFixed(2)}</Text>
           ) : null}
         </Pressable>
@@ -844,32 +879,35 @@ function makeStyles(colors: Colors) {
     qualityDetailSelected: {
       color: colors.primary,
     },
-    infillRow: {
+    infillHeaderRow: {
       flexDirection: 'row',
-      gap: 8,
+      justifyContent: 'space-between',
+      alignItems: 'center',
       marginBottom: designTokens.spacing.xl,
     },
-    infillOption: {
-      flex: 1,
-      minHeight: 42,
-      borderRadius: 12,
+    infillInputWrapper: {
+      flexDirection: 'row',
+      alignItems: 'center',
       borderWidth: 1,
       borderColor: colors.border,
+      borderRadius: designTokens.radius.md,
       backgroundColor: colors.inputBg,
-      alignItems: 'center',
-      justifyContent: 'center',
+      paddingHorizontal: 12,
+      height: 42,
     },
-    infillOptionSelected: {
-      borderColor: colors.primary,
-      backgroundColor: colors.primarySoft,
+    infillInput: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 14,
+      minWidth: 32,
+      textAlign: 'right',
+      padding: 0,
     },
-    infillText: {
+    infillPercentSign: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.heading,
-      fontSize: 12,
-    },
-    infillTextSelected: {
-      color: colors.primary,
+      fontSize: 14,
+      marginLeft: 4,
     },
     quantitySection: {
       flexDirection: 'row',

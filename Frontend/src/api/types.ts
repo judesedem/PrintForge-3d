@@ -8,6 +8,15 @@ export type UserDto = {
   full_name: string;
   email: string;
   role: Role;
+  profile_picture_url?: string;
+  suspended?: boolean;
+  is_premium?: boolean;
+};
+
+export type UpdateProfilePayload = {
+  fullName?: string;
+  email?: string;
+  profilePictureUrl?: string;
 };
 
 export type AuthResponse = {

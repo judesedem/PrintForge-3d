@@ -7,9 +7,12 @@ export type DesignRequest = {
   description: string;
   budget: number | null;
   deadline: string | null;
-  status: 'OPEN' | 'FULFILLED' | 'CANCELLED';
+  status: 'OPEN' | 'ACCEPTED' | 'FULFILLED' | 'CANCELLED';
   createdAt: string;
   userName: string;
+  designerId?: number;
+  designerName?: string;
+  fileId?: number;
 };
 
 type DesignRequestApiResponse = {
@@ -19,9 +22,12 @@ type DesignRequestApiResponse = {
   description: string | null;
   budget: number | null;
   deadline: string | null;
-  status: 'OPEN' | 'FULFILLED' | 'CANCELLED';
+  status: 'OPEN' | 'ACCEPTED' | 'FULFILLED' | 'CANCELLED';
   createdAt: string;
   userName: string | null;
+  designerId?: number | null;
+  designerName?: string | null;
+  fileId?: number | null;
 };
 
 function toDesignRequest(res: DesignRequestApiResponse): DesignRequest {
@@ -35,6 +41,9 @@ function toDesignRequest(res: DesignRequestApiResponse): DesignRequest {
     status: res.status,
     createdAt: res.createdAt,
     userName: res.userName ?? 'Unknown User',
+    designerId: res.designerId ?? undefined,
+    designerName: res.designerName ?? undefined,
+    fileId: res.fileId ?? undefined,
   };
 }
 
@@ -70,6 +79,33 @@ export async function updateDesignRequestStatus(
     method: 'PATCH',
     token,
     body: JSON.stringify({ status }),
+  });
+  return toDesignRequest(data);
+}
+
+export async function fetchAcceptedRequests(token: string): Promise<DesignRequest[]> {
+  const data = await apiFetch<DesignRequestApiResponse[]>('/api/design-requests/my-accepted-requests', { token });
+  return data.map(toDesignRequest);
+}
+
+export async function fetchMyRequests(token: string): Promise<DesignRequest[]> {
+  const data = await apiFetch<DesignRequestApiResponse[]>('/api/design-requests/my-requests', { token });
+  return data.map(toDesignRequest);
+}
+
+export async function acceptDesignRequest(token: string, id: string): Promise<DesignRequest> {
+  const data = await apiFetch<DesignRequestApiResponse>(`/api/design-requests/${id}/accept`, {
+    method: 'PATCH',
+    token,
+  });
+  return toDesignRequest(data);
+}
+
+export async function deliverDesignRequest(token: string, id: string, fileId: string): Promise<DesignRequest> {
+  const data = await apiFetch<DesignRequestApiResponse>(`/api/design-requests/${id}/deliver`, {
+    method: 'PATCH',
+    token,
+    body: JSON.stringify({ fileId }),
   });
   return toDesignRequest(data);
 }

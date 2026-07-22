@@ -12,13 +12,7 @@ import { useSession } from '@/SessionContext';
 
 const MENU_ITEMS = [
   { route: '/staff/dashboard',     label: 'Dashboard',     icon: LayoutDashboard },
-  { route: '/staff/users',         label: 'Users',         icon: Users },
   { route: '/staff/queue',         label: 'Print Queue',   icon: ClipboardList },
-  { route: '/staff/printers',      label: 'Fleet',         icon: Printer },
-  { route: '/staff/payments',      label: 'Payments',      icon: CreditCard },
-  { route: '/staff/marketplace',   label: 'Marketplace',   icon: ShoppingBag },
-  { route: '/staff/notifications', label: 'Notifications', icon: Bell },
-  { route: '/staff/settings',      label: 'Settings',      icon: Settings },
   { route: '/staff/board',         label: 'Queue Board',   icon: Columns3 },
 ] as const;
 
@@ -77,7 +71,10 @@ export default function DrawerContent(_props: any) {
       <View style={s.divider} />
 
       {/* Logout */}
-      <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.7}>
+      <TouchableOpacity style={s.logoutBtn} onPress={async () => {
+        await signOut();
+        router.replace('/(auth)/login');
+      }} activeOpacity={0.7}>
         <LogOut size={16} color="#f87171" />
         <Text style={s.logoutText}>Sign out</Text>
       </TouchableOpacity>

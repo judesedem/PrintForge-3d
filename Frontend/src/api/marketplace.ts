@@ -8,6 +8,9 @@ export type DesignListingApiResponse = {
   id: number;
   fileId: number | null;
   designerId: number;
+  designerName?: string;
+  designerAvatar?: string;
+  isPremiumDesigner?: boolean;
   title: string;
   description: string | null;
   basePrice: number;
@@ -17,6 +20,7 @@ export type DesignListingApiResponse = {
   publishedAt: string | null;
   totalOrders: number;
   totalEarnings: number;
+  category?: string;
 };
 
 /**
@@ -40,6 +44,10 @@ export type MarketplaceListing = {
   totalEarnings: number;
   createdAt: string;
   publishedAt: string | null;
+  designerName?: string;
+  designerAvatar?: string;
+  isPremiumDesigner?: boolean;
+  category?: string;
 };
 
 export function toListing(res: DesignListingApiResponse): MarketplaceListing {
@@ -54,13 +62,17 @@ export function toListing(res: DesignListingApiResponse): MarketplaceListing {
     totalEarnings: res.totalEarnings,
     createdAt: res.createdAt,
     publishedAt: res.publishedAt,
+    designerName: res.designerName,
+    designerAvatar: res.designerAvatar,
+    isPremiumDesigner: res.isPremiumDesigner,
+    category: res.category,
   };
 }
 
 /** Maps to GET /api/marketplace — public storefront, PUBLISHED listings only. */
 export async function fetchListings(token: string): Promise<MarketplaceListing[]> {
   const data = await apiFetch<{ content: DesignListingApiResponse[] }>('/api/marketplace', { token });
-  return data.content.map(toListing);
+  console.log("MARKETPLACE FETCH:", data.content.map(l => l.title)); return data.content.map(toListing);
 }
 
 // Mirrors estimateservice/model/Estimate.java's JSON output — same no-DTO
@@ -105,6 +117,37 @@ export async function fetchListing(
   };
 }
 
+/**
+ * Maps to GET /api/marketplace/{id}/quote. Fetches a new auto-generated
+ * quote with custom parameters (quantity, quality, infill, material).
+ */
+export async function fetchCustomQuote(
+  token: string,
+  id: string,
+  params: {
+    quality: string;
+    infillPercent: number;
+    quantity: number;
+    materialType: string;
+  }
+): Promise<Quote> {
+  const query = new URLSearchParams({
+    quality: params.quality,
+    infillPercent: String(params.infillPercent),
+    quantity: String(params.quantity),
+    materialType: params.materialType,
+  }).toString();
+
+  const data = await apiFetch<EstimateApiResponse>(`/api/marketplace/${id}/quote?${query}`, {
+    token,
+  });
+
+  return {
+    estimateId: String(data.id),
+    totalCost: data.totalCost ?? 0,
+  };
+}
+
 /** Maps to GET /api/marketplace/my-listings. DESIGNER-only on the backend (403 otherwise). */
 export async function fetchMyListings(token: string): Promise<MarketplaceListing[]> {
   const data = await apiFetch<DesignListingApiResponse[]>('/api/marketplace/my-listings', { token });
@@ -132,6 +175,7 @@ export async function createListing(
     description?: string;
     basePrice: number;
     thumbnail?: { uri: string; name: string; type: string };
+    ownershipAttested: boolean;
   }
 ): Promise<MarketplaceListing> {
   const form = new FormData();
@@ -139,6 +183,7 @@ export async function createListing(
   form.append('title', payload.title);
   if (payload.description) form.append('description', payload.description);
   form.append('base_price', String(payload.basePrice));
+  form.append('ownership_attested', String(payload.ownershipAttested));
   if (payload.thumbnail) {
     form.append('thumbnail', payload.thumbnail as unknown as Blob);
   }
@@ -155,4 +200,22 @@ export async function createListing(
 /** Maps to DELETE /api/marketplace/{id}. Backend only allows deleting DRAFT listings with no orders. */
 export function deleteListing(token: string, id: string): Promise<void> {
   return apiFetch<void>(`/api/marketplace/${id}`, { method: 'DELETE', token });
+}
+
+/** Maps to PATCH /api/marketplace/{id}/publish. Transitions DRAFT → PUBLISHED. DESIGNER only. */
+export async function publishListing(token: string, id: string): Promise<MarketplaceListing> {
+  const data = await apiFetch<DesignListingApiResponse>(`/api/marketplace/${id}/publish`, {
+    method: 'PATCH',
+    token,
+  });
+  return toListing(data);
+}
+
+/** Maps to PATCH /api/marketplace/{id}/unpublish. Transitions PUBLISHED → DRAFT. DESIGNER only. */
+export async function unpublishListing(token: string, id: string): Promise<MarketplaceListing> {
+  const data = await apiFetch<DesignListingApiResponse>(`/api/marketplace/${id}/unpublish`, {
+    method: 'PATCH',
+    token,
+  });
+  return toListing(data);
 }

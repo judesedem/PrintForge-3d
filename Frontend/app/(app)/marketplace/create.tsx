@@ -54,20 +54,22 @@ export default function CreateListingScreen() {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [basePrice, setBasePrice] = useState('');
+  const [ownershipAttested, setOwnershipAttested] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [phase, setPhase] = useState<SubmitPhase>('idle');
 
   const numericBasePrice = Number.parseFloat(basePrice || '0');
-  const isReady = Boolean(modelFile && title.trim() && numericBasePrice > 0);
+  const isReady = Boolean(modelFile && title.trim() && numericBasePrice > 0 && ownershipAttested);
 
   const completionItems = useMemo(
     () => [
       { label: 'Printable model attached', complete: Boolean(modelFile) },
       { label: 'Listing title added', complete: Boolean(title.trim()) },
       { label: 'Designer base price set', complete: numericBasePrice > 0 },
+      { label: 'Ownership rights confirmed', complete: ownershipAttested },
       { label: 'Storefront thumbnail added', complete: Boolean(thumbnail), optional: true },
     ],
-    [modelFile, numericBasePrice, thumbnail, title],
+    [modelFile, numericBasePrice, thumbnail, title, ownershipAttested],
   );
 
   const pickModel = async () => {
@@ -121,6 +123,7 @@ export default function CreateListingScreen() {
         title: title.trim(),
         description: description.trim() || undefined,
         basePrice: numericBasePrice,
+        ownershipAttested,
         thumbnail: thumbnail
           ? { uri: thumbnail.uri, name: thumbnail.name, type: thumbnail.mimeType ?? 'image/jpeg' }
           : undefined,
@@ -412,6 +415,35 @@ export default function CreateListingScreen() {
             )}
           </Pressable>
 
+          <View style={s.sectionHeading}>
+            <View style={s.sectionIcon}>
+              <ShieldCheck size={18} color={colors.primary} />
+            </View>
+            <View style={s.sectionHeadingCopy}>
+              <Text style={s.sectionTitle}>Ownership & Rights</Text>
+              <Text style={s.sectionSubtitle}>Required · Confirm your authority to sell this</Text>
+            </View>
+          </View>
+
+          <Card style={s.formCard}>
+            <Pressable
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: ownershipAttested }}
+              onPress={() => setOwnershipAttested(!ownershipAttested)}
+              style={({ pressed }) => [s.checkboxRow, pressed && s.pressed]}
+            >
+              <View style={[s.checkbox, ownershipAttested && s.checkboxChecked]}>
+                {ownershipAttested && <Check size={14} color={colors.onPrimary} strokeWidth={3} />}
+              </View>
+              <View style={s.checkboxCopy}>
+                <Text style={s.checkboxLabel}>I confirm I own the rights to this design</Text>
+                <Text style={s.checkboxHint}>
+                  You must be the original creator or have explicit commercial distribution rights.
+                </Text>
+              </View>
+            </Pressable>
+          </Card>
+
           <Card style={s.readinessCard}>
             <View style={s.readinessHeader}>
               <View>
@@ -420,7 +452,7 @@ export default function CreateListingScreen() {
               </View>
               <View style={[s.readinessScore, isReady && s.readinessScoreComplete]}>
                 <Text style={[s.readinessScoreText, isReady && s.readinessScoreTextComplete]}>
-                  {completionItems.filter(item => item.complete).length}/4
+                  {completionItems.filter(item => item.complete).length}/{completionItems.length}
                 </Text>
               </View>
             </View>
@@ -819,6 +851,41 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.body,
       fontSize: 10,
       paddingRight: 13,
+    },
+    checkboxRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    checkbox: {
+      width: 22,
+      height: 22,
+      borderRadius: 7,
+      borderWidth: 1.5,
+      borderColor: colors.border,
+      backgroundColor: colors.inputBg,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginTop: 2,
+    },
+    checkboxChecked: {
+      backgroundColor: colors.primary,
+      borderColor: colors.primary,
+    },
+    checkboxCopy: {
+      flex: 1,
+    },
+    checkboxLabel: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.medium,
+      fontSize: 12,
+    },
+    checkboxHint: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 10,
+      lineHeight: 15,
+      marginTop: 2,
     },
     thumbnailCard: {
       minHeight: 116,

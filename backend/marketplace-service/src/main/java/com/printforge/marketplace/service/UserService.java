@@ -139,17 +139,19 @@ public class UserService {
             if (designer != null) {
                 listing.setDesignerName(designer.getFullName());
                 listing.setDesignerAvatar(designer.getProfilePictureUrl());
+                listing.setIsPremiumDesigner(designer.isPremium());
             }
         }
     }
 
-    private UserDto toUserDto(User user) {
+    public UserDto toUserDto(User user) {
         return UserDto.builder()
                 .user_id(user.getUserId())
                 .full_name(user.getFullName())
                 .email(user.getEmail())
                 .role(user.getRole().name().toLowerCase())
                 .profile_picture_url(user.getProfilePictureUrl())
+                .is_premium(user.isPremium())
                 .build();
     }
 }

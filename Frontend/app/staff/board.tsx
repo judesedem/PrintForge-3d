@@ -28,7 +28,6 @@ const openDrawer = (nav: any) => nav.dispatch({ type: 'OPEN_DRAWER' });
 import { T } from '@/constants/theme';
 import {
   BOARD_COLUMNS,
-  INITIAL_BOARD_JOBS,
   BOARD_PRINTERS,
   LOCATION_MAP,
   type BoardJob,
@@ -40,6 +39,11 @@ import { PrinterPill } from '@/components/board/BoardChips';
 import { ApproveModal } from '@/components/board/ApproveModal';
 import { RejectModal } from '@/components/board/RejectModal';
 import { BoardToast } from '@/components/board/BoardToast';
+
+import { useSession } from '@/SessionContext';
+import { useJobs } from '@/JobsContext';
+import { approveJob, rejectJob, updateJobStatus } from '@/api/jobs';
+
 
 const HEADER_H   = 52;
 const COLUMN_GAP = 12;
@@ -61,7 +65,27 @@ export default function BoardScreen() {
   const insets      = useSafeAreaInsets();
   const navigation  = useNavigation();
 
-  const [jobs,       setJobs]       = useState<BoardJob[]>(INITIAL_BOARD_JOBS);
+  const { token } = useSession();
+  const { jobs: rawJobs, refetch: refetchJobs } = useJobs();
+
+  const jobs: BoardJob[] = rawJobs.map(j => ({
+    id: j.id,
+    user: j.student,
+    email: j.student + '@example.com',
+    file: j.title,
+    material: j.material,
+    quality: j.quality,
+    infill: 20,
+    color: '#3B82F6',
+    qty: j.qty,
+    status: (j.status as any),
+    submitted: j.submittedAt || '',
+    cost: j.cost,
+    notes: j.notes || '',
+    assignedPrinter: j.printer || undefined,
+    pickupLocation: j.location || undefined,
+  }));
+
   const [modal,      setModal]      = useState<ModalState>(null);
   const [toast,      setToast]      = useState<ToastState>({ visible: false, message: '', jobId: '' });
   const [refreshing, setRefreshing] = useState(false);
@@ -88,7 +112,8 @@ export default function BoardScreen() {
     setModal({ type: 'reject', job });
   }, []);
 
-  const handleAdvance = useCallback((job: BoardJob, to: JobStatus) => {
+  const handleAdvance = useCallback(async (job: BoardJob, to: JobStatus) => {
+    if (!token) return;
     const labels: Record<JobStatus, string> = {
       SUBMITTED: 'Submitted',
       APPROVED:  'Approved',
@@ -96,51 +121,46 @@ export default function BoardScreen() {
       READY:     'Ready for Pickup',
       COLLECTED: 'Collected',
     };
-    setJobs(prev =>
-      prev.map(j => {
-        if (j.id !== job.id) return j;
-        return {
-          ...j,
-          status: to,
-          pickupLocation:
-            to === 'READY'
-              ? j.assignedPrinter
-                ? (LOCATION_MAP[j.assignedPrinter] ?? 'Design Studio')
-                : 'Design Studio'
-              : j.pickupLocation,
-        };
-      })
-    );
-    showToast(`Moved to ${labels[to]}`, job.id);
-  }, [showToast]);
+    try {
+      await updateJobStatus(token, job.id, to as any);
+      showToast(`Moved to ${labels[to]}`, job.id);
+      await refetchJobs();
+    } catch (e) {
+      showToast(`Failed to advance job`, job.id);
+    }
+  }, [token, refetchJobs, showToast]);
 
-  const confirmApprove = useCallback((printerName: string) => {
-    if (!modal || modal.type !== 'approve') return;
+  const confirmApprove = useCallback(async (printerName: string) => {
+    if (!modal || modal.type !== 'approve' || !token) return;
     const job = modal.job;
-    setJobs(prev =>
-      prev.map(j =>
-        j.id !== job.id
-          ? j
-          : { ...j, status: 'APPROVED', assignedPrinter: printerName || undefined }
-      )
-    );
     setModal(null);
-    showToast('Job approved', job.id);
-  }, [modal, showToast]);
+    try {
+      await approveJob(token, job.id, { printerId: printerName || undefined });
+      showToast('Job approved', job.id);
+      await refetchJobs();
+    } catch (e) {
+      showToast('Failed to approve job', job.id);
+    }
+  }, [modal, token, refetchJobs, showToast]);
 
-  const confirmReject = useCallback((_reason: string) => {
-    if (!modal || modal.type !== 'reject') return;
+  const confirmReject = useCallback(async (reason: string) => {
+    if (!modal || modal.type !== 'reject' || !token) return;
     const job = modal.job;
-    setJobs(prev => prev.filter(j => j.id !== job.id));
     setModal(null);
-    showToast('Job rejected', job.id);
-  }, [modal, showToast]);
+    try {
+      await rejectJob(token, job.id, reason);
+      showToast('Job rejected', job.id);
+      await refetchJobs();
+    } catch (e) {
+      showToast('Failed to reject job', job.id);
+    }
+  }, [modal, token, refetchJobs, showToast]);
 
-  const handleRefresh = useCallback(() => {
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    // TODO: refetch from GET /api/print-jobs/queue
-    setTimeout(() => setRefreshing(false), 900);
-  }, []);
+    await refetchJobs();
+    setRefreshing(false);
+  }, [refetchJobs]);
 
   // ── Layout ────────────────────────────────────────────────────────────────
 

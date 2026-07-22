@@ -90,7 +90,7 @@ export default function RegisterScreen() {
       return;
     }
     if (!email.trim()) {
-      setError('Enter your university email.');
+      setError('Enter your email.');
       return;
     }
     if (password.length < 6) {
@@ -182,7 +182,7 @@ export default function RegisterScreen() {
                   autoCapitalize="none"
                   autoComplete="email"
                   keyboardType="email-address"
-                  placeholder="University email"
+                  placeholder="Email"
                   placeholderTextColor={CARD_MUTED}
                   style={s.input}
                   value={email}

@@ -1,4 +1,4 @@
-package com.printforge.auth.security;
+package com.printforge.admin.security;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -15,27 +15,24 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 @EnableMethodSecurity
 public class SecurityConfig {
 
-    private final JwtAuthFilter jwtAuthFilter;
-    private final JwtAuthEntryPoint authEntryPoint;
+    private final HeaderAuthFilter headerAuthFilter;
 
-    public SecurityConfig(JwtAuthFilter jwtAuthFilter, JwtAuthEntryPoint authEntryPoint) {
-        this.jwtAuthFilter = jwtAuthFilter;
-        this.authEntryPoint = authEntryPoint;
+    public SecurityConfig(HeaderAuthFilter headerAuthFilter) {
+        this.headerAuthFilter = headerAuthFilter;
     }
 
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
             .csrf(AbstractHttpConfigurer::disable)
-            .exceptionHandling(exception -> exception.authenticationEntryPoint(authEntryPoint))
-            .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/api/auth/**").permitAll()
                 .anyRequest().authenticated()
             )
-            .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
+            .sessionManagement(session -> session
+                .sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+            )
+            .addFilterBefore(headerAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
     }
-
 }

@@ -35,6 +35,7 @@ type SessionContextType = {
   /** Email/password registration — throws ApiError on failure (e.g. duplicate email). */
   register: (payload: RegisterPayload) => Promise<UserDto>;
   signOut: () => Promise<void>;
+  updateUser: (user: UserDto) => void;
 };
 
 const SessionContext = createContext<SessionContextType>({
@@ -51,6 +52,7 @@ const SessionContext = createContext<SessionContextType>({
     throw new Error('SessionProvider not mounted');
   },
   signOut: async () => {},
+  updateUser: () => {},
 });
 
 // token/appUser/authLoading live in ONE state object so a consumer can
@@ -192,6 +194,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setFirebaseUser(null);
   };
 
+  const updateUser = (user: UserDto) => {
+    setSession(prev => ({ ...prev, appUser: user }));
+  };
+
   return (
     <SessionContext.Provider
       value={{
@@ -204,6 +210,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         login,
         register,
         signOut,
+        updateUser,
       }}
     >
       {children}

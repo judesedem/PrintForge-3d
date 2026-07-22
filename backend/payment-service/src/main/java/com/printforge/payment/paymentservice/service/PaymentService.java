@@ -1,5 +1,7 @@
 package com.printforge.payment.paymentservice.service;
 
+import com.printforge.payment.marketplaceservice.repository.DesignRequestRepository;
+import com.printforge.payment.marketplaceservice.model.DesignRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.printforge.payment.estimateservice.model.Estimate;
@@ -14,6 +16,8 @@ import com.printforge.payment.paymentservice.repository.PaymentRepository;
 import com.printforge.payment.notificationservice.service.NotificationService;
 import com.printforge.payment.queueservice.model.PrintJob;
 import com.printforge.payment.queueservice.repository.PrintJobRepository;
+import com.printforge.payment.repository.UserRepository;
+import com.printforge.payment.entity.User;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
@@ -45,8 +49,10 @@ public class PaymentService {
     private final PaymentRepository paymentRepository;
     private final EstimateRepository estimateRepository;
     private final DesignListingRepository listingRepository;
+    private final DesignRequestRepository requestRepository;
     private final PrintJobRepository printJobRepository;
     private final NotificationService notificationService;
+    private final UserRepository userRepository;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -56,13 +62,17 @@ public class PaymentService {
     public PaymentService(PaymentRepository paymentRepository,
                           EstimateRepository estimateRepository,
                           DesignListingRepository listingRepository,
+                          DesignRequestRepository requestRepository,
                           PrintJobRepository printJobRepository,
-                          NotificationService notificationService) {
+                          NotificationService notificationService,
+                          UserRepository userRepository) {
         this.paymentRepository  = paymentRepository;
         this.estimateRepository = estimateRepository;
         this.listingRepository  = listingRepository;
+        this.requestRepository = requestRepository;
         this.printJobRepository = printJobRepository;
         this.notificationService = notificationService;
+        this.userRepository = userRepository;
         // Connect timeout only bounds establishing the TCP/TLS connection —
         // it does not bound waiting for a response once connected, which is
         // why each individual HttpRequest below also sets its own .timeout().
@@ -88,42 +98,56 @@ public class PaymentService {
      * handleWebhook() later copies them onto the PrintJob it creates. They
      * play no part in the charge amount.
      */
-    public Payment initiatePayment(Long estimateId, Long listingId, Long userId, String userEmail,
-                                    String color, String notes) {
+    public Payment initiatePayment(Long estimateId, Long listingId, Long requestId, Long userId, String userEmail,
+                                    String color, String notes, Boolean isPremiumUpgrade) {
 
-        Estimate estimate = estimateRepository.findById(estimateId)
-                .orElseThrow(() -> new EstimateNotFoundException(estimateId));
+        double totalCost = 0.0;
 
-        // Tapping Pay Now twice quickly used to create two separate PENDING
-        // Payment rows (each with its own Paystack reference) for the same
-        // estimate — the webhook's idempotency guard above only protects
-        // against Paystack retrying one already-known reference, not two
-        // distinct PENDING rows. A COMPLETED payment doesn't block a new
-        // one: that's a legitimate retry/re-order case, e.g. after a first
-        // order's job is done and the user wants another.
-        paymentRepository.findByEstimateIdAndStatus(estimateId, "PENDING")
-                .ifPresent(existing -> {
-                    throw new DuplicatePaymentException(
-                            "A pending payment already exists for this estimate. " +
-                                    "Complete or cancel it before initiating a new one.");
-                });
+        if (Boolean.TRUE.equals(isPremiumUpgrade)) {
+            paymentRepository.findByUserIdAndStatus(userId, "PENDING").stream()
+                    .filter(p -> Boolean.TRUE.equals(p.getIsPremiumUpgrade()))
+                    .findFirst()
+                    .ifPresent(existing -> {
+                        throw new DuplicatePaymentException(
+                                "A pending payment already exists for your premium upgrade. " +
+                                        "Complete or cancel it before initiating a new one.");
+                    });
+            totalCost = 100.0; // Fixed cost for Premium Upgrade
+        } else if (requestId != null) {
+            DesignRequest request = requestRepository.findById(requestId)
+                    .orElseThrow(() -> new IllegalArgumentException("Design Request not found: " + requestId));
+            
+            if (!request.getUserId().equals(userId)) {
+                throw new AccessDeniedException("You can only pay for your own design requests");
+            }
 
-        // Previously any authenticated user could pay for someone else's
-        // estimate just by guessing/incrementing the id — nothing checked
-        // that the estimate actually belonged to the caller.
-        if (!estimate.getUserId().equals(userId)) {
-            throw new AccessDeniedException("You can only pay for your own estimates");
-        }
+            paymentRepository.findByRequestIdAndStatus(requestId, "PENDING")
+                    .ifPresent(existing -> {
+                        throw new DuplicatePaymentException(
+                                "A pending payment already exists for this request. " +
+                                        "Complete or cancel it before initiating a new one.");
+                    });
+            
+            totalCost = request.getBudget() != null ? request.getBudget().doubleValue() : 0.0;
+        } else {
+            Estimate estimate = estimateRepository.findById(estimateId)
+                    .orElseThrow(() -> new EstimateNotFoundException(estimateId));
 
-        // Total = machine+material cost from estimate + designer's base_price
-        // (if marketplace). Uses the basePrice snapshotted onto the Estimate
-        // at quote time (EstimateService.calculateAndSaveEstimate()'s
-        // listingId overload) rather than re-reading DesignListing.basePrice
-        // live here — a designer changing the price between quote and
-        // payment must not change what the student is actually charged.
-        double totalCost = estimate.getTotalCost();
-        if (estimate.getLockedBasePrice() != null) {
-            totalCost = totalCost + estimate.getLockedBasePrice().doubleValue();
+            paymentRepository.findByEstimateIdAndStatus(estimateId, "PENDING")
+                    .ifPresent(existing -> {
+                        throw new DuplicatePaymentException(
+                                "A pending payment already exists for this estimate. " +
+                                        "Complete or cancel it before initiating a new one.");
+                    });
+
+            if (!estimate.getUserId().equals(userId)) {
+                throw new AccessDeniedException("You can only pay for your own estimates");
+            }
+
+            totalCost = estimate.getTotalCost();
+            if (estimate.getLockedBasePrice() != null) {
+                totalCost = totalCost + estimate.getLockedBasePrice().doubleValue();
+            }
         }
 
         // Paystack expects amount in the smallest currency unit (pesewas for GHS)
@@ -139,6 +163,8 @@ public class PaymentService {
         payment.setUserId(userId);
         payment.setEstimateId(estimateId);
         payment.setListingId(listingId);
+        payment.setRequestId(requestId);
+        payment.setIsPremiumUpgrade(Boolean.TRUE.equals(isPremiumUpgrade));
         payment.setAmount(BigDecimal.valueOf(totalCost));
         payment.setPaystackReference(reference);
         payment.setCheckoutUrl(checkoutUrl);
@@ -208,10 +234,48 @@ public class PaymentService {
     }
 
     private Payment fulfillPayment(Payment payment) {
-        if ("COMPLETED".equals(payment.getStatus())) return payment;
-
         payment.setStatus("COMPLETED");
         payment.setCompletedAt(LocalDateTime.now());
+        
+        if (Boolean.TRUE.equals(payment.getIsPremiumUpgrade())) {
+            User user = userRepository.findById(payment.getUserId())
+                    .orElseThrow(() -> new IllegalArgumentException("User not found: " + payment.getUserId()));
+            user.setPremium(true);
+            userRepository.save(user);
+            log.info("User {} upgraded to premium via payment {}", user.getUserId(), payment.getId());
+            return paymentRepository.save(payment);
+        }
+
+        if (payment.getRequestId() != null) {
+            DesignRequest request = requestRepository.findById(payment.getRequestId())
+                    .orElseThrow(() -> new IllegalArgumentException("Design request not found"));
+            
+            // Deduct 15% platform commission
+            BigDecimal budget = payment.getAmount();
+            BigDecimal platformFee = budget.multiply(new BigDecimal("0.15"));
+            BigDecimal designerEarning = budget.subtract(platformFee);
+
+            // Here we would normally add the earnings to the designer.
+            // But since User/DesignRequest doesn't have a totalEarnings field yet,
+            // we will just save the payment as completed. The designer's lifetime
+            // earnings for requests might be queried dynamically from Payments if needed.
+            
+            Payment savedPayment = paymentRepository.save(payment);
+            
+            notificationService.createNotification(
+                    payment.getUserId(),
+                    "Payment Confirmed",
+                    "Your payment for the design request was successful.",
+                    "success");
+
+            notificationService.createNotification(
+                    request.getDesignerId(),
+                    "Request Paid",
+                    "The student has paid for your design request. You earned GH₵ " + designerEarning.setScale(2, java.math.RoundingMode.HALF_UP),
+                    "success");
+                    
+            return savedPayment;
+        }
 
         Estimate linkedEstimate = estimateRepository.findById(payment.getEstimateId())
                 .orElseThrow(() -> new EstimateNotFoundException(payment.getEstimateId()));
@@ -242,8 +306,13 @@ public class PaymentService {
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
-                BigDecimal designerEarning = listing.getBasePrice() != null
+                BigDecimal basePrice = listing.getBasePrice() != null
                         ? listing.getBasePrice() : BigDecimal.ZERO;
+                
+                // Deduct 15% platform commission
+                BigDecimal platformFee = basePrice.multiply(new BigDecimal("0.15"));
+                BigDecimal designerEarning = basePrice.subtract(platformFee);
+                
                 BigDecimal prev = listing.getTotalEarnings() != null
                         ? listing.getTotalEarnings() : BigDecimal.ZERO;
                 listing.setTotalEarnings(prev.add(designerEarning));
