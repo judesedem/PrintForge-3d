@@ -71,3 +71,16 @@ export function createUser(token: string, payload: AdminCreateUserPayload): Prom
     body: payload,
   });
 }
+
+export type AdminUserDto = {
+  user_id: number;
+  full_name: string;
+  email: string;
+  role: string;
+  profile_picture_url: string | null;
+  suspended: boolean;
+};
+
+export function fetchUsers(token: string): Promise<AdminUserDto[]> {
+  return apiFetch<AdminUserDto[]>('/api/admin/users', { token });
+}

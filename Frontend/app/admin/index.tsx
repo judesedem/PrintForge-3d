@@ -3,7 +3,10 @@ import { useCallback, useEffect, useState } from 'react';
 import { useTheme } from '../../src/ThemeContext';
 import { useSession } from '../../src/SessionContext';
 import { designTokens, Colors } from '../../src/theme';
-import { fetchAdminDashboard, AdminDashboard } from '../../src/api/admin';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { fetchAdminDashboard, AdminDashboard, fetchUsers, AdminUserDto } from '../../src/api/admin';
+import { Briefcase, Printer, Clock, DollarSign, LogOut } from 'lucide-react-native';
 import MonoText from '../../src/components/MonoText';
 
 const tabs = ['Users', 'Printers', 'Earnings', 'Logs'] as const;
@@ -11,10 +14,13 @@ const tabs = ['Users', 'Printers', 'Earnings', 'Logs'] as const;
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<'Users' | 'Printers' | 'Earnings' | 'Logs'>('Users');
   const { colors } = useTheme();
-  const { token, authLoading } = useSession();
-  const s = makeStyles(colors);
+  const { token, authLoading, signOut } = useSession();
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const s = makeStyles(colors, insets);
 
   const [dashboard, setDashboard] = useState<AdminDashboard | null>(null);
+  const [users, setUsers] = useState<AdminUserDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -26,8 +32,12 @@ export default function AdminPanel() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchAdminDashboard(token);
-      setDashboard(data);
+      const [dashData, usersData] = await Promise.all([
+        fetchAdminDashboard(token),
+        fetchUsers(token)
+      ]);
+      setDashboard(dashData);
+      setUsers(usersData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load the admin dashboard');
     } finally {
@@ -66,25 +76,57 @@ export default function AdminPanel() {
   return (
     <View style={s.screen}>
       <View style={s.header}>
-        <Text style={s.title}>Admin Panel</Text>
+        <View style={s.titleRow}>
+          <Text style={s.title}>Admin Panel</Text>
+          <Pressable 
+            onPress={async () => {
+              await signOut();
+              router.replace('/(auth)/login');
+            }} 
+            style={({ pressed }) => [s.logoutButton, pressed && s.pressed]}
+          >
+            <LogOut size={16} color={colors.destructive ?? '#ff4444'} style={{ marginRight: 6 }} />
+            <Text style={s.logoutText}>Logout</Text>
+          </Pressable>
+        </View>
         <Text style={s.subtitle}>Overview of users, printers, and platform activity.</Text>
       </View>
       <View style={s.statsRow}>
         <View style={s.statCard}>
-          <Text style={s.statLabel}>Total Jobs</Text>
-          <Text style={s.statValue}>{dashboard.totalJobs}</Text>
+          <View style={s.statIconWrapper}>
+            <Briefcase size={20} color={colors.primary} />
+          </View>
+          <View>
+            <Text style={s.statLabel}>Total Jobs</Text>
+            <Text style={s.statValue}>{dashboard.totalJobs}</Text>
+          </View>
         </View>
         <View style={s.statCard}>
-          <Text style={s.statLabel}>Total Printers</Text>
-          <Text style={s.statValue}>{dashboard.totalPrinters}</Text>
+          <View style={[s.statIconWrapper, { backgroundColor: 'rgba(59, 130, 246, 0.15)' }]}>
+            <Printer size={20} color="#3b82f6" />
+          </View>
+          <View>
+            <Text style={s.statLabel}>Total Printers</Text>
+            <Text style={s.statValue}>{dashboard.totalPrinters}</Text>
+          </View>
         </View>
         <View style={s.statCard}>
-          <Text style={s.statLabel}>Awaiting Review</Text>
-          <Text style={s.statValue}>{submittedJobs}</Text>
+          <View style={[s.statIconWrapper, { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+            <Clock size={20} color="#f59e0b" />
+          </View>
+          <View>
+            <Text style={s.statLabel}>Awaiting Review</Text>
+            <Text style={s.statValue}>{submittedJobs}</Text>
+          </View>
         </View>
         <View style={s.statCard}>
-          <Text style={s.statLabel}>Owed to Designers</Text>
-          <Text style={s.statValue}>GH₵ {totalOwed.toFixed(0)}</Text>
+          <View style={[s.statIconWrapper, { backgroundColor: 'rgba(16, 185, 129, 0.15)' }]}>
+            <DollarSign size={20} color="#10b981" />
+          </View>
+          <View>
+            <Text style={s.statLabel}>Owed to Designers</Text>
+            <Text style={s.statValue}>GH₵ {totalOwed.toFixed(0)}</Text>
+          </View>
         </View>
       </View>
       <View style={s.tabRow}>
@@ -100,15 +142,25 @@ export default function AdminPanel() {
       </View>
 
       {activeTab === 'Users' ? (
-        // The backend has no user-listing endpoint (only POST /api/admin/users
-        // to create one) — nothing honest to show here yet.
-        <View style={s.emptyState}>
-          <Text style={s.sectionTitle}>User directory not available yet</Text>
-          <Text style={s.smallText}>
-            The backend doesn't expose a user-listing endpoint yet — only account creation
-            (POST /api/admin/users). This tab will list real accounts once that exists.
-          </Text>
-        </View>
+        <FlatList
+          data={users}
+          keyExtractor={u => u.user_id.toString()}
+          ListEmptyComponent={
+            <View style={s.emptyState}>
+              <Text style={s.sectionTitle}>No users found</Text>
+              <Text style={s.smallText}>Users will appear here once they register.</Text>
+            </View>
+          }
+          renderItem={({ item }) => (
+            <View style={s.row}>
+              <View style={s.rowContent}>
+                <Text style={s.rowTitle}>{item.full_name || 'No Name'}</Text>
+                <Text style={s.smallText}>{item.email}</Text>
+              </View>
+              <Text style={s.rowTag}>{item.role}</Text>
+            </View>
+          )}
+        />
       ) : activeTab === 'Printers' ? (
         <FlatList
           data={printerStatusRows}
@@ -157,9 +209,9 @@ export default function AdminPanel() {
   );
 }
 
-function makeStyles(colors: Colors) {
+function makeStyles(colors: Colors, insets: { top: number; bottom: number }) {
   return StyleSheet.create({
-    screen: { flex: 1, padding: 16, backgroundColor: colors.background },
+    screen: { flex: 1, padding: 16, paddingTop: Math.max(16, insets.top + 16), backgroundColor: colors.background },
     centered: { alignItems: 'center', justifyContent: 'center' },
     stateText: {
       color: colors.mutedFg,
@@ -180,26 +232,51 @@ function makeStyles(colors: Colors) {
     retryText: { color: colors.primary, fontFamily: designTokens.type.heading, fontSize: 13 },
     pressed: { opacity: 0.72 },
     header: { marginBottom: 18 },
+    titleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
     title: {
       fontSize: 28,
       fontFamily: designTokens.type.heading,
-      marginBottom: 6,
       color: colors.foreground,
     },
+    logoutButton: { 
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 8, 
+      paddingHorizontal: 14, 
+      backgroundColor: 'rgba(255, 68, 68, 0.1)', 
+      borderRadius: 12, 
+      borderWidth: 1, 
+      borderColor: 'rgba(255, 68, 68, 0.2)' 
+    },
+    logoutText: { color: colors.destructive ?? '#ff4444', fontFamily: designTokens.type.heading, fontSize: 13 },
     subtitle: { color: colors.mutedFg, fontFamily: designTokens.type.body },
-    statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 18 },
+    statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 24 },
     statCard: {
-      borderRadius: 16,
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 20,
       borderWidth: 1,
       padding: 16,
       width: '48%',
       backgroundColor: colors.card,
       borderColor: colors.border,
-      borderLeftWidth: 3,
-      borderLeftColor: colors.primary,
+      shadowColor: '#000',
+      shadowOffset: { width: 0, height: 4 },
+      shadowOpacity: 0.05,
+      shadowRadius: 12,
+      elevation: 2,
     },
-    statLabel: { color: colors.mutedFg, fontFamily: designTokens.type.body, marginBottom: 6 },
-    statValue: { fontSize: 20, fontFamily: designTokens.type.heading, color: colors.foreground },
+    statIconWrapper: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      backgroundColor: colors.primary + '20',
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    statLabel: { color: colors.mutedFg, fontFamily: designTokens.type.body, fontSize: 12, marginBottom: 2 },
+    statValue: { fontSize: 22, fontFamily: designTokens.type.heading, color: colors.foreground },
     tabRow: { flexDirection: 'row', gap: 12, marginBottom: 18 },
     tabItem: {
       paddingVertical: 12,

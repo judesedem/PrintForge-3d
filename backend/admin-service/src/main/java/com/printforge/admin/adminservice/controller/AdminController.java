@@ -78,4 +78,18 @@ public class AdminController {
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 
+    @GetMapping("/users")
+    public ResponseEntity<java.util.List<UserDto>> getUsers() {
+        return ResponseEntity.ok(userRepository.findAll().stream()
+                .map(user -> UserDto.builder()
+                        .user_id(user.getUserId())
+                        .full_name(user.getFullName())
+                        .email(user.getEmail())
+                        .role(user.getRole().name())
+                        .profile_picture_url(user.getProfilePictureUrl())
+                        .suspended(user.getSuspended())
+                        .build())
+                .toList());
+    }
+
 }
