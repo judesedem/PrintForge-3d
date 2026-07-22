@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   Bell,
@@ -23,6 +23,7 @@ import GhsAmount from '@/components/GhsAmount';
 import SectionHeader from '@/components/SectionHeader';
 import { useSwipeTabs } from '@/SwipeTabsContext';
 import { useSession } from '@/SessionContext';
+import { fetchDesignRequests, DesignRequest } from '@/api/design-requests';
 
 type DesignerListingView = Listing & {
   marketplaceStatus: 'PUBLISHED' | 'DRAFT';
@@ -51,6 +52,14 @@ export default function DesignerDashboard() {
   const s = makeStyles(colors);
   const controls = makeControlStyles(colors);
   const [activeTab, setActiveTab] = useState(dashboardTabs[0]);
+  const [requests, setRequests] = useState<DesignRequest[]>([]);
+  const { token } = useSession();
+
+  useEffect(() => {
+    if (token) {
+      fetchDesignRequests(token).then(setRequests).catch(console.error);
+    }
+  }, [token]);
 
   const designerName = firebaseUser?.displayName || 'Aero Designs';
   const designerEmail = firebaseUser?.email || 'designer@printforge.edu';
@@ -253,6 +262,34 @@ export default function DesignerDashboard() {
               </View>
             </Pressable>
           ))}
+        </View>
+
+        <View style={s.sectionHeaderWrap}>
+          <SectionHeader label="Open design requests" />
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => goToTab('marketplace')}
+            style={({ pressed }) => [s.createButton, pressed && controls.primaryButtonPressed, { backgroundColor: colors.secondary }]}
+          >
+            <Text style={[s.createButtonText, { color: colors.foreground }]}>View all</Text>
+          </Pressable>
+        </View>
+
+        <View style={s.requestsList}>
+          {requests.length === 0 ? (
+            <Text style={s.requestsEmpty}>No open requests right now.</Text>
+          ) : (
+            requests.slice(0, 3).map(req => (
+              <View key={req.id} style={s.requestCard}>
+                <Text style={s.requestTitle}>{req.title}</Text>
+                <Text style={s.requestDesc} numberOfLines={2}>{req.description}</Text>
+                <View style={s.requestFooter}>
+                  <Text style={s.requestBudget}>GH₵ {req.budget?.toFixed(2) || '0.00'}</Text>
+                  <Text style={s.requestUser}>By {req.userName}</Text>
+                </View>
+              </View>
+            ))
+          )}
         </View>
 
         <View style={s.earningsCard}>
@@ -621,5 +658,50 @@ function makeStyles(colors: Colors) {
       marginTop: 9,
     },
     progressFill: { height: 5, borderRadius: designTokens.radius.pill, backgroundColor: colors.primary },
+    requestsList: {
+      gap: 12,
+      marginBottom: designTokens.spacing.lg,
+    },
+    requestCard: {
+      padding: 14,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+    },
+    requestTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 14,
+      marginBottom: 4,
+    },
+    requestDesc: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+      marginBottom: 10,
+    },
+    requestFooter: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    requestBudget: {
+      color: colors.success,
+      fontFamily: designTokens.type.heading,
+      fontSize: 13,
+    },
+    requestUser: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.medium,
+      fontSize: 11,
+    },
+    requestsEmpty: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 13,
+      fontStyle: 'italic',
+      paddingVertical: 10,
+    },
   });
 }
