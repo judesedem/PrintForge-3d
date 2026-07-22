@@ -1,11 +1,14 @@
 package com.printforge.admin.adminservice.controller;
 
+import com.printforge.admin.adminservice.dto.RevenueHistoryEntry;
 import com.printforge.admin.adminservice.dto.SuspendUserRequest;
 import com.printforge.admin.adminservice.service.AdminService;
 import com.printforge.admin.dto.UserDto;
 import com.printforge.admin.entity.User;
 import com.printforge.admin.marketplaceservice.model.DesignListing;
-import com.printforge.admin.repository.UserRepository;
+import com.printforge.admin.materialservice.dto.UpdateMaterialRequest;
+import com.printforge.admin.materialservice.model.Material;
+import com.printforge.admin.materialservice.service.MaterialService;
 import com.printforge.admin.repository.UserRepository;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -14,6 +17,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -35,10 +39,13 @@ public class AdminController {
 
     private final AdminService adminService;
     private final UserRepository userRepository;
+    private final MaterialService materialService;
 
-    public AdminController(AdminService adminService, UserRepository userRepository) {
+    public AdminController(AdminService adminService, UserRepository userRepository,
+                            MaterialService materialService) {
         this.adminService = adminService;
         this.userRepository = userRepository;
+        this.materialService = materialService;
     }
 
 
@@ -46,6 +53,19 @@ public class AdminController {
     @GetMapping("/dashboard")
     public ResponseEntity<Map<String, Object>> getDashboard() {
         return ResponseEntity.ok(adminService.getDashboardSummary());
+    }
+
+    /**
+     * ADMIN only — completed-payment revenue for a chart, one point per
+     * calendar day over the last `days` days (default 7, clamped to
+     * [1, 90] in AdminService). Stricter than the plain dashboard summary
+     * above, which any LAB_STAFF can see.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/dashboard/revenue-history")
+    public ResponseEntity<List<RevenueHistoryEntry>> getRevenueHistory(
+            @RequestParam(defaultValue = "7") int days) {
+        return ResponseEntity.ok(adminService.getRevenueHistory(days));
     }
 
     /**
@@ -72,6 +92,22 @@ public class AdminController {
     }
 
 
+
+    /**
+     * ADMIN only — updates cost_per_gram/colors/availability_status for a
+     * material (see MaterialService.updateMaterial()'s javadoc). Writes to
+     * the same `materials` table order-service's and marketplace-service's
+     * EstimateService cost calculations and GET /api/materials all read,
+     * so the change is live immediately — no second hardcoded copy left
+     * stale anywhere.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @PatchMapping("/materials/{name}")
+    public ResponseEntity<Material> updateMaterial(
+            @PathVariable String name,
+            @RequestBody UpdateMaterialRequest request) {
+        return ResponseEntity.ok(materialService.updateMaterial(name, request));
+    }
 
     private User currentUser(Authentication authentication) {
         return userRepository.findByEmail(authentication.getName())

@@ -10,6 +10,8 @@ import com.printforge.marketplace.fileservice.model.ModelFile;
 import com.printforge.marketplace.fileservice.repository.ModelFileRepository;
 import com.printforge.marketplace.marketplaceservice.model.DesignListing;
 import com.printforge.marketplace.marketplaceservice.repository.DesignListingRepository;
+import com.printforge.marketplace.materialservice.model.Material;
+import com.printforge.marketplace.materialservice.repository.MaterialRepository;
 import com.printforge.marketplace.repository.UserRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
@@ -21,21 +23,7 @@ import java.util.Set;
 @Service
 public class EstimateService {
 
-    private static final Set<String> VALID_QUALITIES = Set.of("DRAFT", "STANDARD", "HIGH");   
-    private static final Set<String> VALID_MATERIALS = Set.of("PLA", "RESIN", "ABS", "PETG", "CARBON_FIBER");
-
-    // Material densities (g/cm3), used when real STL geometry is available
-    // (see calculateAndSaveEstimate()'s geometryParsed branch below).
-    private static final double PLA_DENSITY_G_CM3 = 1.24;
-    private static final double RESIN_DENSITY_G_CM3 = 1.10;
-    private static final double ABS_DENSITY_G_CM3 = 1.04;
-    // PETG and carbon-fiber-filled filament densities, per typical
-    // manufacturer spec sheets — both materials were already accepted by
-    // VALID_MATERIALS below with no density/cost branch to back them,
-    // producing a silently-wrong (PLA-rate) estimate for any job using
-    // either. Fixed here.
-    private static final double PETG_DENSITY_G_CM3 = 1.27;
-    private static final double CARBON_FIBER_DENSITY_G_CM3 = 1.30;
+    private static final Set<String> VALID_QUALITIES = Set.of("DRAFT", "STANDARD", "HIGH");
 
     // Assumed print-shell thickness, used to split a mesh's total volume
     // into a solid outer shell + infill-percentage-scaled interior.
@@ -45,15 +33,18 @@ public class EstimateService {
     private final ModelFileRepository modelFileRepository;
     private final UserRepository userRepository;
     private final DesignListingRepository listingRepository;
+    private final MaterialRepository materialRepository;
 
     public EstimateService(EstimateRepository estimateRepository,
                            ModelFileRepository modelFileRepository,
                            UserRepository userRepository,
-                           DesignListingRepository listingRepository) {
+                           DesignListingRepository listingRepository,
+                           MaterialRepository materialRepository) {
         this.estimateRepository = estimateRepository;
         this.modelFileRepository = modelFileRepository;
         this.userRepository = userRepository;
         this.listingRepository = listingRepository;
+        this.materialRepository = materialRepository;
     }
 
     /**
@@ -123,34 +114,24 @@ public class EstimateService {
                     "Invalid quality '" + quality + "'. Must be one of: " + VALID_QUALITIES);
         }
 
+        // Material name/cost_per_gram/baseMinutesPerGram/density all come
+        // from the shared `materials` table (see materialservice.model
+        // .Material) — the same table order-service's EstimateService AND
+        // MaterialsController read/write. A previous version of this
+        // method had its own hardcoded if/else ladder here, independent of
+        // both of those — all three had already drifted (PETG/CARBON_FIBER
+        // disagreed on price). Reading one table instead of three
+        // hardcoded copies is what closes that gap.
         String normalizedMaterial = materialType.trim().toUpperCase();
-        if (!VALID_MATERIALS.contains(normalizedMaterial)) {
-            throw new InvalidEstimateInputException(
-                    "Invalid materialType '" + materialType + "'. Must be one of: " + VALID_MATERIALS);
-        }
+        Material material = materialRepository.findByName(normalizedMaterial)
+                .orElseThrow(() -> new InvalidEstimateInputException(
+                        "Invalid materialType '" + materialType + "'. Must be one of: " + validMaterialNames()));
 
         double fileSizeKb = file.getFileSizeBytes() / 1024.0;
 
-        // 1. Material Dynamic Rates (Base defaults to standard PLA)
-        double baseMinutesPerGram = 2.5;
-        double costPerGram = 0.05; // 5 cents per gram of PLA
-
-        if ("RESIN".equals(normalizedMaterial)) {
-            baseMinutesPerGram = 4.0;  // Resin takes longer
-            costPerGram = 0.15;        // Resin is more expensive
-        } else if ("ABS".equals(normalizedMaterial)) {
-            baseMinutesPerGram = 2.8;
-            costPerGram = 0.08;
-        } else if ("PETG".equals(normalizedMaterial)) {
-            // baseMinutesPerGram intentionally left at PLA's default
-            // (2.5) above — only density/costPerGram were specified for
-            // this material, no print-time rate. Revisit if a more
-            // accurate PETG print-speed rate is ever specified.
-            costPerGram = 0.12;
-        } else if ("CARBON_FIBER".equals(normalizedMaterial)) {
-            // Same note as PETG above — no print-time rate specified.
-            costPerGram = 0.25;
-        }
+        // 1. Material Dynamic Rates
+        double baseMinutesPerGram = material.getBaseMinutesPerGram();
+        double costPerGram = material.getCostPerGram();
 
         // Pre-sliced weight (gcode uploads — GCodeWeightParser) takes
         // priority over everything else: the slicer already computed the
@@ -172,7 +153,7 @@ public class EstimateService {
             shellVolumeCm3 = Math.min(shellVolumeCm3, file.getVolumeCm3());
             double infillVolumeCm3 = interiorVolumeCm3 * (infillPercent / 100.0);
             double totalPrintVolumeCm3 = shellVolumeCm3 + infillVolumeCm3;
-            estimatedGrams = totalPrintVolumeCm3 * densityForMaterial(normalizedMaterial);
+            estimatedGrams = totalPrintVolumeCm3 * material.getDensityGCm3();
         } else {
             estimatedGrams = fileSizeKb * 0.8; // existing heuristic, unchanged
             log.warn("Estimate for fileId {} used the file-size fallback formula (no parsed geometry/pre-sliced weight available)",
@@ -233,17 +214,11 @@ public class EstimateService {
                 .orElseThrow(() -> new EstimateNotFoundException(id));
     }
 
-    /** Matches the existing if/else pattern above for baseMinutesPerGram/costPerGram. */
-    private double densityForMaterial(String normalizedMaterial) {
-        if ("RESIN".equals(normalizedMaterial)) {
-            return RESIN_DENSITY_G_CM3;
-        } else if ("ABS".equals(normalizedMaterial)) {
-            return ABS_DENSITY_G_CM3;
-        } else if ("PETG".equals(normalizedMaterial)) {
-            return PETG_DENSITY_G_CM3;
-        } else if ("CARBON_FIBER".equals(normalizedMaterial)) {
-            return CARBON_FIBER_DENSITY_G_CM3;
-        }
-        return PLA_DENSITY_G_CM3;
+    /** Only queried on the invalid-material error path, so an extra findAll() here is fine. */
+    private java.util.List<String> validMaterialNames() {
+        return materialRepository.findAll().stream()
+                .map(Material::getName)
+                .sorted()
+                .toList();
     }
 }

@@ -11,9 +11,13 @@ import com.printforge.payment.paymentservice.exception.PaymentFailedException;
 import com.printforge.payment.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.payment.paymentservice.model.Payment;
 import com.printforge.payment.paymentservice.repository.PaymentRepository;
+import com.printforge.payment.notificationservice.model.NotificationType;
 import com.printforge.payment.notificationservice.service.NotificationService;
 import com.printforge.payment.queueservice.model.PrintJob;
 import com.printforge.payment.queueservice.repository.PrintJobRepository;
+import com.printforge.payment.settingsservice.model.FeatureToggle;
+import com.printforge.payment.settingsservice.model.FeatureToggleKeys;
+import com.printforge.payment.settingsservice.repository.FeatureToggleRepository;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
@@ -47,6 +51,7 @@ public class PaymentService {
     private final DesignListingRepository listingRepository;
     private final PrintJobRepository printJobRepository;
     private final NotificationService notificationService;
+    private final FeatureToggleRepository featureToggleRepository;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -57,12 +62,14 @@ public class PaymentService {
                           EstimateRepository estimateRepository,
                           DesignListingRepository listingRepository,
                           PrintJobRepository printJobRepository,
-                          NotificationService notificationService) {
+                          NotificationService notificationService,
+                          FeatureToggleRepository featureToggleRepository) {
         this.paymentRepository  = paymentRepository;
         this.estimateRepository = estimateRepository;
         this.listingRepository  = listingRepository;
         this.printJobRepository = printJobRepository;
         this.notificationService = notificationService;
+        this.featureToggleRepository = featureToggleRepository;
         // Connect timeout only bounds establishing the TCP/TLS connection —
         // it does not bound waiting for a response once connected, which is
         // why each individual HttpRequest below also sets its own .timeout().
@@ -207,7 +214,11 @@ public class PaymentService {
         fulfillPayment(payment);
     }
 
-    private Payment fulfillPayment(Payment payment) {
+    // Package-private (not private) so PaymentServiceTest can call it
+    // directly without going through handleWebhook()'s HMAC signature
+    // verification or getPaymentById()'s live Paystack HTTP call — this
+    // method itself talks to no external service.
+    Payment fulfillPayment(Payment payment) {
         if ("COMPLETED".equals(payment.getStatus())) return payment;
 
         payment.setStatus("COMPLETED");
@@ -237,16 +248,41 @@ public class PaymentService {
                 payment.getUserId(),
                 "Payment Confirmed",
                 "Your payment was successful. Your print job has been submitted and is in the queue.",
-                "success");
+                NotificationType.PAYMENT_CONFIRMED);
 
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
+                // totalOrders is fulfillment tracking (how many times this
+                // sold), unrelated to whether the designer actually gets
+                // paid for it — always increments regardless of the
+                // designerEarnings toggle below.
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
-                BigDecimal designerEarning = listing.getBasePrice() != null
-                        ? listing.getBasePrice() : BigDecimal.ZERO;
-                BigDecimal prev = listing.getTotalEarnings() != null
-                        ? listing.getTotalEarnings() : BigDecimal.ZERO;
-                listing.setTotalEarnings(prev.add(designerEarning));
+
+                // designerEarnings toggle: lets an admin pause designer
+                // payouts without pausing the marketplace itself (orders
+                // still go through, jobs still get created — only the
+                // earnings credit + sale notification are skipped).
+                if (isFeatureEnabled(FeatureToggleKeys.DESIGNER_EARNINGS)) {
+                    BigDecimal designerEarning = listing.getBasePrice() != null
+                            ? listing.getBasePrice() : BigDecimal.ZERO;
+                    BigDecimal prev = listing.getTotalEarnings() != null
+                            ? listing.getTotalEarnings() : BigDecimal.ZERO;
+                    listing.setTotalEarnings(prev.add(designerEarning));
+
+                    // Tell the designer their design sold — there was previously
+                    // no notification at all for this event; the customer-facing
+                    // "Payment Confirmed" above doesn't reach the designer, who
+                    // is a different user.
+                    if (listing.getDesignerId() != null) {
+                        notificationService.createNotification(
+                                listing.getDesignerId(),
+                                "Design Sold!",
+                                String.format("Your design '%s' just sold for GH₵%.2f.",
+                                        listing.getTitle(), designerEarning),
+                                NotificationType.LISTING_SALE);
+                    }
+                }
+
                 listingRepository.save(listing);
             });
         }
@@ -382,6 +418,18 @@ public class PaymentService {
         } catch (Exception e) {
             throw new PaymentFailedException("Could not verify transaction with Paystack: " + e.getMessage());
         }
+    }
+
+    /**
+     * Read-side check duplicated from admin-service's SettingsService.
+     * isFeatureEnabled() — same fail-open semantics: a missing/unrecognized
+     * key is treated as enabled, never as disabled, since there's no REST
+     * call between services to ask admin-service directly.
+     */
+    private boolean isFeatureEnabled(String featureName) {
+        return featureToggleRepository.findByFeatureName(featureName)
+                .map(FeatureToggle::isEnabled)
+                .orElse(true);
     }
 
     /**

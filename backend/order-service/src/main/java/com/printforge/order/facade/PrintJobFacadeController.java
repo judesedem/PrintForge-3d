@@ -15,6 +15,7 @@ import com.printforge.order.marketplaceservice.exception.ListingNotFoundExceptio
 import com.printforge.order.marketplaceservice.exception.ListingNotPublishedException;
 import com.printforge.order.marketplaceservice.model.DesignListing;
 import com.printforge.order.marketplaceservice.repository.DesignListingRepository;
+import com.printforge.order.notificationservice.model.NotificationType;
 import com.printforge.order.notificationservice.service.NotificationService;
 import com.printforge.order.queueservice.model.PrintJob;
 import com.printforge.order.queueservice.repository.PrintJobRepository;
@@ -335,7 +336,7 @@ public class PrintJobFacadeController {
                 "Job Approved",
                 "Your print job has been approved" +
                         (estimatedCost != null ? String.format(". Estimated cost: GH₵%.2f", estimatedCost) : "") + ".",
-                "success"
+                NotificationType.JOB_APPROVED
         );
 
         ModelFile file = safeGetFile(updatedJob.getFileId());
@@ -365,7 +366,7 @@ public class PrintJobFacadeController {
                 job.getUserId(),
                 "Job Rejected",
                 "Your print job has been rejected. Reason: " + reason,
-                "error"
+                NotificationType.JOB_REJECTED
         );
 
         ModelFile file = safeGetFile(updatedJob.getFileId());
