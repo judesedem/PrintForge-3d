@@ -44,7 +44,7 @@ spring:
         - id: marketplace-service-route
           uri: ${MARKETPLACE_SERVICE_URL:http://localhost:8085}
           predicates:
-            - Path=/api/marketplace/**, /api/files/**, /api/follows/**, /api/users/**
+            - Path=/api/marketplace/**, /api/files/**, /api/follows/**, /api/users/**, /api/design-requests/**, /api/challenges/**
           filters:
             - JwtAuthenticationFilter
 

@@ -11,6 +11,7 @@ COPY order-service/ order-service/
 COPY marketplace-service/ marketplace-service/
 COPY payment-service/ payment-service/
 COPY notification-service/ notification-service/
+COPY admin-service/ admin-service/
 
 # The module to build and run, passed as an argument (e.g., api-gateway, auth-service)
 ARG MODULE_NAME

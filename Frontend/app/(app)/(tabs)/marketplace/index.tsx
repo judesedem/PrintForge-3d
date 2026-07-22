@@ -19,9 +19,18 @@ import { fetchListings, MarketplaceListing } from '@/api/marketplace';
 const CATEGORIES = ['All', 'Gears', 'Drones', 'Enclosures', 'Miniatures', 'Articulated'] as const;
 type Category = (typeof CATEGORIES)[number];
 
+const CATEGORY_KEYWORDS: Record<Exclude<Category, 'All'>, string[]> = {
+  Gears: ['gear', 'cog', 'pinion', 'rack'],
+  Drones: ['drone', 'quadcopter', 'propeller', 'frame'],
+  Enclosures: ['case', 'enclosure', 'box', 'mount', 'housing'],
+  Miniatures: ['mini', 'figurine', 'statue', 'tabletop', 'model'],
+  Articulated: ['articulated', 'flex', 'joint', 'print-in-place'],
+};
+
 type GridItem = {
   id: string;
   name: string;
+  description: string;
   likes: number;
   price: string | null;
   img: string;
@@ -32,6 +41,7 @@ const MOCK_GRID: GridItem[] = [
   {
     id: 'mock-1',
     name: 'Helical Gear',
+    description: 'A 3D printable helical gear for high torque applications.',
     likes: 1200,
     price: 'GH₵ 3.99',
     img: 'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=300',
@@ -40,6 +50,7 @@ const MOCK_GRID: GridItem[] = [
   {
     id: 'mock-2',
     name: 'GoPro Mount',
+    description: 'Durable mount enclosure for action cameras.',
     likes: 890,
     price: 'GH₵ 4.99',
     img: 'https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=300',
@@ -48,6 +59,7 @@ const MOCK_GRID: GridItem[] = [
   {
     id: 'mock-3',
     name: 'Pi Case',
+    description: 'Raspberry Pi 4 cooling case.',
     likes: 567,
     price: 'GH₵ 1.49',
     img: 'https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=300',
@@ -56,6 +68,7 @@ const MOCK_GRID: GridItem[] = [
   {
     id: 'mock-4',
     name: 'Drone Frame',
+    description: 'Lightweight racing drone frame.',
     likes: 2100,
     price: 'GH₵ 4.99',
     img: 'https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=300',
@@ -64,6 +77,7 @@ const MOCK_GRID: GridItem[] = [
   {
     id: 'mock-5',
     name: 'Cable Clip',
+    description: 'Desk cable management clip.',
     likes: 340,
     price: null,
     img: 'https://images.pexels.com/photos/4488626/pexels-photo-4488626.jpeg?auto=compress&cs=tinysrgb&w=300',
@@ -72,6 +86,7 @@ const MOCK_GRID: GridItem[] = [
   {
     id: 'mock-6',
     name: 'Vase Spiral',
+    description: 'Beautiful decorative spiral vase.',
     likes: 780,
     price: 'GH₵ 0.99',
     img: 'https://images.pexels.com/photos/4488637/pexels-photo-4488637.jpeg?auto=compress&cs=tinysrgb&w=300',
@@ -125,6 +140,7 @@ export default function MarketplaceScreen() {
     return listings.map(listing => ({
       id: listing.id,
       name: listing.title,
+      description: listing.description,
       likes: listing.totalOrders,
       price: listing.price > 0 ? `GH₵ ${listing.price.toFixed(2)}` : null,
       img: listing.thumbnailUrl,
@@ -132,9 +148,20 @@ export default function MarketplaceScreen() {
     }));
   }, [listings]);
 
-  const filtered = gridData.filter(item =>
-    item.name.toLowerCase().includes(search.trim().toLowerCase())
-  );
+  const filtered = useMemo(() => {
+    return gridData.filter(item => {
+      const matchesSearch = item.name.toLowerCase().includes(search.trim().toLowerCase());
+      if (!matchesSearch) return false;
+
+      if (category === 'All') return true;
+
+      const keywords = CATEGORY_KEYWORDS[category];
+      if (!keywords) return true;
+
+      const searchTarget = `${item.name} ${item.description}`.toLowerCase();
+      return keywords.some(kw => searchTarget.includes(kw));
+    });
+  }, [gridData, search, category]);
 
   const rows = useMemo(() => {
     const result: GridItem[][] = [];

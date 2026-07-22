@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   Bell,
@@ -49,6 +50,7 @@ export default function DesignerDashboard() {
   const { firebaseUser } = useSession();
   const s = makeStyles(colors);
   const controls = makeControlStyles(colors);
+  const [activeTab, setActiveTab] = useState(dashboardTabs[0]);
 
   const designerName = firebaseUser?.displayName || 'Aero Designs';
   const designerEmail = firebaseUser?.email || 'designer@printforge.edu';
@@ -111,9 +113,13 @@ export default function DesignerDashboard() {
 
         <View style={s.segmentedControl}>
           {dashboardTabs.map((tab, index) => (
-            <View key={tab} style={[s.segment, index === 0 && s.segmentActive]}>
-              <Text style={[s.segmentText, index === 0 && s.segmentTextActive]}>{tab}</Text>
-            </View>
+            <Pressable 
+              key={tab} 
+              style={[s.segment, activeTab === tab && s.segmentActive]}
+              onPress={() => setActiveTab(tab)}
+            >
+              <Text style={[s.segmentText, activeTab === tab && s.segmentTextActive]}>{tab}</Text>
+            </Pressable>
           ))}
         </View>
 

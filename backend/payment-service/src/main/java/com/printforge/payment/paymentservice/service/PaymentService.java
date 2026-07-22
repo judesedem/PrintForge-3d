@@ -203,16 +203,16 @@ public class PaymentService {
         // 3. Re-verify with Paystack API (don't trust the webhook body alone)
         verifyWithPaystack(reference);
 
-        // 4. Mark payment complete
+        // 4. Mark payment complete and create the PrintJob
+        fulfillPayment(payment);
+    }
+
+    private Payment fulfillPayment(Payment payment) {
+        if ("COMPLETED".equals(payment.getStatus())) return payment;
+
         payment.setStatus("COMPLETED");
         payment.setCompletedAt(LocalDateTime.now());
 
-        // 5. Create the PrintJob — this is the gate.
-        // Pull print parameters from the linked Estimate so that lab staff
-        // see a fully-populated job in the queue view, not a row of nulls.
-        // color/notes come from the Payment instead — the Estimate has no
-        // home for them (captured at order-submission time, carried
-        // through initiatePayment(), see Payment.color/notes's javadoc).
         Estimate linkedEstimate = estimateRepository.findById(payment.getEstimateId())
                 .orElseThrow(() -> new EstimateNotFoundException(payment.getEstimateId()));
 
@@ -223,33 +223,22 @@ public class PaymentService {
         job.setMaterial(linkedEstimate.getMaterialType());
         job.setColor(payment.getColor());
         job.setQuantity(linkedEstimate.getQuantity());
-        // infillPercent is stored as an integer (e.g. 20); normalise to the
-        // "20%" string format the rest of the app uses on PrintJob.infill
         job.setInfill(linkedEstimate.getInfillPercent() != null
                 ? linkedEstimate.getInfillPercent() + "%" : null);
         job.setQuality(linkedEstimate.getQuality());
         job.setNotes(payment.getNotes());
-        // status defaults to SUBMITTED via @PrePersist on PrintJob
+        
         PrintJob savedJob = printJobRepository.save(job);
 
-        // 6. Link the job back to the payment
         payment.setPrintJobId(savedJob.getId());
-        paymentRepository.save(payment);
+        Payment savedPayment = paymentRepository.save(payment);
 
-        // 7. Notify user — payment confirmed, job is in the queue
         notificationService.createNotification(
                 payment.getUserId(),
                 "Payment Confirmed",
                 "Your payment was successful. Your print job has been submitted and is in the queue.",
                 "success");
 
-        // 8. Update marketplace listing stats if this was a marketplace order.
-        // This is the single place earnings are recorded — the facade no longer
-        // increments at submission time to avoid double-counting on payment
-        // confirmation.
-        // totalEarnings tracks what the designer earns, which is basePrice only
-        // (not the full payment.getAmount(), which also includes the machine and
-        // material cost that goes to the lab, not the designer).
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
@@ -261,6 +250,7 @@ public class PaymentService {
                 listingRepository.save(listing);
             });
         }
+        return savedPayment;
     }
 
     public Payment retryPayment(Long paymentId, Long callerId, String userEmail) {
@@ -293,8 +283,19 @@ public class PaymentService {
     }
 
     public Payment getPaymentById(Long id) {
-        return paymentRepository.findById(id)
+        Payment payment = paymentRepository.findById(id)
                 .orElseThrow(() -> new PaymentNotFoundException(id));
+        
+        if ("PENDING".equals(payment.getStatus())) {
+            try {
+                verifyWithPaystack(payment.getPaystackReference());
+                return fulfillPayment(payment);
+            } catch (Exception e) {
+                log.info("Auto-verify found payment {} is not yet successful: {}", id, e.getMessage());
+            }
+        }
+        
+        return payment;
     }
 
     public List<Payment> getPaymentsForUser(Long userId) {
@@ -306,7 +307,7 @@ public class PaymentService {
     private String callPaystackInitialize(String email, long amountInPesewas, String reference) {
         try {
             String body = String.format(
-                    "{\"email\":\"%s\",\"amount\":%d,\"reference\":\"%s\",\"currency\":\"GHS\"}",
+                    "{\"email\":\"%s\",\"amount\":%d,\"reference\":\"%s\",\"currency\":\"GHS\",\"callback_url\":\"printforge://payment-callback\"}",
                     email, amountInPesewas, reference
             );
 
