@@ -7,10 +7,12 @@ import com.printforge.printforge.fileservice.storage.FileStorageService;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.marketplaceservice.repository.FavoriteRepository;
+import com.printforge.printforge.marketplaceservice.repository.ListingImageRepository;
 import com.printforge.printforge.marketplaceservice.exception.ListingDeleteException;
 import com.printforge.printforge.moderationservice.service.ModerationLogService;
 import com.printforge.printforge.paymentservice.repository.PaymentRepository;
 import com.printforge.printforge.repository.UserRepository;
+import com.printforge.printforge.settingsservice.service.SettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -42,6 +44,8 @@ class MarketplaceControllerTest {
     FavoriteRepository favoriteRepository;
     ModerationLogService moderationLogService;
     PaymentRepository paymentRepository;
+    ListingImageRepository listingImageRepository;
+    SettingsService settingsService;
     MarketplaceController controller;
     Authentication designerAuth;
 
@@ -57,8 +61,15 @@ class MarketplaceControllerTest {
         favoriteRepository = Mockito.mock(FavoriteRepository.class);
         moderationLogService = Mockito.mock(ModerationLogService.class);
         paymentRepository = Mockito.mock(PaymentRepository.class);
+        listingImageRepository = Mockito.mock(ListingImageRepository.class);
+        settingsService = Mockito.mock(SettingsService.class);
+        // Marketplace is on by default in production (seeded true) — match
+        // that here so existing tests exercise the same "enabled" path
+        // unless a test explicitly wants otherwise.
+        Mockito.lenient().when(settingsService.isFeatureEnabled(Mockito.anyString())).thenReturn(true);
         controller = new MarketplaceController(listingRepository, estimateService, fileStorageService,
-                userRepository, favoriteRepository, moderationLogService, paymentRepository);
+                userRepository, favoriteRepository, moderationLogService, paymentRepository, listingImageRepository,
+                settingsService);
 
         User designer = User.builder().userId(DESIGNER_ID).email(DESIGNER_EMAIL).role(Role.DESIGNER).build();
         Mockito.when(userRepository.findByEmail(DESIGNER_EMAIL)).thenReturn(Optional.of(designer));
@@ -139,5 +150,29 @@ class MarketplaceControllerTest {
 
         assertEquals(204, response.getStatusCode().value());
         Mockito.verify(listingRepository).delete(Mockito.any());
+    }
+
+    // --- marketplace feature toggle ---
+
+    @Test
+    void createListingIsRejectedWhenMarketplaceToggleIsDisabled() {
+        Mockito.when(settingsService.isFeatureEnabled("marketplace")).thenReturn(false);
+
+        assertThrows(com.printforge.printforge.settingsservice.exception.FeatureDisabledException.class,
+                () -> controller.createListing(
+                        1L, "Test Listing", null, BigDecimal.TEN,
+                        null, null, true,
+                        null, null, null, null,
+                        null, designerAuth));
+        Mockito.verifyNoInteractions(listingRepository);
+    }
+
+    @Test
+    void getStorefrontIsRejectedWhenMarketplaceToggleIsDisabled() {
+        Mockito.when(settingsService.isFeatureEnabled("marketplace")).thenReturn(false);
+
+        assertThrows(com.printforge.printforge.settingsservice.exception.FeatureDisabledException.class,
+                () -> controller.getStorefront(null, "newest",
+                        org.springframework.data.domain.PageRequest.of(0, 20), designerAuth));
     }
 }

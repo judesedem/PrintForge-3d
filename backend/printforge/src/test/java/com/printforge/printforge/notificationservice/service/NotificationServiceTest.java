@@ -3,6 +3,7 @@ package com.printforge.printforge.notificationservice.service;
 import com.printforge.printforge.notificationservice.exception.NotificationNotFoundException;
 import com.printforge.printforge.notificationservice.model.Notification;
 import com.printforge.printforge.notificationservice.repository.NotificationRepository;
+import com.printforge.printforge.settingsservice.service.SettingsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -23,12 +24,18 @@ import static org.junit.jupiter.api.Assertions.*;
 class NotificationServiceTest {
 
     NotificationRepository repository;
+    SettingsService settingsService;
     NotificationService service;
 
     @BeforeEach
     void setUp() {
         repository = Mockito.mock(NotificationRepository.class);
-        service = new NotificationService(repository);
+        settingsService = Mockito.mock(SettingsService.class);
+        // Not exercised by any test in this file (none call createNotification),
+        // but stubbed defensively so the "notifications" toggle's fail-open
+        // default doesn't silently start mattering here later.
+        Mockito.lenient().when(settingsService.isFeatureEnabled(Mockito.anyString())).thenReturn(true);
+        service = new NotificationService(repository, settingsService);
     }
 
     private Notification notificationOwnedBy(Long ownerId) {
@@ -76,5 +83,29 @@ class NotificationServiceTest {
         Mockito.when(repository.findById(999L)).thenReturn(Optional.empty());
 
         assertThrows(NotificationNotFoundException.class, () -> service.markAsRead(999L, 1L, false));
+    }
+
+    // --- notifications feature toggle ---
+
+    @Test
+    void createNotificationPersistsWhenTheToggleIsEnabled() {
+        Mockito.when(settingsService.isFeatureEnabled("notifications")).thenReturn(true);
+        Mockito.when(repository.save(Mockito.any(Notification.class))).thenAnswer(inv -> inv.getArgument(0));
+
+        Notification result = service.createNotification(7L, "Title", "Message", "info");
+
+        assertNotNull(result);
+        assertEquals("Title", result.getTitle());
+        Mockito.verify(repository).save(Mockito.any(Notification.class));
+    }
+
+    @Test
+    void createNotificationIsANoOpWhenTheToggleIsDisabled() {
+        Mockito.when(settingsService.isFeatureEnabled("notifications")).thenReturn(false);
+
+        Notification result = service.createNotification(7L, "Title", "Message", "info");
+
+        assertNull(result);
+        Mockito.verifyNoInteractions(repository);
     }
 }

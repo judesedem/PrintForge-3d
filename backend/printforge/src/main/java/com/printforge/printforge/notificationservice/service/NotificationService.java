@@ -3,6 +3,8 @@ package com.printforge.printforge.notificationservice.service;
 import com.printforge.printforge.notificationservice.exception.NotificationNotFoundException;
 import com.printforge.printforge.notificationservice.model.Notification;
 import com.printforge.printforge.notificationservice.repository.NotificationRepository;
+import com.printforge.printforge.settingsservice.model.FeatureToggleKeys;
+import com.printforge.printforge.settingsservice.service.SettingsService;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,9 +15,11 @@ import java.util.List;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final SettingsService settingsService;
 
-    public NotificationService(NotificationRepository notificationRepository) {
+    public NotificationService(NotificationRepository notificationRepository, SettingsService settingsService) {
         this.notificationRepository = notificationRepository;
+        this.settingsService = settingsService;
     }
 
     private static final int MAX_MESSAGE_LENGTH = 500;
@@ -49,6 +53,15 @@ public class NotificationService {
      * version above, which passes null here unchanged.
      */
     public Notification createNotification(Long userId, String title, String message, String type, String deepLink) {
+        // The "notifications" toggle is a single choke point: every other
+        // createNotification() call site in the app (job/payment/
+        // suspension flows, the staff-only POST endpoint) funnels through
+        // here, so gating just this one method turns the whole system off
+        // without touching any of those call sites.
+        if (!settingsService.isFeatureEnabled(FeatureToggleKeys.NOTIFICATIONS)) {
+            return null;
+        }
+
         Notification notification = new Notification();
         notification.setUserId(userId);
         notification.setTitle(title);

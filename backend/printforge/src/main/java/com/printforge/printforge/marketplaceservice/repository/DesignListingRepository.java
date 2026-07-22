@@ -23,6 +23,11 @@ public interface DesignListingRepository extends JpaRepository<DesignListing, Lo
 
     boolean existsByFileId(Long fileId);
 
+    // Used by ListingImageBackfillRunner to seed a displayOrder=0
+    // ListingImage row for every pre-existing listing that already has a
+    // thumbnail.
+    List<DesignListing> findByThumbnailUrlIsNotNull();
+
     // Used by DELETE /api/files/{id}: a file backing a still-PUBLISHED
     // listing can't be deleted out from under it.
     boolean existsByFileIdAndStatus(Long fileId, String status);

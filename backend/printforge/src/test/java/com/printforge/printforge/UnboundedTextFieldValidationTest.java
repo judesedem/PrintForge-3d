@@ -14,6 +14,8 @@ import com.printforge.printforge.marketplaceservice.exception.InvalidListingInpu
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
 import com.printforge.printforge.marketplaceservice.repository.DesignListingRepository;
 import com.printforge.printforge.marketplaceservice.repository.FavoriteRepository;
+import com.printforge.printforge.marketplaceservice.repository.ListingImageRepository;
+import com.printforge.printforge.settingsservice.service.SettingsService;
 import com.printforge.printforge.moderationservice.service.ModerationLogService;
 import com.printforge.printforge.notificationservice.controller.NotificationController;
 import com.printforge.printforge.paymentservice.repository.PaymentRepository;
@@ -186,6 +188,8 @@ class UnboundedTextFieldValidationTest {
     private FavoriteRepository favoriteRepository;
     private ModerationLogService moderationLogService;
     private PaymentRepository paymentRepository;
+    private ListingImageRepository listingImageRepository;
+    private SettingsService settingsService;
     private MarketplaceController marketplaceController;
     private Authentication designerAuth;
 
@@ -198,9 +202,13 @@ class UnboundedTextFieldValidationTest {
         favoriteRepository = Mockito.mock(FavoriteRepository.class);
         moderationLogService = Mockito.mock(ModerationLogService.class);
         paymentRepository = Mockito.mock(PaymentRepository.class);
+        listingImageRepository = Mockito.mock(ListingImageRepository.class);
+        settingsService = Mockito.mock(SettingsService.class);
+        Mockito.lenient().when(settingsService.isFeatureEnabled(Mockito.anyString())).thenReturn(true);
         marketplaceController = new MarketplaceController(
                 listingRepository, estimateService, fileStorageService,
-                userRepository, favoriteRepository, moderationLogService, paymentRepository);
+                userRepository, favoriteRepository, moderationLogService, paymentRepository,
+                listingImageRepository, settingsService);
 
         User designer = User.builder()
                 .userId(42L)

@@ -11,9 +11,12 @@ import com.printforge.printforge.paymentservice.exception.PaymentFailedException
 import com.printforge.printforge.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.printforge.paymentservice.model.Payment;
 import com.printforge.printforge.paymentservice.repository.PaymentRepository;
+import com.printforge.printforge.notificationservice.model.NotificationType;
 import com.printforge.printforge.notificationservice.service.NotificationService;
 import com.printforge.printforge.queueservice.model.PrintJob;
 import com.printforge.printforge.queueservice.repository.PrintJobRepository;
+import com.printforge.printforge.settingsservice.model.FeatureToggleKeys;
+import com.printforge.printforge.settingsservice.service.SettingsService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
@@ -47,6 +50,7 @@ public class PaymentService {
     private final DesignListingRepository listingRepository;
     private final PrintJobRepository printJobRepository;
     private final NotificationService notificationService;
+    private final SettingsService settingsService;
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -57,12 +61,14 @@ public class PaymentService {
                           EstimateRepository estimateRepository,
                           DesignListingRepository listingRepository,
                           PrintJobRepository printJobRepository,
-                          NotificationService notificationService) {
+                          NotificationService notificationService,
+                          SettingsService settingsService) {
         this.paymentRepository  = paymentRepository;
         this.estimateRepository = estimateRepository;
         this.listingRepository  = listingRepository;
         this.printJobRepository = printJobRepository;
         this.notificationService = notificationService;
+        this.settingsService = settingsService;
         // Connect timeout only bounds establishing the TCP/TLS connection —
         // it does not bound waiting for a response once connected, which is
         // why each individual HttpRequest below also sets its own .timeout().
@@ -241,7 +247,7 @@ public class PaymentService {
                 payment.getUserId(),
                 "Payment Confirmed",
                 "Your payment was successful. Your print job has been submitted and is in the queue.",
-                "success");
+                NotificationType.PAYMENT_CONFIRMED);
 
         // 8. Update marketplace listing stats if this was a marketplace order.
         // This is the single place earnings are recorded — the facade no longer
@@ -252,12 +258,37 @@ public class PaymentService {
         // material cost that goes to the lab, not the designer).
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
+                // totalOrders is fulfillment tracking (how many times this
+                // sold), unrelated to whether the designer actually gets
+                // paid for it — always increments regardless of the
+                // designerEarnings toggle below.
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
-                BigDecimal designerEarning = listing.getBasePrice() != null
-                        ? listing.getBasePrice() : BigDecimal.ZERO;
-                BigDecimal prev = listing.getTotalEarnings() != null
-                        ? listing.getTotalEarnings() : BigDecimal.ZERO;
-                listing.setTotalEarnings(prev.add(designerEarning));
+
+                // designerEarnings toggle: lets an admin pause designer
+                // payouts without pausing the marketplace itself (orders
+                // still go through, jobs still get created — only the
+                // earnings credit + sale notification are skipped).
+                if (settingsService.isFeatureEnabled(FeatureToggleKeys.DESIGNER_EARNINGS)) {
+                    BigDecimal designerEarning = listing.getBasePrice() != null
+                            ? listing.getBasePrice() : BigDecimal.ZERO;
+                    BigDecimal prev = listing.getTotalEarnings() != null
+                            ? listing.getTotalEarnings() : BigDecimal.ZERO;
+                    listing.setTotalEarnings(prev.add(designerEarning));
+
+                    // Tell the designer their design sold — there was previously
+                    // no notification at all for this event; the customer-facing
+                    // "Payment Confirmed" above doesn't reach the designer, who
+                    // is a different user.
+                    if (listing.getDesignerId() != null) {
+                        notificationService.createNotification(
+                                listing.getDesignerId(),
+                                "Design Sold!",
+                                String.format("Your design '%s' just sold for GH₵%.2f.",
+                                        listing.getTitle(), designerEarning),
+                                NotificationType.LISTING_SALE);
+                    }
+                }
+
                 listingRepository.save(listing);
             });
         }

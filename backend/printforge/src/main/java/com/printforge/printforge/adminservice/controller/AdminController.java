@@ -1,5 +1,6 @@
 package com.printforge.printforge.adminservice.controller;
 
+import com.printforge.printforge.adminservice.dto.RevenueHistoryEntry;
 import com.printforge.printforge.adminservice.dto.SuspendUserRequest;
 import com.printforge.printforge.adminservice.service.AdminService;
 import com.printforge.printforge.dto.AuthResponse;
@@ -7,6 +8,9 @@ import com.printforge.printforge.dto.RegisterRequest;
 import com.printforge.printforge.dto.UserDto;
 import com.printforge.printforge.entity.User;
 import com.printforge.printforge.marketplaceservice.model.DesignListing;
+import com.printforge.printforge.materialservice.dto.UpdateMaterialRequest;
+import com.printforge.printforge.materialservice.model.Material;
+import com.printforge.printforge.materialservice.service.MaterialService;
 import com.printforge.printforge.repository.UserRepository;
 import com.printforge.printforge.service.AuthService;
 import jakarta.validation.Valid;
@@ -16,6 +20,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,11 +43,14 @@ public class AdminController {
     private final AdminService adminService;
     private final AuthService authService;
     private final UserRepository userRepository;
+    private final MaterialService materialService;
 
-    public AdminController(AdminService adminService, AuthService authService, UserRepository userRepository) {
+    public AdminController(AdminService adminService, AuthService authService, UserRepository userRepository,
+                            MaterialService materialService) {
         this.adminService = adminService;
         this.authService = authService;
         this.userRepository = userRepository;
+        this.materialService = materialService;
     }
 
     /**
@@ -62,6 +70,19 @@ public class AdminController {
     @GetMapping("/dashboard")
     public ResponseEntity<Map<String, Object>> getDashboard() {
         return ResponseEntity.ok(adminService.getDashboardSummary());
+    }
+
+    /**
+     * ADMIN only — completed-payment revenue for a chart, one point per
+     * calendar day over the last `days` days (default 7, clamped to
+     * [1, 90] in AdminService). Stricter than the plain dashboard summary
+     * above, which any LAB_STAFF can see.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @GetMapping("/dashboard/revenue-history")
+    public ResponseEntity<List<RevenueHistoryEntry>> getRevenueHistory(
+            @RequestParam(required = false, defaultValue = "7") int days) {
+        return ResponseEntity.ok(adminService.getRevenueHistory(days));
     }
 
     /**
@@ -101,6 +122,21 @@ public class AdminController {
 
         return ResponseEntity.ok(adminService.suspendUser(
                 id, request.isSuspended(), request.getReason(), currentUser(authentication)));
+    }
+
+    /**
+     * ADMIN only — updates cost_per_gram/colors/availability_status for a
+     * material (see MaterialService.updateMaterial()'s javadoc). Writes to
+     * the same `materials` table EstimateService's cost calculation and
+     * GET /api/materials both read, so the change is live immediately —
+     * no second hardcoded copy left stale anywhere.
+     */
+    @PreAuthorize("hasRole('ADMIN')")
+    @PatchMapping("/materials/{name}")
+    public ResponseEntity<Material> updateMaterial(
+            @PathVariable String name,
+            @RequestBody UpdateMaterialRequest request) {
+        return ResponseEntity.ok(materialService.updateMaterial(name, request));
     }
 
     private User currentUser(Authentication authentication) {
