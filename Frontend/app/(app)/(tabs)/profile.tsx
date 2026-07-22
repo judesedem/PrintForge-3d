@@ -30,6 +30,7 @@ import {
 import { useRouter } from "expo-router";
 import { useSession } from "../../../src/SessionContext";
 import { useTheme } from "../../../src/ThemeContext";
+import { Colors } from "../../../src/theme";
 import { useToast } from "../../../src/ToastContext";
 import { fetchMyPayments, Payment } from "../../../src/api/payments";
 // TODO(backend): no fetchUserStats / fetchUserDesigns endpoints exist yet.
@@ -39,22 +40,6 @@ import { fetchMyPayments, Payment } from "../../../src/api/payments";
 // import { fetchUserStats } from "../../../src/api/users";
 // import { fetchUserDesigns } from "../../../src/api/marketplace";
 
-const NAVY = "#0A182E";
-const NAVY_LIGHT = "#152544";
-const ORANGE = "#FF6A00";
-const WHITE = "#FFFFFF";
-const WHITE_50 = "rgba(255,255,255,0.5)";
-const WHITE_30 = "rgba(255,255,255,0.3)";
-const WHITE_15 = "rgba(255,255,255,0.15)";
-const WHITE_10 = "rgba(255,255,255,0.1)";
-const WHITE_8 = "rgba(255,255,255,0.08)";
-const EMERALD = "#34D399";
-const EMERALD_BG = "rgba(16,185,129,0.2)";
-const RED = "#EF4444";
-const GRAY = "#6B7280";
-const GRAY_LIGHT = "#D1D5DB";
-const ORANGE_10 = "rgba(255,106,0,0.1)";
-const ORANGE_20 = "rgba(255,106,0,0.2)";
 
 // Following count has no backend model yet — always 0 until a follow API
 // exists.
@@ -122,15 +107,15 @@ function orderDisplayName(payment: Payment): string {
 
 type BadgeVisual = { bg: string; text: string; label: string };
 
-function paymentStatusVisual(status: Payment["status"]): BadgeVisual {
+function paymentStatusVisual(status: Payment["status"], colors: Colors): BadgeVisual {
   switch (status) {
     case "COMPLETED":
-      return { bg: EMERALD_BG, text: EMERALD, label: "Ready for Pickup" };
+      return { bg: colors.statusCompleted.bg, text: colors.statusCompleted.text, label: "Ready for Pickup" };
     case "FAILED":
-      return { bg: WHITE_10, text: WHITE_50, label: "Failed" };
+      return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: "Failed" };
     case "PENDING":
     default:
-      return { bg: ORANGE_20, text: ORANGE, label: "Printing" };
+      return { bg: colors.statusPrinting.bg, text: colors.statusPrinting.text, label: "Printing" };
   }
 }
 
@@ -155,9 +140,13 @@ const BENEFITS = [
 function DarkModeToggle({
   isDark,
   onToggle,
+  colors,
+  styles,
 }: {
   isDark: boolean;
   onToggle: () => void;
+  colors: Colors;
+  styles: ReturnType<typeof getStyles>;
 }) {
   const translateX = useRef(new Animated.Value(isDark ? 20 : 0)).current;
 
@@ -177,7 +166,7 @@ function DarkModeToggle({
       onPress={toggle}
       style={[
         styles.toggleTrack,
-        { backgroundColor: isDark ? ORANGE : WHITE_15 },
+        { backgroundColor: isDark ? colors.primary : colors.border },
       ]}
     >
       <Animated.View
@@ -191,10 +180,14 @@ function BecomeDesignerModal({
   visible,
   onClose,
   onStartUploading,
+  colors,
+  styles,
 }: {
   visible: boolean;
   onClose: () => void;
   onStartUploading: () => void;
+  colors: Colors;
+  styles: ReturnType<typeof getStyles>;
 }) {
   return (
     <Modal
@@ -211,7 +204,7 @@ function BecomeDesignerModal({
         >
           <View style={styles.dragHandle} />
           <View style={styles.modalIconCircle}>
-            <Sparkles size={32} color={ORANGE} />
+            <Sparkles size={32} color={colors.primary} />
           </View>
 
           <Text style={styles.modalTitle}>Become a Designer!</Text>
@@ -225,7 +218,7 @@ function BecomeDesignerModal({
               return (
                 <View key={i} style={styles.benefitRow}>
                   <View style={styles.benefitIconCircle}>
-                    <Icon size={18} color={ORANGE} />
+                    <Icon size={18} color={colors.primary} />
                   </View>
                   <View style={styles.benefitTextCol}>
                     <Text style={styles.benefitTitle}>{b.title}</Text>
@@ -244,7 +237,7 @@ function BecomeDesignerModal({
             }}
           >
             <Text style={styles.modalCtaText}>Start Uploading</Text>
-            <ChevronRight size={18} strokeWidth={2.5} color={WHITE} />
+            <ChevronRight size={18} strokeWidth={2.5} color={colors.onPrimary} />
           </Pressable>
 
           <Pressable onPress={onClose} style={styles.maybeLaterBtn}>
@@ -259,7 +252,8 @@ function BecomeDesignerModal({
 export default function ProfileScreen() {
   const router = useRouter();
   const { appUser, role, signOut, token, authLoading } = useSession();
-  const { isDark, toggleTheme } = useTheme();
+  const { isDark, toggleTheme, colors } = useTheme();
+  const styles = getStyles(colors);
   const { showToast } = useToast();
 
   const [showModal, setShowModal] = useState(false);
@@ -385,7 +379,7 @@ export default function ProfileScreen() {
 
         <View style={styles.ordersSection}>
           <View style={styles.ordersHeading}>
-            <ShoppingBag size={16} color={ORANGE} />
+            <ShoppingBag size={16} color={colors.primary} />
             <Text style={styles.ordersHeadingText}>My Orders</Text>
           </View>
 
@@ -398,7 +392,7 @@ export default function ProfileScreen() {
           ) : (
             <View>
               {payments.map((payment, idx) => {
-                const badge = paymentStatusVisual(payment.status);
+                const badge = paymentStatusVisual(payment.status, colors);
                 const isLast = idx === payments.length - 1;
                 return (
                   <TouchableOpacity
@@ -421,7 +415,7 @@ export default function ProfileScreen() {
                     </View>
                     <ChevronRight
                       size={16}
-                      color={WHITE_30}
+                      color={colors.mutedFg}
                       style={styles.orderChevron}
                     />
                   </TouchableOpacity>
@@ -435,7 +429,7 @@ export default function ProfileScreen() {
           <>
             <View style={styles.divider} />
             <View style={styles.gridHeaderRow}>
-              <Grid3x3 size={16} color={WHITE} />
+              <Grid3x3 size={16} color={colors.foreground} />
               <Text style={styles.gridHeaderText}>My Designs</Text>
             </View>
             <View style={styles.grid}>
@@ -456,7 +450,7 @@ export default function ProfileScreen() {
               style={styles.designerBtn}
               onPress={() => setShowModal(true)}
             >
-              <Star size={18} color={WHITE} fill={WHITE} />
+              <Star size={18} color={colors.onPrimary} fill={colors.onPrimary} />
               <Text style={styles.designerBtnText}>Become a Designer</Text>
             </Pressable>
           </View>
@@ -467,10 +461,10 @@ export default function ProfileScreen() {
 
           <View style={styles.settingsRow}>
             <View style={styles.settingsRowLeft}>
-              <Moon size={18} color="rgba(255,255,255,0.6)" />
+              <Moon size={18} color={colors.mutedFg} />
               <Text style={styles.settingsRowText}>Dark Mode</Text>
             </View>
-            <DarkModeToggle isDark={isDark} onToggle={toggleTheme} />
+            <DarkModeToggle isDark={isDark} onToggle={toggleTheme} colors={colors} styles={styles} />
           </View>
 
           <TouchableOpacity
@@ -478,10 +472,10 @@ export default function ProfileScreen() {
             onPress={() => showToast("Help center coming soon.")}
           >
             <View style={styles.settingsRowLeft}>
-              <HelpCircle size={18} color="rgba(255,255,255,0.6)" />
+              <HelpCircle size={18} color={colors.mutedFg} />
               <Text style={styles.settingsRowText}>Help & Support</Text>
             </View>
-            <ChevronRight size={18} color={WHITE_30} />
+            <ChevronRight size={18} color={colors.mutedFg} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -489,16 +483,16 @@ export default function ProfileScreen() {
             onPress={() => router.push("/(app)/change-password")}
           >
             <View style={styles.settingsRowLeft}>
-              <Lock size={18} color="rgba(255,255,255,0.6)" />
+              <Lock size={18} color={colors.mutedFg} />
               <Text style={styles.settingsRowText}>Change Password</Text>
             </View>
-            <ChevronRight size={18} color={WHITE_30} />
+            <ChevronRight size={18} color={colors.mutedFg} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.settingsRow} onPress={handleSignOut}>
             <View style={styles.settingsRowLeft}>
-              <LogOut size={18} color={RED} />
-              <Text style={[styles.settingsRowText, { color: RED }]}>
+              <LogOut size={18} color={colors.destructive} />
+              <Text style={[styles.settingsRowText, { color: colors.destructive }]}>
                 Sign Out
               </Text>
             </View>
@@ -512,18 +506,20 @@ export default function ProfileScreen() {
         visible={showModal}
         onClose={() => setShowModal(false)}
         onStartUploading={() => showToast("Designer upgrade coming soon")}
+        colors={colors}
+        styles={styles}
       />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const getStyles = (colors: Colors) => StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: NAVY,
+    backgroundColor: colors.background,
   },
   safeTop: {
-    backgroundColor: NAVY,
+    backgroundColor: colors.background,
   },
   topBar: {
     paddingHorizontal: 16,
@@ -533,7 +529,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 16,
     fontWeight: "800",
-    color: WHITE,
+    color: colors.foreground,
   },
   scrollContent: {
     paddingBottom: 96,
@@ -550,9 +546,9 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 36,
-    backgroundColor: NAVY_LIGHT,
+    backgroundColor: colors.card,
     borderWidth: 2,
-    borderColor: ORANGE,
+    borderColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 16,
@@ -560,18 +556,18 @@ const styles = StyleSheet.create({
   avatarInitials: {
     fontSize: 20,
     fontWeight: "800",
-    color: ORANGE,
+    color: colors.primary,
   },
   followingStat: {},
   followingNumber: {
     fontSize: 24,
     fontWeight: "800",
-    color: WHITE,
+    color: colors.foreground,
     lineHeight: 28,
   },
   followingLabel: {
     fontSize: 11,
-    color: WHITE_50,
+    color: colors.mutedFg,
     marginTop: 4,
   },
   statsRow: {
@@ -585,27 +581,27 @@ const styles = StyleSheet.create({
   statValue: {
     fontSize: 16,
     fontWeight: "800",
-    color: WHITE,
+    color: colors.foreground,
   },
   statValueOrange: {
-    color: ORANGE,
+    color: colors.primary,
   },
   statLabel: {
     fontSize: 10,
     fontWeight: "500",
-    color: WHITE_50,
+    color: colors.mutedFg,
     marginTop: 2,
   },
   displayName: {
     fontSize: 18,
     fontWeight: "800",
-    color: WHITE,
+    color: colors.foreground,
     marginTop: 16,
     marginBottom: 2,
   },
   subtitle: {
     fontSize: 14,
-    color: WHITE_50,
+    color: colors.mutedFg,
     marginBottom: 16,
   },
   editProfileBtn: {
@@ -615,14 +611,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: "transparent",
     borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.4)",
+    borderColor: colors.border,
     alignItems: "center",
     justifyContent: "center",
   },
   editProfileText: {
     fontSize: 14,
     fontWeight: "700",
-    color: WHITE,
+    color: colors.foreground,
   },
   ordersSection: {
     marginTop: 24,
@@ -636,7 +632,7 @@ const styles = StyleSheet.create({
   ordersHeadingText: {
     fontSize: 14,
     fontWeight: "700",
-    color: WHITE,
+    color: colors.foreground,
     marginLeft: 8,
   },
   orderRow: {
@@ -646,7 +642,7 @@ const styles = StyleSheet.create({
   },
   orderRowBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: WHITE_8,
+    borderBottomColor: colors.border,
   },
   orderLeft: {
     flex: 1,
@@ -654,11 +650,11 @@ const styles = StyleSheet.create({
   orderName: {
     fontSize: 14,
     fontWeight: "700",
-    color: WHITE,
+    color: colors.foreground,
   },
   orderMeta: {
     fontSize: 11,
-    color: WHITE_50,
+    color: colors.mutedFg,
     marginTop: 2,
   },
   badge: {
@@ -675,7 +671,7 @@ const styles = StyleSheet.create({
   },
   divider: {
     borderTopWidth: 1,
-    borderTopColor: WHITE_10,
+    borderTopColor: colors.border,
     marginTop: 20,
     marginBottom: 12,
     marginHorizontal: 20,
@@ -690,7 +686,7 @@ const styles = StyleSheet.create({
   gridHeaderText: {
     fontSize: 12,
     fontWeight: "700",
-    color: WHITE,
+    color: colors.foreground,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
@@ -713,8 +709,8 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 48,
     borderRadius: 12,
-    backgroundColor: ORANGE,
-    shadowColor: ORANGE,
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -727,7 +723,7 @@ const styles = StyleSheet.create({
   designerBtnText: {
     fontSize: 14,
     fontWeight: "700",
-    color: WHITE,
+    color: colors.onPrimary,
   },
   settingsSection: {
     marginTop: 24,
@@ -735,7 +731,7 @@ const styles = StyleSheet.create({
   },
   settingsDivider: {
     height: 1,
-    backgroundColor: WHITE_10,
+    backgroundColor: colors.border,
     marginBottom: 16,
   },
   settingsRow: {
@@ -751,7 +747,7 @@ const styles = StyleSheet.create({
   settingsRowText: {
     fontSize: 14,
     fontWeight: "600",
-    color: WHITE,
+    color: colors.foreground,
     marginLeft: 12,
   },
   toggleTrack: {
@@ -765,11 +761,11 @@ const styles = StyleSheet.create({
     width: 20,
     height: 20,
     borderRadius: 9999,
-    backgroundColor: WHITE,
+    backgroundColor: colors.background,
   },
   versionText: {
     fontSize: 11,
-    color: WHITE_30,
+    color: colors.mutedFg,
     textAlign: "center",
     marginTop: 24,
     marginBottom: 8,
@@ -779,11 +775,11 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: colors.overlay,
     justifyContent: "flex-end",
   },
   modalSheet: {
-    backgroundColor: WHITE,
+    backgroundColor: colors.background,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingHorizontal: 24,
@@ -794,7 +790,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 4,
     borderRadius: 9999,
-    backgroundColor: GRAY_LIGHT,
+    backgroundColor: colors.border,
     alignSelf: "center",
     marginBottom: 16,
   },
@@ -802,7 +798,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 9999,
-    backgroundColor: "rgba(10,24,46,0.05)",
+    backgroundColor: colors.muted,
     alignSelf: "flex-end",
     alignItems: "center",
     justifyContent: "center",
@@ -811,7 +807,7 @@ const styles = StyleSheet.create({
     width: 64,
     height: 64,
     borderRadius: 9999,
-    backgroundColor: ORANGE_10,
+    backgroundColor: colors.primarySoft,
     alignSelf: "center",
     alignItems: "center",
     justifyContent: "center",
@@ -820,13 +816,13 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: "800",
-    color: NAVY,
+    color: colors.foreground,
     textAlign: "center",
     marginBottom: 4,
   },
   modalSubtitle: {
     fontSize: 14,
-    color: GRAY,
+    color: colors.mutedFg,
     textAlign: "center",
     marginBottom: 24,
   },
@@ -842,7 +838,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 12,
-    backgroundColor: ORANGE_10,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -852,11 +848,11 @@ const styles = StyleSheet.create({
   benefitTitle: {
     fontSize: 14,
     fontWeight: "700",
-    color: NAVY,
+    color: colors.foreground,
   },
   benefitDesc: {
     fontSize: 12,
-    color: GRAY,
+    color: colors.mutedFg,
     lineHeight: 18,
     marginTop: 2,
   },
@@ -864,8 +860,8 @@ const styles = StyleSheet.create({
     width: "100%",
     height: 48,
     borderRadius: 12,
-    backgroundColor: ORANGE,
-    shadowColor: ORANGE,
+    backgroundColor: colors.primary,
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -880,7 +876,7 @@ const styles = StyleSheet.create({
   modalCtaText: {
     fontSize: 14,
     fontWeight: "700",
-    color: WHITE,
+    color: colors.onPrimary,
   },
   maybeLaterBtn: {
     paddingVertical: 8,
@@ -888,7 +884,7 @@ const styles = StyleSheet.create({
   maybeLaterText: {
     fontSize: 14,
     fontWeight: "600",
-    color: GRAY,
+    color: colors.mutedFg,
     textAlign: "center",
   },
 });
