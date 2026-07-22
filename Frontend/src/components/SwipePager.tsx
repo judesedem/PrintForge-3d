@@ -10,6 +10,7 @@ type Props = {
   pages: SwipePage[];
   activeIndex: number;
   onIndexChange: (index: number) => void;
+  scrollEnabled?: boolean;
 };
 
 /**
@@ -22,7 +23,7 @@ type Props = {
  * The user can swipe left/right to move between screens, or a tab bar can
  * jump directly to a page by changing `activeIndex` -- both stay in sync.
  */
-export default function SwipePager({ pages, activeIndex, onIndexChange }: Props) {
+export default function SwipePager({ pages, activeIndex, onIndexChange, scrollEnabled = true }: Props) {
   const { width } = useWindowDimensions();
   const scrollRef = useRef<ScrollView>(null);
   // Tracks whether the current scroll was triggered programmatically (tab tap)
@@ -51,6 +52,7 @@ export default function SwipePager({ pages, activeIndex, onIndexChange }: Props)
       showsHorizontalScrollIndicator={false}
       onMomentumScrollEnd={handleMomentumScrollEnd}
       scrollEventThrottle={16}
+      scrollEnabled={scrollEnabled}
     >
       {pages.map(page => (
         <View key={page.key} style={{ width }}>

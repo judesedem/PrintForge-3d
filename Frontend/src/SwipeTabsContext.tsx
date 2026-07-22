@@ -14,11 +14,13 @@ export type TabKey = typeof TAB_KEYS[number];
 type SwipeTabsContextType = {
   activeIndex: number;
   goToTab: (key: TabKey) => void;
+  setSwipeEnabled: (enabled: boolean) => void;
 };
 
 export const SwipeTabsContext = createContext<SwipeTabsContextType>({
   activeIndex: 0,
   goToTab: () => {},
+  setSwipeEnabled: () => {},
 });
 
 /**

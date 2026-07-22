@@ -105,7 +105,6 @@ export default function LoginScreen() {
       setError("Google sign-in didn’t complete. Try again.");
     }
   };
-  void handleGoogleSignIn;
 
   const busy = submitting || authLoading;
 
@@ -225,28 +224,7 @@ export default function LoginScreen() {
                 )}
               </Pressable>
 
-              <View style={s.dividerRow}>
-                <View style={s.divider} />
-                <Text style={s.dividerText}>or</Text>
-                <View style={s.divider} />
-              </View>
 
-              {/* Placeholder per spec — real Google OAuth wiring (see
-                  handleGoogleSignIn above) comes later. */}
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => console.log("google sign in")}
-                android_ripple={{ color: "rgba(0,0,0,0.05)" }}
-                style={s.googleButton}
-              >
-                <View>
-                  <Image
-                    source={require("../../assets/google_icon.png")}
-                    style={{ width: 20, height: 20 }}
-                  />
-                </View>
-                <Text style={s.googleButtonText}>Continue with Google</Text>
-              </Pressable>
 
               <Pressable
                 onPress={() => router.push("/(auth)/register")}

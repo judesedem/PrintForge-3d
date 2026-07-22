@@ -98,7 +98,7 @@ type PaymentOutcome = "success" | "cancelled" | null;
 const STEPS = ["Configure", "Estimate", "Payment"] as const;
 
 export default function SubmitScreen() {
-  const { goToTab } = useSwipeTabs();
+  const { goToTab, setSwipeEnabled } = useSwipeTabs();
   const { colors } = useTheme();
   const { token } = useSession();
   const { refetch: refetchJobs } = useJobs();
@@ -736,6 +736,8 @@ export default function SubmitScreen() {
           minimumValue={0}
           maximumValue={100}
           step={5}
+          onSlidingStart={() => setSwipeEnabled(false)}
+          onSlidingComplete={() => setSwipeEnabled(true)}
           onValueChange={(value: any) =>
             setInfill(Array.isArray(value) ? value[0] : value)
           }

@@ -1,8 +1,0 @@
-{
-  "build": {
-    "builder": "NIXPACKS"
-  },
-  "deploy": {
-    "startCommand": "java -Xmx400m -Dserver.port=$PORT -jar target/printforge-0.0.1-SNAPSHOT.jar"
-  }
-}

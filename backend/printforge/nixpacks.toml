@@ -1,8 +1,0 @@
-[phases.setup]
-nixPkgs = ["jdk21"]
-
-[phases.build]
-cmds = ["chmod +x mvnw", "./mvnw clean package -DskipTests"]
-
-[start]
-cmd = "java -Xmx400m -Xss512k -XX:+UseContainerSupport -Dserver.port=$PORT -jar target/*.jar"

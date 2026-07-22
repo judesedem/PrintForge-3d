@@ -1,0 +1,77 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: api-gateway
+  cloud:
+    compatibility-verifier:
+      enabled: false
+    gateway:
+      globalcors:
+        cors-configurations:
+          '[/**]':
+            allowedOrigins:
+              - "*"
+            allowedMethods:
+              - "*"
+            allowedHeaders:
+              - "*"
+      routes:
+        # Auth Service (port 8083)
+        - id: auth-service-route
+          uri: ${AUTH_SERVICE_URL:http://localhost:8083}
+          predicates:
+            - Path=/api/auth/**
+
+        # Printer Service (port 8082)
+        - id: printer-service-route
+          uri: ${PRINTER_SERVICE_URL:http://localhost:8082}
+          predicates:
+            - Path=/api/printers/**
+          filters:
+            - JwtAuthenticationFilter
+
+        # Order Service (port 8084)
+        - id: order-service-route
+          uri: ${ORDER_SERVICE_URL:http://localhost:8084}
+          predicates:
+            - Path=/api/print-jobs/**, /api/estimates/**, /api/materials/**, /api/labs/**, /api/job-service/**
+          filters:
+            - JwtAuthenticationFilter
+
+        # Marketplace Service (port 8085)
+        - id: marketplace-service-route
+          uri: ${MARKETPLACE_SERVICE_URL:http://localhost:8085}
+          predicates:
+            - Path=/api/marketplace/**, /api/files/**, /api/follows/**, /api/users/**, /api/design-requests/**, /api/challenges/**
+          filters:
+            - JwtAuthenticationFilter
+
+        # Payment Service (port 8086)
+        - id: payment-service-route
+          uri: ${PAYMENT_SERVICE_URL:http://localhost:8086}
+          predicates:
+            - Path=/api/payments/**
+          filters:
+            - JwtAuthenticationFilter
+
+        # Notification Service (port 8087)
+        - id: notification-service-route
+          uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8087}
+          predicates:
+            - Path=/api/notifications/**, /api/reports/**, /api/moderation/**
+          filters:
+            - JwtAuthenticationFilter
+
+        # Admin Service (port 8088)
+        - id: admin-service-route
+          uri: ${ADMIN_SERVICE_URL:http://localhost:8088}
+          predicates:
+            - Path=/api/admin/**
+          filters:
+            - JwtAuthenticationFilter
+
+jwt:
+  secret: ${JWT_SECRET:bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLWxvY2FsLWRldi0xMjM0}
+

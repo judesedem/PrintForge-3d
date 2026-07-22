@@ -50,7 +50,7 @@ function RootStack() {
         name="(auth)/forgot-password"
         options={{ headerShown: false }}
       />
-      <Stack.Screen name="(app)" options={{ headerShown: false }} />
+      <Stack.Screen name="(app)" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="jobs" options={{ headerShown: false }} />
       <Stack.Screen name="admin" options={{ headerShown: false }} />
       <Stack.Screen name="staff/queue" options={{ headerShown: false }} />

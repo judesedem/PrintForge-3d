@@ -27,6 +27,8 @@ export default function TabsLayout() {
   const insets = useSafeAreaInsets();
   const [activeIndex, setActiveIndex] = useState(0);
 
+  const [swipeEnabled, setSwipeEnabled] = useState(true);
+
   const handleIndexChange = useCallback((index: number) => {
     setActiveIndex(index);
   }, []);
@@ -36,7 +38,7 @@ export default function TabsLayout() {
     if (index !== -1) setActiveIndex(index);
   }, []);
 
-  const contextValue = useMemo(() => ({ activeIndex, goToTab }), [activeIndex, goToTab]);
+  const contextValue = useMemo(() => ({ activeIndex, goToTab, setSwipeEnabled }), [activeIndex, goToTab, setSwipeEnabled]);
 
   // register.tsx/login.tsx replace() straight to this route the moment
   // auth succeeds, but SwipePager mounts all 5 tabs at once (not lazily —
@@ -57,7 +59,7 @@ export default function TabsLayout() {
     <SwipeTabsContext.Provider value={contextValue}>
       <View style={[styles.screen, { backgroundColor: colors.background, paddingTop: insets.top }]}> 
         <View style={styles.pagerWrap}>
-          <SwipePager pages={PAGES} activeIndex={activeIndex} onIndexChange={handleIndexChange} />
+          <SwipePager pages={PAGES} activeIndex={activeIndex} onIndexChange={handleIndexChange} scrollEnabled={swipeEnabled} />
         </View>
         <SwipeTabBar activeIndex={activeIndex} onChange={handleIndexChange} />
       </View>

@@ -257,11 +257,7 @@ export default function RegisterScreen() {
                 accessibilityRole="button"
                 disabled={busy}
                 onPress={handleCreateAccount}
-                style={({ pressed }) => [
-                  s.primaryButton,
-                  pressed && s.primaryButtonPressed,
-                  busy && s.disabled,
-                ]}
+                style={[s.primaryButton, busy && s.disabled]}
               >
                 {submitting ? (
                   <ActivityIndicator color="#FFFFFF" />
