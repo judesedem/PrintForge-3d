@@ -13,3 +13,5 @@
 
 nodemodules/
 node_modules
+
+.fake

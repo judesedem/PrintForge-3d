@@ -10,7 +10,10 @@ import {
   Animated,
   Easing,
   Modal,
+  Linking,
+  TextInput,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ShoppingBag,
@@ -34,11 +37,11 @@ import { useSession } from "../../../src/SessionContext";
 import { useTheme } from "../../../src/ThemeContext";
 import { Colors } from "../../../src/theme";
 import { useToast } from "../../../src/ToastContext";
-import { fetchMyPayments, Payment, initiatePayment } from "../../../src/api/payments";
+import { fetchMyPayments, Payment, initiatePayment, fetchPayment } from "../../../src/api/payments";
 import { fetchMyListings } from "../../../src/api/marketplace";
 import { fetchAcceptedRequests, deliverDesignRequest, DesignRequest } from "../../../src/api/design-requests";
 import { uploadFile } from "../../../src/api/files";
-import { upgradeToPremium } from "../../../src/api/auth";
+import { upgradeToPremium, deleteAccount } from "../../../src/api/auth";
 // TODO(backend): no fetchUserStats endpoint exists yet.
 // GET /api/users/{id}/stats is on the "not wired" list.
 // import { fetchUserStats } from "../../../src/api/users";
@@ -244,6 +247,9 @@ export default function ProfileScreen() {
   const { showToast } = useToast();
 
   const [showModal, setShowModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
@@ -421,14 +427,31 @@ export default function ProfileScreen() {
               activeOpacity={0.7}
               onPress={async () => {
                 if (token) {
+                  const openPaymentUrl = async (url: string, id: string) => {
+                    await WebBrowser.openBrowserAsync(url);
+                    try {
+                      // Fetching the payment auto-verifies it if pending
+                      await fetchPayment(token, id);
+                    } catch (e) {
+                      // ignore
+                    }
+                    // Refresh data after payment attempt
+                    loadData();
+                  };
+
+                  const existing = payments.find(p => p.isPremiumUpgrade && p.status === 'PENDING');
+                  if (existing && existing.checkoutUrl) {
+                    await openPaymentUrl(existing.checkoutUrl, existing.id);
+                    return;
+                  }
                   try {
                     showToast("Initiating secure payment...");
                     const payment = await initiatePayment(token, { isPremiumUpgrade: true });
                     if (payment.checkoutUrl) {
-                      window.location.href = payment.checkoutUrl;
+                      await openPaymentUrl(payment.checkoutUrl, payment.id);
                     }
-                  } catch (e) {
-                    showToast("Failed to initiate payment");
+                  } catch (e: any) {
+                    showToast(e.message || "Failed to initiate payment");
                   }
                 }
               }}
@@ -626,9 +649,80 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.settingsRow}
+            onPress={() => setShowDeleteModal(true)}
+          >
+            <View style={styles.settingsRowLeft}>
+              <X size={18} color={colors.destructive} />
+              <Text style={[styles.settingsRowText, { color: colors.destructive }]}>Delete Account</Text>
+            </View>
+          </TouchableOpacity>
+
           <Text style={styles.versionText}>PrintForge 3D · v1.0.0</Text>
         </View>
       </ScrollView>
+
+      {/* Delete Account Modal */}
+      <Modal visible={showDeleteModal} transparent animationType="slide" onRequestClose={() => setShowDeleteModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowDeleteModal(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
+            <View style={styles.dragHandle} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.modalTitle, { marginBottom: 0 }]}>Delete Account</Text>
+              <Pressable onPress={() => setShowDeleteModal(false)} style={styles.modalCloseBtn}>
+                <X size={20} color={colors.mutedFg} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalSubtitle, { marginBottom: 16 }]}>
+              Enter your password to confirm account deletion. This action is permanent.
+            </Text>
+            <TextInput
+              style={[styles.input, { marginBottom: 24 }]}
+              placeholder="Password"
+              placeholderTextColor={colors.mutedFg}
+              secureTextEntry
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+            />
+            <TouchableOpacity
+              style={[styles.modalCta, { backgroundColor: colors.destructive, shadowColor: colors.destructive }]}
+              activeOpacity={0.8}
+              disabled={deletingAccount}
+              onPress={async () => {
+                if (!deletePassword) {
+                  showToast("Password is required");
+                  return;
+                }
+                if (token) {
+                  setDeletingAccount(true);
+                  try {
+                    await deleteAccount(token, deletePassword);
+                    showToast("Account deleted successfully");
+                    signOut();
+                  } catch (e: any) {
+                    showToast(e.message || "Failed to delete account");
+                  } finally {
+                    setDeletingAccount(false);
+                    setShowDeleteModal(false);
+                    setDeletePassword("");
+                  }
+                }
+              }}
+            >
+              <Text style={styles.modalCtaText}>
+                {deletingAccount ? "Deleting..." : "Confirm Delete"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.maybeLaterBtn}
+              onPress={() => setShowDeleteModal(false)}
+            >
+              <Text style={styles.maybeLaterText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <BecomeDesignerModal
         visible={showModal}
@@ -953,6 +1047,15 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     color: colors.mutedFg,
     textAlign: "center",
     marginBottom: 24,
+  },
+  input: {
+    height: 48,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    color: colors.foreground,
+    backgroundColor: colors.background,
   },
   benefitsContainer: {
     gap: 12,
