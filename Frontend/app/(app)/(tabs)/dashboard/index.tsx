@@ -11,7 +11,7 @@ export default function DashboardIndex() {
   // 'lab_staff', not 'staff'. This used to check 'staff' and silently
   // fall through lab staff accounts to the student dashboard.
   if (role === 'designer') return <DesignerDashboard />;
-  if (role === 'lab_staff') return <Redirect href="/staff/queue" />;
+  if (role === 'lab_staff') return <Redirect href="/staff/board" />;
   if (role === 'admin') return <Redirect href="/admin" />;
 
   return <StudentDashboard />;
