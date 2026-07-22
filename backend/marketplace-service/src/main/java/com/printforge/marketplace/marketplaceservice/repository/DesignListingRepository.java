@@ -43,7 +43,7 @@ public interface DesignListingRepository extends JpaRepository<DesignListing, Lo
     @Query("SELECT dl FROM DesignListing dl WHERE dl.status = 'PUBLISHED' " +
             "AND (:category IS NULL OR LOWER(dl.category) = LOWER(CAST(:category AS string))) " +
             "AND dl.designerId NOT IN (SELECT u.userId FROM User u WHERE u.suspended = true) " +
-            "ORDER BY dl.createdAt DESC")
+            "ORDER BY (SELECT u.isPremium FROM User u WHERE u.userId = dl.designerId) DESC, dl.createdAt DESC")
     Page<DesignListing> findPublishedNewest(@Param("category") String category, Pageable pageable);
 
     // Backs GET /api/marketplace?sort=trending. Same PUBLISHED/category/
@@ -55,7 +55,8 @@ public interface DesignListingRepository extends JpaRepository<DesignListing, Lo
     @Query("SELECT dl FROM DesignListing dl WHERE dl.status = 'PUBLISHED' " +
             "AND (:category IS NULL OR LOWER(dl.category) = LOWER(CAST(:category AS string))) " +
             "AND dl.designerId NOT IN (SELECT u.userId FROM User u WHERE u.suspended = true) " +
-            "ORDER BY (dl.downloadCount * :downloadWeight + dl.favoriteCount * :favoriteWeight) DESC, dl.createdAt DESC")
+            "ORDER BY (SELECT u.isPremium FROM User u WHERE u.userId = dl.designerId) DESC, " +
+            "(dl.downloadCount * :downloadWeight + dl.favoriteCount * :favoriteWeight) DESC, dl.createdAt DESC")
     Page<DesignListing> findPublishedTrending(@Param("category") String category,
                                                @Param("downloadWeight") int downloadWeight,
                                                @Param("favoriteWeight") int favoriteWeight,

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { BadgeCheck, Bell, Download, Heart } from 'lucide-react-native';
@@ -21,6 +21,12 @@ import NotificationsPanel from '@/components/NotificationsPanel';
  * missing theme token.
  */
 
+import { fetchListings, MarketplaceListing } from '@/api/marketplace';
+import { useSession } from '@/SessionContext';
+
+// NOTE: FeedItem still has mock-like fields (designerName, avatar, likes, downloads) 
+// because those backend features don't exist yet, but we will populate the core 
+// data (image, designName) from real listings.
 type FeedItem = {
   id: string;
   designerName: string;
@@ -35,54 +41,6 @@ type FeedItem = {
   liked: boolean;
 };
 
-const MOCK_FEED: FeedItem[] = [
-  {
-    id: '1',
-    designerName: 'Marcus Chen',
-    verified: true,
-    followed: false,
-    image:
-      'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=600',
-    avatar:
-      'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
-    designName: 'Planetary Gear Set V3',
-    likes: 1240,
-    downloads: 320,
-    trending: true,
-    liked: false,
-  },
-  {
-    id: '2',
-    designerName: 'Priya Patel',
-    verified: true,
-    followed: true,
-    image:
-      'https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=600',
-    avatar:
-      'https://images.pexels.com/photos/415829/pexels-photo-415829.jpeg?auto=compress&cs=tinysrgb&w=100',
-    designName: 'Drone GoPro Mount',
-    likes: 890,
-    downloads: 210,
-    trending: true,
-    liked: true,
-  },
-  {
-    id: '3',
-    designerName: 'Jonas Weiss',
-    verified: false,
-    followed: false,
-    image:
-      'https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=600',
-    avatar:
-      'https://images.pexels.com/photos/733872/pexels-photo-733872.jpeg?auto=compress&cs=tinysrgb&w=100',
-    designName: 'Raspberry Pi Enclosure',
-    likes: 567,
-    downloads: 145,
-    trending: false,
-    liked: false,
-  },
-];
-
 // The Bolt reference renders feed cards white-on-navy in both themes, so
 // these are fixed card-local colors rather than theme tokens.
 const CARD_BG = '#FFFFFF';
@@ -95,12 +53,44 @@ type FeedTab = 'trending' | 'newest';
 export default function StudentDashboard() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { token, authLoading } = useSession();
   const s = makeStyles(colors);
 
-  // UI-only toggle for now — no feed API exists yet.
   const [tab, setTab] = useState<FeedTab>('trending');
   const [notifOpen, setNotifOpen] = useState(false);
-  const [feed, setFeed] = useState<FeedItem[]>(MOCK_FEED);
+  const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch live listings
+  useEffect(() => {
+    if (authLoading) return;
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    fetchListings(token)
+      .then((listings) => {
+        // Map live listings to FeedItem shape.
+        // We use placeholder designer info since no user endpoint exists yet.
+        const mappedFeed: FeedItem[] = listings.map((l, idx) => ({
+          id: l.id,
+          designerName: 'Aero Designs', // Hardcoded to match our seeder for now
+          verified: true,
+          followed: false,
+          image: l.thumbnailUrl || 'https://via.placeholder.com/600',
+          avatar: 'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
+          designName: l.title,
+          likes: l.totalOrders * 3 + 12, // Fake likes based on orders
+          downloads: l.totalOrders,
+          trending: idx < 3,
+          liked: false,
+        }));
+        setFeed(mappedFeed);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [authLoading, token]);
 
   const toggleLike = (id: string) =>
     setFeed(prev =>
@@ -164,14 +154,17 @@ export default function StudentDashboard() {
         </Pressable>
       </View>
 
-      <View style={s.imageWrap}>
+      <Pressable 
+        style={({ pressed }) => [s.imageWrap, pressed && s.pressed]}
+        onPress={() => router.push(`/marketplace/${item.id}`)}
+      >
         <Image source={{ uri: item.image }} style={s.cardImage} />
         {item.trending && tab === 'trending' ? (
           <View style={s.popularBadge}>
             <Text style={s.popularText}>Popular</Text>
           </View>
         ) : null}
-      </View>
+      </Pressable>
 
       <View style={s.actionRow}>
         <Pressable
@@ -234,13 +227,23 @@ export default function StudentDashboard() {
         </View>
       </View>
 
-      <FlatList
-        data={feed}
-        keyExtractor={item => item.id}
-        renderItem={renderCard}
-        contentContainerStyle={s.feedContent}
-        showsVerticalScrollIndicator={false}
-      />
+      {loading ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: colors.mutedFg }}>Loading feed...</Text>
+        </View>
+      ) : feed.length === 0 ? (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+          <Text style={{ color: colors.mutedFg }}>No designs published yet.</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={feed}
+          keyExtractor={item => item.id}
+          renderItem={renderCard}
+          contentContainerStyle={s.feedContent}
+          showsVerticalScrollIndicator={false}
+        />
+      )}
 
       <NotificationsPanel visible={notifOpen} onClose={() => setNotifOpen(false)} />
     </View>

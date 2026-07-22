@@ -20,8 +20,15 @@ public class Payment {
     // The marketplace listing being ordered (nullable — only set for marketplace orders)
     private Long listingId;
 
+    // The design request being paid for (nullable)
+    private Long requestId;
+
     // The print job created after payment clears (null until webhook confirms)
     private Long printJobId;
+
+    // True if this payment is to upgrade the user to a Premium Designer
+    @Column(name = "is_premium_upgrade", columnDefinition = "boolean default false")
+    private Boolean isPremiumUpgrade = false;
 
     // Carried through from order submission to handleWebhook()'s PrintJob
     // creation — the Estimate has no home for these (see
@@ -74,8 +81,14 @@ public class Payment {
     public Long getListingId() { return listingId; }
     public void setListingId(Long listingId) { this.listingId = listingId; }
 
+    public Long getRequestId() { return requestId; }
+    public void setRequestId(Long requestId) { this.requestId = requestId; }
+
     public Long getPrintJobId() { return printJobId; }
     public void setPrintJobId(Long printJobId) { this.printJobId = printJobId; }
+
+    public Boolean getIsPremiumUpgrade() { return isPremiumUpgrade; }
+    public void setIsPremiumUpgrade(Boolean isPremiumUpgrade) { this.isPremiumUpgrade = isPremiumUpgrade; }
 
     public String getColor() { return color; }
     public void setColor(String color) { this.color = color; }

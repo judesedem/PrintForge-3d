@@ -52,5 +52,19 @@ public class DataSeeder implements CommandLineRunner {
             userRepository.save(staff);
             System.out.println("Seeded staff user: " + staffEmail);
         }
+
+        // Seed a DESIGNER user for marketplace listings
+        String designerEmail = "designer@printforge.com";
+        if (!userRepository.existsByEmail(designerEmail)) {
+            User designer = new User();
+            designer.setEmail(designerEmail);
+            designer.setPassword(passwordEncoder.encode("designer123"));
+            designer.setFullName("Aero Designs");
+            designer.setRole(Role.DESIGNER);
+            designer.setEmailVerified(true);
+            designer.setEmailOptIn(false);
+            userRepository.save(designer);
+            System.out.println("Seeded designer user: " + designerEmail);
+        }
     }
 }

@@ -82,6 +82,13 @@ public class ReportService {
         return saved;
     }
 
+    public void deleteReport(Long id) {
+        if (!reportRepository.existsById(id)) {
+            throw new ReportNotFoundException(id);
+        }
+        reportRepository.deleteById(id);
+    }
+
     private ReportStatus parseStatus(String status, String validValuesMessage) {
         try {
             return ReportStatus.valueOf(status.trim().toUpperCase());

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useCallback, useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View, ActionSheetIOS, Platform } from 'react-native';
 import {
   Bell,
   Boxes,
@@ -8,63 +8,177 @@ import {
   ClipboardList,
   CloudUpload,
   Crown,
+  Eye,
+  EyeOff,
   MoreHorizontal,
   PackageCheck,
   Sparkles,
   Star,
-  TrendingUp,
+  Trash2,
 } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '@/ThemeContext';
 import { Colors, designTokens, makeControlStyles } from '@/theme';
-import { LISTINGS, Listing } from '@/data/mockData';
+import { fetchMyListings, publishListing, unpublishListing, deleteListing, MarketplaceListing } from '@/api/marketplace';
+import { fetchDesignRequests, DesignRequest } from '@/api/design-requests';
 import ImageWithFallback from '@/components/ImageWithFallback';
 import GhsAmount from '@/components/GhsAmount';
 import SectionHeader from '@/components/SectionHeader';
 import { useSwipeTabs } from '@/SwipeTabsContext';
 import { useSession } from '@/SessionContext';
-import { fetchDesignRequests, DesignRequest } from '@/api/design-requests';
-
-type DesignerListingView = Listing & {
-  marketplaceStatus: 'PUBLISHED' | 'DRAFT';
-  totalOrders: number;
-  totalEarnings: number;
-};
-
-const designerListings: DesignerListingView[] = LISTINGS.slice(0, 4).map((listing, index) => {
-  const totalOrders = index === 3 ? 0 : [24, 15, 11][index];
-
-  return {
-    ...listing,
-    marketplaceStatus: index === 3 ? 'DRAFT' : 'PUBLISHED',
-    totalOrders,
-    totalEarnings: totalOrders * listing.price,
-  };
-});
-
-const dashboardTabs = ['Overview', 'Listings', 'Orders', 'Earnings'];
 
 export default function DesignerDashboard() {
   const router = useRouter();
   const { colors } = useTheme();
   const { goToTab } = useSwipeTabs();
-  const { firebaseUser } = useSession();
+  const { firebaseUser, token } = useSession();
   const s = makeStyles(colors);
   const controls = makeControlStyles(colors);
-  const [activeTab, setActiveTab] = useState(dashboardTabs[0]);
-  const [requests, setRequests] = useState<DesignRequest[]>([]);
-  const { token } = useSession();
 
-  useEffect(() => {
-    if (token) {
-      fetchDesignRequests(token).then(setRequests).catch(console.error);
+  const [listings, setListings] = useState<MarketplaceListing[]>([]);
+  const [requests, setRequests] = useState<DesignRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [publishingId, setPublishingId] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    if (!token) { setLoading(false); return; }
+    setLoading(true);
+    setError(null);
+    try {
+      const [listingsData, requestsData] = await Promise.all([
+        fetchMyListings(token),
+        fetchDesignRequests(token),
+      ]);
+      setListings(listingsData);
+      setRequests(requestsData);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load dashboard');
+    } finally {
+      setLoading(false);
     }
   }, [token]);
 
-  const designerName = firebaseUser?.displayName || 'Aero Designs';
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load])
+  );
+
+  const handleTogglePublish = async (listing: MarketplaceListing) => {
+    if (!token || publishingId) return;
+    setPublishingId(listing.id);
+    try {
+      const updated = listing.status === 'DRAFT'
+        ? await publishListing(token, listing.id)
+        : await unpublishListing(token, listing.id);
+      setListings(prev => prev.map(l => l.id === listing.id ? updated : l));
+    } catch (err) {
+      console.error('Publish/unpublish failed:', err);
+    } finally {
+      setPublishingId(null);
+    }
+  };
+
+  const handleDeleteListing = (listing: MarketplaceListing) => {
+    Alert.alert(
+      'Delete Listing',
+      `Are you sure you want to delete "${listing.title}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            if (!token) return;
+            try {
+              await deleteListing(token, listing.id);
+              setListings(prev => prev.filter(l => l.id !== listing.id));
+            } catch (err) {
+              Alert.alert('Error', err instanceof Error ? err.message : 'Could not delete listing');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleCardPress = (listing: MarketplaceListing) => {
+    const isDraft = listing.status === 'DRAFT';
+    const canDelete = isDraft && listing.totalOrders === 0;
+
+    if (Platform.OS === 'ios') {
+      const options = ['Cancel', isDraft ? 'Publish' : 'Unpublish'];
+      let destructiveIndex = -1;
+      
+      if (canDelete) {
+        options.push('Delete');
+        destructiveIndex = 2;
+      }
+
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          options,
+          cancelButtonIndex: 0,
+          destructiveButtonIndex: destructiveIndex !== -1 ? destructiveIndex : undefined,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            handleTogglePublish(listing);
+          } else if (buttonIndex === 2 && canDelete) {
+            handleDeleteListing(listing);
+          }
+        }
+      );
+    } else {
+      // Fallback for Android
+      const buttons = [
+        {
+          text: isDraft ? 'Publish' : 'Unpublish',
+          onPress: () => handleTogglePublish(listing),
+        },
+        { text: 'Cancel', style: 'cancel' as const },
+      ];
+
+      if (canDelete) {
+        buttons.splice(1, 0, {
+          text: 'Delete',
+          style: 'destructive' as const,
+          onPress: () => handleDeleteListing(listing),
+        });
+      }
+
+      Alert.alert('Manage Listing', `What would you like to do with "${listing.title}"?`, buttons);
+    }
+  };
+
+  const designerName = firebaseUser?.displayName || 'Designer';
   const designerEmail = firebaseUser?.email || 'designer@printforge.edu';
-  const totalOrders = designerListings.reduce((total, listing) => total + listing.totalOrders, 0);
-  const totalEarnings = designerListings.reduce((total, listing) => total + listing.totalEarnings, 0);
+
+  // Derive stats from live data — shows 0 when no transactions exist
+  const totalEarnings = listings.reduce((sum, l) => sum + l.totalEarnings, 0);
+  const totalOrders = listings.reduce((sum, l) => sum + l.totalOrders, 0);
+  const publishedCount = listings.filter(l => l.status === 'PUBLISHED').length;
+
+  if (loading) {
+    return (
+      <View style={[s.screen, s.centered]}>
+        <ActivityIndicator size="large" color={colors.primary} />
+        <Text style={s.loadingText}>Loading your dashboard…</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[s.screen, s.centered]}>
+        <Text style={s.loadingText}>{error}</Text>
+        <Pressable onPress={load} style={({ pressed }) => [s.retryButton, pressed && s.pressed]}>
+          <Text style={s.retryText}>Try again</Text>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <View style={s.screen}>
@@ -120,28 +234,12 @@ export default function DesignerDashboard() {
           </Pressable>
         </View>
 
-        <View style={s.segmentedControl}>
-          {dashboardTabs.map((tab, index) => (
-            <Pressable 
-              key={tab} 
-              style={[s.segment, activeTab === tab && s.segmentActive]}
-              onPress={() => setActiveTab(tab)}
-            >
-              <Text style={[s.segmentText, activeTab === tab && s.segmentTextActive]}>{tab}</Text>
-            </Pressable>
-          ))}
-        </View>
-
         <Text style={s.sectionEyebrow}>THIS MONTH</Text>
         <View style={s.statsContainer}>
           <View style={[s.statCard, s.statCardWide]}>
             <View style={s.statHeaderRow}>
-               <View style={[s.statIcon, { backgroundColor: colors.statusCompleted.bg }]}> 
+               <View style={[s.statIcon, { backgroundColor: colors.statusCompleted.bg }]}>
                  <CircleDollarSign size={20} color={colors.statusCompleted.dot} />
-               </View>
-               <View style={s.statTrendBadge}>
-                 <TrendingUp size={12} color={colors.success} />
-                 <Text style={s.statTrendText}>+10%</Text>
                </View>
             </View>
             <View style={s.statBody}>
@@ -152,30 +250,26 @@ export default function DesignerDashboard() {
 
           <View style={s.statsSubRow}>
             <View style={[s.statCard, s.statCardSquare]}>
-              <View style={[s.statIcon, { backgroundColor: colors.primarySoft }]}> 
+              <View style={[s.statIcon, { backgroundColor: colors.primarySoft }]}>
                 <Boxes size={20} color={colors.primary} />
               </View>
               <View style={s.statBodySquare}>
-                <Text style={s.statValue}>{designerListings.length}</Text>
+                <Text style={s.statValue}>{listings.length}</Text>
                 <Text style={s.statLabel}>Active Listings</Text>
               </View>
               <View style={s.statFooter}>
                 <PackageCheck size={12} color={colors.success} />
-                <Text style={s.statFooterText}>3 published</Text>
+                <Text style={s.statFooterText}>{publishedCount} published</Text>
               </View>
             </View>
 
             <View style={[s.statCard, s.statCardSquare]}>
-              <View style={[s.statIcon, { backgroundColor: colors.statusApproved.bg }]}> 
+              <View style={[s.statIcon, { backgroundColor: colors.statusApproved.bg }]}>
                 <ClipboardList size={20} color={colors.statusApproved.dot} />
               </View>
               <View style={s.statBodySquare}>
                 <Text style={s.statValue}>{totalOrders}</Text>
-                <Text style={s.statLabel}>New Orders</Text>
-              </View>
-              <View style={s.statFooter}>
-                <TrendingUp size={12} color={colors.success} />
-                <Text style={s.statFooterText}>+12%</Text>
+                <Text style={s.statLabel}>Total Orders</Text>
               </View>
             </View>
           </View>
@@ -194,85 +288,123 @@ export default function DesignerDashboard() {
           </Pressable>
         </View>
 
-        <View style={s.listingsGrid}>
-          {designerListings.map(listing => (
+        {listings.length === 0 ? (
+          <View style={s.emptyListings}>
+            <Boxes size={40} color={colors.mutedFg} />
+            <Text style={s.emptyTitle}>No listings yet</Text>
+            <Text style={s.emptySubtitle}>
+              Upload your first 3D design to start selling on the marketplace.
+            </Text>
             <Pressable
-              key={listing.id}
-              accessibilityRole="button"
-              accessibilityLabel={`Open ${listing.title}`}
-              onPress={() => router.push(`/marketplace/${listing.id}`)}
-              style={({ pressed }) => [s.listingCard, pressed && s.listingCardPressed]}
+              onPress={() => router.push('/marketplace/create')}
+              style={({ pressed }) => [s.createButton, pressed && controls.primaryButtonPressed, { marginTop: 12 }]}
             >
-              <View style={s.listingImageWrap}>
-                <ImageWithFallback source={{ uri: listing.image }} style={s.listingImage} resizeMode="cover" />
-                <View
-                  style={[
-                    s.statusBadge,
-                    listing.marketplaceStatus === 'PUBLISHED' ? s.publishedBadge : s.draftBadge,
-                  ]}
-                >
+              <CloudUpload size={16} color={colors.onPrimary} />
+              <Text style={s.createButtonText}>Create your first listing</Text>
+            </Pressable>
+          </View>
+        ) : (
+          <View style={s.listingsGrid}>
+            {listings.map(listing => (
+              <Pressable
+                key={listing.id}
+                onPress={() => handleCardPress(listing)}
+                style={({ pressed }) => [s.listingCard, pressed && s.pressed]}
+              >
+                <View style={s.listingImageWrap}>
+                  {listing.thumbnailUrl ? (
+                    <ImageWithFallback source={{ uri: listing.thumbnailUrl }} style={s.listingImage} resizeMode="cover" />
+                  ) : (
+                    <View style={[s.listingImage, s.listingImageFallback]}>
+                      <Boxes size={30} color={colors.mutedFg} />
+                    </View>
+                  )}
                   <View
                     style={[
-                      s.statusDot,
-                      {
-                        backgroundColor:
-                          listing.marketplaceStatus === 'PUBLISHED' ? colors.success : colors.warning,
-                      },
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      s.statusText,
-                      {
-                        color:
-                          listing.marketplaceStatus === 'PUBLISHED'
-                            ? colors.statusCompleted.text
-                            : colors.statusSubmitted.text,
-                      },
+                      s.statusBadge,
+                      listing.status === 'PUBLISHED' ? s.publishedBadge : s.draftBadge,
                     ]}
                   >
-                    {listing.marketplaceStatus}
-                  </Text>
-                </View>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={`More options for ${listing.title}`}
-                  onPress={() => {}}
-                  style={({ pressed }) => [s.moreButton, pressed && s.pressed]}
-                >
-                  <MoreHorizontal size={17} color={colors.foreground} />
-                </Pressable>
-              </View>
-
-              <View style={s.listingContent}>
-                <Text style={s.listingTitle} numberOfLines={2}>{listing.title}</Text>
-                <View style={s.priceRow}>
-                  <GhsAmount amount={listing.price} size="sm" />
-                  <Text style={s.perOrder}>per order</Text>
-                </View>
-
-                <View style={s.listingDivider} />
-
-                <View style={s.listingMetrics}>
-                  <View style={s.listingMetric}>
-                    <ClipboardList size={14} color={colors.mutedFg} />
-                    <Text style={s.metricText}>{listing.totalOrders} orders</Text>
+                    <View
+                      style={[
+                        s.statusDot,
+                        {
+                          backgroundColor:
+                            listing.status === 'PUBLISHED' ? colors.success : colors.warning,
+                        },
+                      ]}
+                    />
+                    <Text
+                      style={[
+                        s.statusText,
+                        {
+                          color:
+                            listing.status === 'PUBLISHED'
+                              ? colors.statusCompleted.text
+                              : colors.statusSubmitted.text,
+                        },
+                      ]}
+                    >
+                      {listing.status}
+                    </Text>
                   </View>
-                  <View style={s.listingMetric}>
-                    <CircleDollarSign size={14} color={colors.mutedFg} />
-                    <Text style={s.metricText}>GH₵ {listing.totalEarnings.toFixed(0)}</Text>
-                  </View>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={listing.status === 'DRAFT' ? `Publish ${listing.title}` : `Unpublish ${listing.title}`}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleTogglePublish(listing);
+                    }}
+                    style={({ pressed }) => [s.publishButton, pressed && s.pressed]}
+                  >
+                    {publishingId === listing.id ? (
+                      <ActivityIndicator size="small" color={colors.primary} />
+                    ) : listing.status === 'DRAFT' ? (
+                      <Eye size={17} color={colors.success} />
+                    ) : (
+                      <EyeOff size={17} color={colors.warning} />
+                    )}
+                  </Pressable>
+
+                  {listing.status === 'DRAFT' && listing.totalOrders === 0 && (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Delete ${listing.title}`}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        handleDeleteListing(listing);
+                      }}
+                      style={({ pressed }) => [s.deleteButton, pressed && s.pressed]}
+                    >
+                      <Trash2 size={16} color={colors.destructive} />
+                    </Pressable>
+                  )}
                 </View>
 
-                <View style={s.ratingRow}>
-                  <Star size={13} color={colors.warning} fill={colors.warning} />
-                  <Text style={s.ratingText}>{listing.rating}</Text>
-                  <Text style={s.ratingMeta}>Marketplace rating</Text>
+                <View style={s.listingContent}>
+                  <Text style={s.listingTitle} numberOfLines={2}>{listing.title}</Text>
+                  <View style={s.priceRow}>
+                    <GhsAmount amount={listing.price} size="sm" />
+                    <Text style={s.perOrder}>per order</Text>
+                  </View>
+
+                  <View style={s.listingDivider} />
+
+                  <View style={s.listingMetrics}>
+                    <View style={s.listingMetric}>
+                      <ClipboardList size={14} color={colors.mutedFg} />
+                      <Text style={s.metricText}>{listing.totalOrders} orders</Text>
+                    </View>
+                    <View style={s.listingMetric}>
+                      <CircleDollarSign size={14} color={colors.mutedFg} />
+                      <Text style={s.metricText}>GH₵ {listing.totalEarnings.toFixed(0)}</Text>
+                    </View>
+                  </View>
                 </View>
-              </View>
-            </Pressable>
-          ))}
-        </View>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         <View style={s.sectionHeaderWrap}>
           <SectionHeader label="Open design requests" />
@@ -302,35 +434,37 @@ export default function DesignerDashboard() {
           )}
         </View>
 
-        <View style={s.earningsCard}>
-          <View style={s.earningsHeader}>
-            <View>
-              <Text style={s.earningsEyebrow}>EARNINGS OVERVIEW</Text>
-              <Text style={s.earningsTitle}>Your designs are gaining traction</Text>
-            </View>
-            <View style={s.sparkleBadge}>
-              <Sparkles size={19} color={colors.primary} />
-            </View>
-          </View>
-
-          {designerListings.slice(0, 3).map((listing, index) => {
-            const maximum = Math.max(...designerListings.map(item => item.totalEarnings), 1);
-            const progress = `${Math.max(8, (listing.totalEarnings / maximum) * 100)}%` as `${number}%`;
-
-            return (
-              <View key={listing.id} style={[s.earningRow, index > 0 && s.earningRowBorder]}>
-                <View style={s.earningCopy}>
-                  <Text style={s.earningTitle} numberOfLines={1}>{listing.title}</Text>
-                  <Text style={s.earningOrders}>{listing.totalOrders} marketplace orders</Text>
-                </View>
-                <GhsAmount amount={listing.totalEarnings} size="sm" />
-                <View style={s.progressTrack}>
-                  <View style={[s.progressFill, { width: progress }]} />
-                </View>
+        {listings.length > 0 && totalEarnings > 0 ? (
+          <View style={s.earningsCard}>
+            <View style={s.earningsHeader}>
+              <View>
+                <Text style={s.earningsEyebrow}>EARNINGS OVERVIEW</Text>
+                <Text style={s.earningsTitle}>Your designs are gaining traction</Text>
               </View>
-            );
-          })}
-        </View>
+              <View style={s.sparkleBadge}>
+                <Sparkles size={19} color={colors.primary} />
+              </View>
+            </View>
+
+            {listings.filter(l => l.totalEarnings > 0).slice(0, 3).map((listing, index) => {
+              const maximum = Math.max(...listings.map(item => item.totalEarnings), 1);
+              const progress = `${Math.max(8, (listing.totalEarnings / maximum) * 100)}%` as `${number}%`;
+
+              return (
+                <View key={listing.id} style={[s.earningRow, index > 0 && s.earningRowBorder]}>
+                  <View style={s.earningCopy}>
+                    <Text style={s.earningTitle} numberOfLines={1}>{listing.title}</Text>
+                    <Text style={s.earningOrders}>{listing.totalOrders} marketplace orders</Text>
+                  </View>
+                  <GhsAmount amount={listing.totalEarnings} size="sm" />
+                  <View style={s.progressTrack}>
+                    <View style={[s.progressFill, { width: progress }]} />
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -339,6 +473,25 @@ export default function DesignerDashboard() {
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
+    centered: { alignItems: 'center', justifyContent: 'center', flex: 1 },
+    loadingText: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 13,
+      marginTop: 12,
+      textAlign: 'center',
+    },
+    retryButton: {
+      marginTop: 12,
+      minHeight: 42,
+      borderRadius: designTokens.radius.md,
+      borderWidth: 1,
+      borderColor: colors.primary,
+      paddingHorizontal: designTokens.spacing.lg,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    retryText: { color: colors.primary, fontFamily: designTokens.type.heading, fontSize: 13 },
     content: {
       paddingHorizontal: designTokens.spacing.lg,
       paddingTop: designTokens.spacing.lg,
@@ -453,33 +606,6 @@ function makeStyles(colors: Colors) {
       justifyContent: 'center',
       backgroundColor: colors.secondary,
     },
-    segmentedControl: {
-      flexDirection: 'row',
-      gap: 4,
-      padding: 4,
-      borderRadius: designTokens.radius.md,
-      backgroundColor: colors.secondary,
-      marginBottom: designTokens.spacing.xxl,
-    },
-    segment: {
-      flex: 1,
-      minHeight: 38,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: 10,
-    },
-    segmentActive: {
-      backgroundColor: colors.card,
-      borderWidth: 1,
-      borderColor: colors.border,
-      shadowColor: colors.shadow,
-      shadowOpacity: 0.05,
-      shadowRadius: 5,
-      shadowOffset: { width: 0, height: 2 },
-      elevation: 1,
-    },
-    segmentText: { color: colors.mutedFg, fontFamily: designTokens.type.medium, fontSize: 11 },
-    segmentTextActive: { color: colors.primary, fontFamily: designTokens.type.heading },
     sectionEyebrow: {
       color: colors.mutedFg,
       fontFamily: designTokens.type.heading,
@@ -527,20 +653,6 @@ function makeStyles(colors: Colors) {
       borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
-    },
-    statTrendBadge: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 4,
-      backgroundColor: colors.statusCompleted.bg,
-      paddingHorizontal: 8,
-      paddingVertical: 4,
-      borderRadius: 20,
-    },
-    statTrendText: {
-      color: colors.success,
-      fontFamily: designTokens.type.heading,
-      fontSize: 11,
     },
     statBody: {
       gap: 4,
@@ -595,6 +707,29 @@ function makeStyles(colors: Colors) {
       paddingVertical: 8,
     },
     createButtonText: { color: colors.onPrimary, fontFamily: designTokens.type.heading, fontSize: 11 },
+    emptyListings: {
+      alignItems: 'center',
+      padding: 32,
+      borderRadius: designTokens.radius.lg,
+      backgroundColor: colors.card,
+      borderWidth: 1,
+      borderColor: colors.border,
+      marginBottom: designTokens.spacing.lg,
+      gap: 8,
+    },
+    emptyTitle: {
+      color: colors.foreground,
+      fontFamily: designTokens.type.heading,
+      fontSize: 16,
+      marginTop: 8,
+    },
+    emptySubtitle: {
+      color: colors.mutedFg,
+      fontFamily: designTokens.type.body,
+      fontSize: 12,
+      textAlign: 'center',
+      maxWidth: 260,
+    },
     listingsGrid: {
       flexDirection: 'row',
       flexWrap: 'wrap',
@@ -619,6 +754,11 @@ function makeStyles(colors: Colors) {
       borderColor: colors.border,
     },
     listingImage: { width: '100%', height: '100%' },
+    listingImageFallback: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.secondary,
+    },
     statusBadge: {
       position: 'absolute',
       left: 9,
@@ -634,7 +774,7 @@ function makeStyles(colors: Colors) {
     draftBadge: { backgroundColor: colors.statusSubmitted.bg },
     statusDot: { width: 6, height: 6, borderRadius: 3 },
     statusText: { fontFamily: designTokens.type.heading, fontSize: 8, letterSpacing: 0.35 },
-    moreButton: {
+    publishButton: {
       position: 'absolute',
       right: 9,
       top: 9,
@@ -645,9 +785,20 @@ function makeStyles(colors: Colors) {
       alignItems: 'center',
       justifyContent: 'center',
     },
+    deleteButton: {
+      position: 'absolute',
+      right: 45, // 9 + 30 + 6
+      top: 9,
+      width: 30,
+      height: 30,
+      borderRadius: 10,
+      backgroundColor: 'rgba(255,255,255,0.93)',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
     listingContent: {
       padding: 12,
-      minHeight: 174,
+      minHeight: 130,
       borderBottomLeftRadius: designTokens.radius.lg,
       borderBottomRightRadius: designTokens.radius.lg,
       backgroundColor: colors.card,
@@ -668,9 +819,6 @@ function makeStyles(colors: Colors) {
     listingMetrics: { gap: 6 },
     listingMetric: { flexDirection: 'row', alignItems: 'center', gap: 5 },
     metricText: { color: colors.mutedFg, fontFamily: designTokens.type.medium, fontSize: 10 },
-    ratingRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 10 },
-    ratingText: { color: colors.foreground, fontFamily: designTokens.type.heading, fontSize: 10 },
-    ratingMeta: { color: colors.mutedFg, fontFamily: designTokens.type.body, fontSize: 9 },
     earningsCard: {
       padding: 16,
       borderRadius: designTokens.radius.lg,

@@ -1,4 +1,4 @@
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   ImageBackground,
@@ -10,17 +10,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { ArrowLeft, Mail, TriangleAlert } from "lucide-react-native";
+import { ArrowLeft, Lock, TriangleAlert } from "lucide-react-native";
 import { useState } from "react";
 import { useToast } from "../../src/ToastContext";
-import { ApiError } from "../../src/api/client";
-import { forgotPassword } from "../../src/api/auth";
+import { ApiError, apiFetch } from "../../src/api/client";
 import { designTokens } from "../../src/theme";
-
-/**
- * Forgot Password — same hero/card visual shell as login.tsx.
- * Calls the backend to issue a password reset token via email.
- */
 
 const HERO_IMAGE =
   "https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=800";
@@ -31,24 +25,40 @@ const CARD_BORDER = "rgba(10, 24, 46, 0.12)";
 const CARD_INPUT_BG = "#F6F7F9";
 const ORANGE = "#FF6A00";
 
-export default function ForgotPasswordScreen() {
+export default function ResetPasswordScreen() {
   const router = useRouter();
+  const { token } = useLocalSearchParams<{ token?: string }>();
   const { showToast } = useToast();
-  const [email, setEmail] = useState("");
+  
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (!email.trim()) {
-      setError("Enter your email.");
+    if (!token) {
+      setError("Invalid or missing reset token.");
       return;
     }
+    if (password.length < 6) {
+      setError("Password must be at least 6 characters.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+    
     setError(null);
     setSubmitting(true);
+    
     try {
-      await forgotPassword(email.trim());
-      showToast("Reset link sent if account exists.");
-      setTimeout(() => router.back(), 2000);
+      await apiFetch("/api/auth/reset-password", {
+        method: "POST",
+        body: { token, newPassword: password },
+      });
+      showToast("Password reset successfully. You can now log in.");
+      setTimeout(() => router.replace("/(auth)/login"), 2000);
     } catch (err) {
       setError(
         err instanceof ApiError
@@ -71,8 +81,8 @@ export default function ForgotPasswordScreen() {
         <SafeAreaView style={s.safeArea}>
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Go back"
-            onPress={() => router.back()}
+            accessibilityLabel="Go back to login"
+            onPress={() => router.replace("/(auth)/login")}
             style={({ pressed }) => [s.backButton, pressed && s.pressed]}
           >
             <ArrowLeft size={22} color="#FFFFFF" />
@@ -84,10 +94,9 @@ export default function ForgotPasswordScreen() {
             showsVerticalScrollIndicator={false}
           >
             <View style={s.card}>
-              <Text style={s.heading}>Forgot Password</Text>
+              <Text style={s.heading}>Set New Password</Text>
               <Text style={s.subtitle}>
-                Enter your email and we&apos;ll send you a reset
-                link.
+                Choose a new password for your account.
               </Text>
 
               {error ? (
@@ -98,16 +107,29 @@ export default function ForgotPasswordScreen() {
               ) : null}
 
               <View style={s.inputShell}>
-                <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
                 <TextInput
                   autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  placeholder="Email"
+                  secureTextEntry
+                  placeholder="New password (min 6 chars)"
                   placeholderTextColor={CARD_MUTED}
                   style={s.input}
-                  value={email}
-                  onChangeText={setEmail}
+                  value={password}
+                  onChangeText={setPassword}
+                  editable={!submitting}
+                />
+              </View>
+
+              <View style={s.inputShell}>
+                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                <TextInput
+                  autoCapitalize="none"
+                  secureTextEntry
+                  placeholder="Confirm new password"
+                  placeholderTextColor={CARD_MUTED}
+                  style={s.input}
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
                   editable={!submitting}
                   onSubmitEditing={handleSubmit}
                 />
@@ -115,14 +137,14 @@ export default function ForgotPasswordScreen() {
 
               <Pressable
                 accessibilityRole="button"
-                disabled={submitting}
+                disabled={submitting || !token}
                 onPress={handleSubmit}
-                style={[s.primaryButton, submitting && s.disabled]}
+                style={[s.primaryButton, (submitting || !token) && s.disabled]}
               >
                 {submitting ? (
                   <ActivityIndicator color="#FFFFFF" />
                 ) : (
-                  <Text style={s.primaryButtonText}>Send Reset Link</Text>
+                  <Text style={s.primaryButtonText}>Reset Password</Text>
                 )}
               </Pressable>
             </View>
@@ -213,7 +235,7 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: CARD_BORDER,
     backgroundColor: CARD_INPUT_BG,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   input: {
     flex: 1,
@@ -230,6 +252,7 @@ const s = StyleSheet.create({
     justifyContent: "center",
     flexDirection: "row",
     gap: 8,
+    marginTop: 4,
   },
   disabled: { opacity: 0.6 },
   primaryButtonText: {

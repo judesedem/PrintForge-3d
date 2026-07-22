@@ -4,17 +4,21 @@ import { useRouter } from 'expo-router';
 import { useTheme } from '@/ThemeContext';
 import { useSession } from '@/SessionContext';
 import { Colors, designTokens } from '@/theme';
-import { fetchDesignRequests, DesignRequest } from '@/api/design-requests';
+import { fetchDesignRequests, acceptDesignRequest, DesignRequest } from '@/api/design-requests';
 import { Clock } from 'lucide-react-native';
+import { useToast } from '@/ToastContext';
 
 export default function RequestsTab() {
   const router = useRouter();
   const { colors } = useTheme();
-  const { token, authLoading } = useSession();
+  const { token, authLoading, role } = useSession();
+  const { showToast } = useToast();
   const [requests, setRequests] = useState<DesignRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [acceptingId, setAcceptingId] = useState<string | null>(null);
   const s = makeStyles(colors);
+  const isDesigner = role === 'designer';
 
   const load = useCallback(async () => {
     if (!token) {
@@ -44,11 +48,25 @@ export default function RequestsTab() {
     load();
   }, [authLoading, token, load]);
 
+  const handleAccept = async (id: string) => {
+    if (!token) return;
+    setAcceptingId(id);
+    try {
+      await acceptDesignRequest(token, id);
+      showToast("Design request accepted successfully!");
+      load(); // Refresh list to remove it or show status update
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to accept request.");
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
   const renderItem = (item: DesignRequest) => (
     <View key={item.id} style={s.card}>
       <View style={s.cardHeader}>
         <Text style={s.cardTitle}>{item.title}</Text>
-        <View style={[s.badge, item.status === 'OPEN' ? s.badgeOpen : s.badgeClosed]}>
+        <View style={[s.badge, item.status === 'OPEN' ? s.badgeOpen : item.status === 'ACCEPTED' ? s.badgeAccepted : s.badgeClosed]}>
           <Text style={s.badgeText}>{item.status}</Text>
         </View>
       </View>
@@ -61,25 +79,40 @@ export default function RequestsTab() {
           <Text style={s.cardBudget}>GH₵ {item.budget.toFixed(2)}</Text>
         )}
       </View>
-      {item.deadline && (
-        <View style={s.deadlineRow}>
-          <Clock size={12} color={colors.mutedFg} />
-          <Text style={s.deadlineText}>Deadline: {new Date(item.deadline).toLocaleDateString()}</Text>
-        </View>
-      )}
+      <View style={s.actionRow}>
+        {item.deadline ? (
+          <View style={s.deadlineRow}>
+            <Clock size={12} color={colors.mutedFg} />
+            <Text style={s.deadlineText}>Deadline: {new Date(item.deadline).toLocaleDateString()}</Text>
+          </View>
+        ) : <View />}
+        {isDesigner && item.status === 'OPEN' && (
+          <Pressable 
+            style={({ pressed }) => [s.acceptBtn, pressed && s.pressed, acceptingId === item.id && s.disabledBtn]} 
+            onPress={() => handleAccept(item.id)}
+            disabled={acceptingId === item.id}
+          >
+            <Text style={s.acceptBtnText}>
+              {acceptingId === item.id ? "Accepting..." : "Accept"}
+            </Text>
+          </Pressable>
+        )}
+      </View>
     </View>
   );
 
   return (
     <View style={s.screen}>
-      <View style={s.topArea}>
-        <Pressable
-          style={({ pressed }) => [s.createBtn, pressed && s.pressed]}
-          onPress={() => router.push('/(app)/design-requests/create')}
-        >
-          <Text style={s.createBtnText}>+ Create New Request</Text>
-        </Pressable>
-      </View>
+      {!isDesigner && (
+        <View style={s.topArea}>
+          <Pressable
+            style={({ pressed }) => [s.createBtn, pressed && s.pressed]}
+            onPress={() => router.push('/(app)/design-requests/create')}
+          >
+            <Text style={s.createBtnText}>+ Create New Request</Text>
+          </Pressable>
+        </View>
+      )}
 
       {loading ? (
         <View style={s.centered}>
@@ -161,6 +194,9 @@ function makeStyles(colors: Colors) {
     },
     badgeOpen: {
       backgroundColor: '#10B98120', // tinted green
+    },
+    badgeAccepted: {
+      backgroundColor: colors.primarySoft,
     },
     badgeClosed: {
       backgroundColor: colors.cardElevated,
@@ -247,6 +283,25 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.body,
       fontSize: 12,
       marginTop: 4,
+    },
+    actionRow: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
+    acceptBtn: {
+      backgroundColor: colors.primary,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+      borderRadius: 8,
+    },
+    disabledBtn: {
+      opacity: 0.5,
+    },
+    acceptBtnText: {
+      color: colors.onPrimary,
+      fontFamily: designTokens.type.heading,
+      fontSize: 12,
     },
   });
 }

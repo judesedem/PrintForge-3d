@@ -189,6 +189,52 @@ public class MarketplaceController {
         return ResponseEntity.ok(response);
     }
 
+    @GetMapping("/{id}/quote")
+    public ResponseEntity<Estimate> getCustomQuote(
+            @PathVariable Long id,
+            @RequestParam(defaultValue = "STANDARD") String quality,
+            @RequestParam(defaultValue = "20") Integer infillPercent,
+            @RequestParam(defaultValue = "1") Integer quantity,
+            @RequestParam(defaultValue = "PLA") String materialType,
+            Authentication authentication) {
+
+        DesignListing listing = listingRepository.findById(id)
+                .orElseThrow(() -> new ListingNotFoundException(id));
+
+        boolean isDesigner = authentication != null && authentication.getAuthorities().stream()
+                .anyMatch(a -> a.getAuthority().equals("ROLE_DESIGNER"));
+        boolean isOwner = isDesigner && listing.getDesignerId().equals(safeCurrentUserId(authentication));
+        if (!"PUBLISHED".equals(listing.getStatus()) && !isOwner) {
+            throw new ListingNotFoundException(id);
+        }
+        if (!isOwner && isOwnerSuspended(listing)) {
+            throw new ListingNotFoundException(id);
+        }
+
+        if (listing.getFileId() == null) {
+            throw new InvalidListingInputException("This listing has no printable file attached");
+        }
+
+        User caller = currentUser(authentication);
+        Estimate quote = estimateService.calculateAndSaveEstimate(
+                listing.getFileId(),
+                quality.toUpperCase(),
+                infillPercent,
+                quantity,
+                materialType,
+                caller.getUserId(),
+                true,  // file belongs to the designer, not the browsing customer
+                listing.getId()  // snapshots basePrice onto lockedBasePrice at quote time
+        );
+
+        // Add base_price on top of machine+material cost
+        double totalWithBase = quote.getTotalCost()
+                + (listing.getBasePrice() != null ? listing.getBasePrice().doubleValue() : 0.0);
+        quote.setTotalCost(totalWithBase);
+
+        return ResponseEntity.ok(quote);
+    }
+
     // ── Favorites ─────────────────────────────────────────────────────────────
 
     @PostMapping("/{id}/favorite")
@@ -497,6 +543,7 @@ public class MarketplaceController {
             if (designer != null) {
                 listing.setDesignerName(designer.getFullName());
                 listing.setDesignerAvatar(designer.getProfilePictureUrl());
+                listing.setIsPremiumDesigner(designer.isPremium());
             }
         }
     }
@@ -507,6 +554,7 @@ public class MarketplaceController {
         userRepository.findById(listing.getDesignerId()).ifPresent(designer -> {
             listing.setDesignerName(designer.getFullName());
             listing.setDesignerAvatar(designer.getProfilePictureUrl());
+            listing.setIsPremiumDesigner(designer.isPremium());
         });
     }
 
@@ -514,6 +562,7 @@ public class MarketplaceController {
     private void enrichWithDesigner(DesignListing listing, User designer) {
         listing.setDesignerName(designer.getFullName());
         listing.setDesignerAvatar(designer.getProfilePictureUrl());
+        listing.setIsPremiumDesigner(designer.isPremium());
     }
 
     private DesignListing getOwnedListing(Long id, Authentication authentication) {

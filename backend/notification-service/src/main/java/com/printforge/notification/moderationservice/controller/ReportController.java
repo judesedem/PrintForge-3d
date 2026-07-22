@@ -66,6 +66,13 @@ public class ReportController {
         return ResponseEntity.ok(reportService.updateStatus(id, request.getStatus(), currentUser(authentication)));
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/api/admin/reports/{id}")
+    public ResponseEntity<Void> deleteReport(@PathVariable Long id) {
+        reportService.deleteReport(id);
+        return ResponseEntity.noContent().build();
+    }
+
     private User currentUser(Authentication authentication) {
         return userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));

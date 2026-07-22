@@ -44,10 +44,12 @@ public class PaymentController {
         Payment payment = paymentService.initiatePayment(
                 request.getEstimateId(),
                 request.getListingId(),
+                request.getRequestId(),
                 caller.getUserId(),
                 caller.getEmail(),
                 request.getColor(),
-                request.getNotes()
+                request.getNotes(),
+                request.getIsPremiumUpgrade()
         );
         return ResponseEntity.ok(payment);
     }

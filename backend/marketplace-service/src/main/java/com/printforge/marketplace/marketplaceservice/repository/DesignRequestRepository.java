@@ -8,6 +8,7 @@ import java.util.List;
 
 @Repository
 public interface DesignRequestRepository extends JpaRepository<DesignRequest, Long> {
-    List<DesignRequest> findByUserId(Long userId);
     List<DesignRequest> findByStatus(String status);
+    List<DesignRequest> findByDesignerId(Long designerId);
+    List<DesignRequest> findByUserId(Long userId);
 }

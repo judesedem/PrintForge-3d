@@ -1,13 +1,10 @@
 package com.printforge.admin.adminservice.controller;
 
-import com.printforge.admin.adminservice.dto.SuspendUserRequest;
 import com.printforge.admin.adminservice.service.AdminService;
 import com.printforge.admin.dto.UserDto;
 import com.printforge.admin.entity.User;
 import com.printforge.admin.marketplaceservice.model.DesignListing;
 import com.printforge.admin.repository.UserRepository;
-import com.printforge.admin.repository.UserRepository;
-import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -92,4 +89,25 @@ public class AdminController {
                 .toList());
     }
 
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/users/{id}")
+    public ResponseEntity<Void> deleteUser(@PathVariable Long id, Authentication authentication) {
+        adminService.deleteUserCascade(id, currentUser(authentication));
+        return ResponseEntity.noContent().build();
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/jobs/{id}")
+    public ResponseEntity<Void> deleteJob(@PathVariable Long id) {
+        adminService.deleteJob(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/jobs")
+    public ResponseEntity<java.util.List<com.printforge.admin.queueservice.model.PrintJob>> getJobs() {
+        return ResponseEntity.ok(((com.printforge.admin.queueservice.repository.PrintJobRepository) 
+            org.springframework.web.context.support.WebApplicationContextUtils.getWebApplicationContext(
+                ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest().getServletContext()
+            ).getBean(com.printforge.admin.queueservice.repository.PrintJobRepository.class)).findAll());
+    }
 }
