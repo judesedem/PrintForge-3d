@@ -273,22 +273,9 @@ public class AdminService {
             throw new IllegalArgumentException("Cannot delete administrative users.");
         }
 
-        // We bypass JPA and microservice silos because everything lives in printforge_db.
-        // It's the most robust way to ensure no FK constraint violations across domains.
-        org.springframework.jdbc.core.JdbcTemplate jdbc = new org.springframework.jdbc.core.JdbcTemplate(
-                org.springframework.web.context.support.WebApplicationContextUtils.getWebApplicationContext(
-                        ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest().getServletContext()
-                ).getBean(javax.sql.DataSource.class)
-        );
-
-        // Delete dependencies (order matters to avoid FK constraints if they exist)
-        jdbc.update("DELETE FROM reports WHERE reporter_id = ?", id);
-        jdbc.update("DELETE FROM reports WHERE target_type = 'USER' AND target_id = ?", id);
-        jdbc.update("DELETE FROM notifications WHERE user_id = ?", id);
-        jdbc.update("DELETE FROM print_jobs WHERE user_id = ?", id);
-        jdbc.update("DELETE FROM design_listings WHERE designer_id = ?", id);
-        jdbc.update("DELETE FROM moderation_logs WHERE actor_id = ?", id);
-        jdbc.update("DELETE FROM moderation_logs WHERE target_type = 'USER' AND target_id = ?", id);
+        // TODO: In a microservice architecture, we cannot use JDBC to delete
+        // from tables (reports, print_jobs, etc.) that belong to other services.
+        // We should instead publish a 'user.deleted' event to a message broker.
         
         // Finally, delete the user
         userRepository.deleteById(id);

@@ -1,23 +1,16 @@
 package com.printforge.admin.adminservice.controller;
 
-<<<<<<< HEAD
 import com.printforge.admin.adminservice.dto.RevenueHistoryEntry;
 import com.printforge.admin.adminservice.dto.SuspendUserRequest;
-=======
->>>>>>> b2baa6d320c0e949de10a0a04f3c104364ffcb93
 import com.printforge.admin.adminservice.service.AdminService;
 import com.printforge.admin.dto.UserDto;
 import com.printforge.admin.entity.User;
 import com.printforge.admin.marketplaceservice.model.DesignListing;
-<<<<<<< HEAD
 import com.printforge.admin.materialservice.dto.UpdateMaterialRequest;
 import com.printforge.admin.materialservice.model.Material;
 import com.printforge.admin.materialservice.service.MaterialService;
 import com.printforge.admin.repository.UserRepository;
 import jakarta.validation.Valid;
-=======
-import com.printforge.admin.repository.UserRepository;
->>>>>>> b2baa6d320c0e949de10a0a04f3c104364ffcb93
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;

@@ -32,6 +32,10 @@ export default function AdminPanel() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // User Filter State
+  const [userSearch, setUserSearch] = useState('');
+  const [showAllUsers, setShowAllUsers] = useState(false);
+
   // Forms State
   const [newUser, setNewUser] = useState({ full_name: '', email: '', password: '', role: 'STUDENT' as AdminCreatableRole });
   const [newPrinter, setNewPrinter] = useState({ printer_name: '', lab_location: '' });
@@ -311,26 +315,57 @@ export default function AdminPanel() {
               </Pressable>
             </View>
 
-            {users.length === 0 ? (
-              <View style={s.emptyState}><Text style={s.smallText}>No users found.</Text></View>
-            ) : (
-              users.map(u => (
-                <View key={u.user_id} style={s.row}>
-                  <View style={s.rowContent}>
-                    <Text style={s.rowTitle}>{u.full_name || 'No Name'}</Text>
-                    <Text style={s.smallText}>{u.email}</Text>
-                  </View>
-                  <View style={[s.badge, { backgroundColor: u.suspended ? 'rgba(239,68,68,0.2)' : colors.primarySoft }]}>
-                    <Text style={[s.badgeText, { color: u.suspended ? '#EF4444' : colors.primary }]}>{u.role}</Text>
-                  </View>
-                  {(u.role !== 'ADMIN' && u.role !== 'LAB_STAFF') && (
-                    <Pressable onPress={() => handleDeleteUser(u.user_id)} style={{ marginLeft: 12, padding: 8 }}>
-                      <Trash2 size={16} color={colors.destructive} />
+            <TextInput
+              style={[s.input, { marginBottom: 16 }]}
+              placeholderTextColor={colors.mutedFg}
+              placeholder="Search users..."
+              value={userSearch}
+              onChangeText={setUserSearch}
+            />
+
+            {(() => {
+              const filtered = users.filter(u =>
+                (u.full_name?.toLowerCase().includes(userSearch.toLowerCase()) || false) ||
+                (u.email?.toLowerCase().includes(userSearch.toLowerCase()) || false)
+              );
+              const displayUsers = (!showAllUsers && userSearch === '') ? filtered.slice(0, 5) : filtered;
+
+              return (
+                <View>
+                  {displayUsers.length === 0 ? (
+                    <View style={s.emptyState}><Text style={s.smallText}>No users found.</Text></View>
+                  ) : (
+                    displayUsers.map(u => (
+                      <View key={u.user_id} style={s.row}>
+                        <View style={s.rowContent}>
+                          <Text style={s.rowTitle}>{u.full_name || 'No Name'}</Text>
+                          <Text style={s.smallText}>{u.email}</Text>
+                        </View>
+                        <View style={[s.badge, { backgroundColor: u.suspended ? 'rgba(239,68,68,0.2)' : colors.primarySoft }]}>
+                          <Text style={[s.badgeText, { color: u.suspended ? '#EF4444' : colors.primary }]}>{u.role}</Text>
+                        </View>
+                        {(u.role !== 'ADMIN' && u.role !== 'LAB_STAFF') && (
+                          <Pressable onPress={() => handleDeleteUser(u.user_id)} style={{ marginLeft: 12, padding: 8 }}>
+                            <Trash2 size={16} color={colors.destructive} />
+                          </Pressable>
+                        )}
+                      </View>
+                    ))
+                  )}
+
+                  {!showAllUsers && userSearch === '' && users.length > 5 && (
+                    <Pressable onPress={() => setShowAllUsers(true)} style={[s.primaryButton, { marginTop: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}>
+                      <Text style={[s.primaryButtonText, { color: colors.foreground }]}>Show All Users</Text>
+                    </Pressable>
+                  )}
+                  {showAllUsers && userSearch === '' && users.length > 5 && (
+                    <Pressable onPress={() => setShowAllUsers(false)} style={[s.primaryButton, { marginTop: 12, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border }]}>
+                      <Text style={[s.primaryButtonText, { color: colors.foreground }]}>Show Less</Text>
                     </Pressable>
                   )}
                 </View>
-              ))
-            )}
+              );
+            })()}
           </View>
         ) : activeTab === 'Printers' ? (
           <View>
