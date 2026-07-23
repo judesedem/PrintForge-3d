@@ -3,6 +3,9 @@ package com.printforge.notification.notificationservice.service;
 import com.printforge.notification.notificationservice.exception.NotificationNotFoundException;
 import com.printforge.notification.notificationservice.model.Notification;
 import com.printforge.notification.notificationservice.repository.NotificationRepository;
+import com.printforge.notification.settingsservice.model.FeatureToggle;
+import com.printforge.notification.settingsservice.model.FeatureToggleKeys;
+import com.printforge.notification.settingsservice.repository.FeatureToggleRepository;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -13,9 +16,12 @@ import java.util.List;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final FeatureToggleRepository featureToggleRepository;
 
-    public NotificationService(NotificationRepository notificationRepository) {
+    public NotificationService(NotificationRepository notificationRepository,
+                                FeatureToggleRepository featureToggleRepository) {
         this.notificationRepository = notificationRepository;
+        this.featureToggleRepository = featureToggleRepository;
     }
 
     private static final int MAX_MESSAGE_LENGTH = 500;
@@ -49,6 +55,20 @@ public class NotificationService {
      * version above, which passes null here unchanged.
      */
     public Notification createNotification(Long userId, String title, String message, String type, String deepLink) {
+        // The "notifications" toggle is a single choke point: this
+        // service's own NotificationController (the staff-only POST
+        // endpoint, and every fire-and-forget call from other services
+        // duplicating this write into their own copy of the notifications
+        // table) funnels through here, so gating just this one method
+        // turns notifications off for this service without touching any
+        // of those call sites.
+        boolean enabled = featureToggleRepository.findByFeatureName(FeatureToggleKeys.NOTIFICATIONS)
+                .map(FeatureToggle::isEnabled)
+                .orElse(true);
+        if (!enabled) {
+            return null;
+        }
+
         Notification notification = new Notification();
         notification.setUserId(userId);
         notification.setTitle(title);
