@@ -21,6 +21,9 @@ import com.printforge.payment.queueservice.model.PrintJob;
 import com.printforge.payment.queueservice.repository.PrintJobRepository;
 import com.printforge.payment.repository.UserRepository;
 import com.printforge.payment.entity.User;
+import com.printforge.payment.paymentservice.model.Withdrawal;
+import com.printforge.payment.paymentservice.repository.WithdrawalRepository;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
@@ -57,6 +60,7 @@ public class PaymentService {
     private final NotificationService notificationService;
     private final UserRepository userRepository;
     private final WithdrawalRepository withdrawalRepository;
+
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -79,6 +83,7 @@ public class PaymentService {
         this.notificationService = notificationService;
         this.userRepository = userRepository;
         this.withdrawalRepository = withdrawalRepository;
+
         // Connect timeout only bounds establishing the TCP/TLS connection —
         // it does not bound waiting for a response once connected, which is
         // why each individual HttpRequest below also sets its own .timeout().
@@ -239,7 +244,7 @@ public class PaymentService {
         fulfillPayment(payment);
     }
 
-    private Payment fulfillPayment(Payment payment) {
+    Payment fulfillPayment(Payment payment) {
         payment.setStatus("COMPLETED");
         payment.setCompletedAt(LocalDateTime.now());
         
@@ -318,9 +323,9 @@ public class PaymentService {
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
+                
                 BigDecimal basePrice = listing.getBasePrice() != null
                         ? listing.getBasePrice() : BigDecimal.ZERO;
-                
                 // Deduct 15% platform commission
                 BigDecimal platformFee = basePrice.multiply(new BigDecimal("0.15"));
                 BigDecimal designerEarning = basePrice.subtract(platformFee);
@@ -328,17 +333,25 @@ public class PaymentService {
                 BigDecimal prev = listing.getTotalEarnings() != null
                         ? listing.getTotalEarnings() : BigDecimal.ZERO;
                 listing.setTotalEarnings(prev.add(designerEarning));
-                listingRepository.save(listing);
                 
                 // Credit the designer's wallet
-                userRepository.findById(listing.getDesignerId()).ifPresent(designer -> {
-                    BigDecimal currentWallet = designer.getWalletBalance() != null ? designer.getWalletBalance() : BigDecimal.ZERO;
-                    BigDecimal currentEarnings = designer.getTotalEarnings() != null ? designer.getTotalEarnings() : BigDecimal.ZERO;
+                if (listing.getDesignerId() != null) {
+                    userRepository.findById(listing.getDesignerId()).ifPresent(designer -> {
+                        BigDecimal currentWallet = designer.getWalletBalance() != null ? designer.getWalletBalance() : BigDecimal.ZERO;
+                        BigDecimal currentEarnings = designer.getTotalEarnings() != null ? designer.getTotalEarnings() : BigDecimal.ZERO;
+                        
+                        designer.setWalletBalance(currentWallet.add(designerEarning));
+                        designer.setTotalEarnings(currentEarnings.add(designerEarning));
+                        userRepository.save(designer);
+                    });
                     
-                    designer.setWalletBalance(currentWallet.add(designerEarning));
-                    designer.setTotalEarnings(currentEarnings.add(designerEarning));
-                    userRepository.save(designer);
-                });
+                    notificationService.createNotification(
+                            listing.getDesignerId(),
+                            "Listing Sold",
+                            "Your listing '" + listing.getTitle() + "' was just ordered!",
+                            "success");
+                }
+                listingRepository.save(listing);
             });
         }
         return savedPayment;
