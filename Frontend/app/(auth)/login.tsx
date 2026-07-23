@@ -161,7 +161,7 @@ export default function LoginScreen() {
                   autoCapitalize="none"
                   autoComplete="email"
                   keyboardType="email-address"
-                  placeholder="University email"
+                  placeholder="Email"
                   placeholderTextColor={CARD_MUTED}
                   style={s.input}
                   value={email}

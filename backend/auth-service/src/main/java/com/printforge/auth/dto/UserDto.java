@@ -22,4 +22,5 @@ public class UserDto {
     // null, which is harmless since none of those responses are about a
     // caller's suspension state.
     private Boolean suspended;
+    private Boolean is_premium;
 }

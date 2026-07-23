@@ -88,12 +88,19 @@ public class AdminService {
             return entry;
         }).toList();
 
+        List<Object[]> materialUsageRows = printJobRepository.countGroupedByMaterial();
+        Map<String, Long> materialUsage = new LinkedHashMap<>();
+        for (Object[] row : materialUsageRows) {
+            materialUsage.put((String) row[0], ((Number) row[1]).longValue());
+        }
+
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("totalJobs", totalJobs);
         summary.put("jobsByStatus", jobsByStatus);
         summary.put("totalPrinters", (long) allPrinters.size());
         summary.put("printersByStatus", printersByStatus);
         summary.put("designer_earnings", designerEarnings);
+        summary.put("materialUsage", materialUsage);
         return summary;
     }
 
@@ -251,5 +258,51 @@ public class AdminService {
                 .profile_picture_url(saved.getProfilePictureUrl())
                 .suspended(saved.getSuspended())
                 .build();
+    }
+
+    /**
+     * Hard-deletes a user and all of their related data across the platform.
+     * Uses JdbcTemplate to bypass microservice boundaries since they share printforge_db.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteUserCascade(Long id, User actor) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + id));
+
+        if (user.getRole().name().equals("ADMIN") || user.getRole().name().equals("LAB_STAFF")) {
+            throw new IllegalArgumentException("Cannot delete administrative users.");
+        }
+
+        // We bypass JPA and microservice silos because everything lives in printforge_db.
+        // It's the most robust way to ensure no FK constraint violations across domains.
+        org.springframework.jdbc.core.JdbcTemplate jdbc = new org.springframework.jdbc.core.JdbcTemplate(
+                org.springframework.web.context.support.WebApplicationContextUtils.getWebApplicationContext(
+                        ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest().getServletContext()
+                ).getBean(javax.sql.DataSource.class)
+        );
+
+        // Delete dependencies (order matters to avoid FK constraints if they exist)
+        jdbc.update("DELETE FROM reports WHERE reporter_id = ?", id);
+        jdbc.update("DELETE FROM reports WHERE target_type = 'USER' AND target_id = ?", id);
+        jdbc.update("DELETE FROM notifications WHERE user_id = ?", id);
+        jdbc.update("DELETE FROM print_jobs WHERE user_id = ?", id);
+        jdbc.update("DELETE FROM design_listings WHERE designer_id = ?", id);
+        jdbc.update("DELETE FROM moderation_logs WHERE actor_id = ?", id);
+        jdbc.update("DELETE FROM moderation_logs WHERE target_type = 'USER' AND target_id = ?", id);
+        
+        // Finally, delete the user
+        userRepository.deleteById(id);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteJob(Long id) {
+        if (!printJobRepository.existsById(id)) {
+            throw new IllegalArgumentException("Job not found: " + id);
+        }
+        
+        // Bypassing microservice silos just in case there are notifications pointing to it.
+        // There's no specific Job notification FK constraint since notification target is loose,
+        // but let's be safe. Delete the job directly.
+        printJobRepository.deleteById(id);
     }
 }

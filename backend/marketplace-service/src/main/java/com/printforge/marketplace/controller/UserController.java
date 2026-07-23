@@ -60,6 +60,14 @@ public class UserController {
         return ResponseEntity.ok(userService.getUserStats(id, caller.getUserId(), isAdmin));
     }
 
+    @PostMapping("/upgrade-premium")
+    public ResponseEntity<UserDto> upgradeToPremium(Authentication authentication) {
+        User caller = currentUser(authentication);
+        caller.setPremium(true);
+        User saved = userRepository.save(caller);
+        return ResponseEntity.ok(userService.toUserDto(saved));
+    }
+
     private User currentUser(Authentication authentication) {
         return userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));

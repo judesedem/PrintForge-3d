@@ -30,8 +30,15 @@ public class DesignRequest {
 
     private LocalDateTime createdAt;
 
+    private Long designerId;
+
+    private Long fileId;
+
     @Transient
     private String userName;
+
+    @Transient
+    private String designerName;
 
     @PrePersist
     protected void onCreate() {
@@ -111,5 +118,29 @@ public class DesignRequest {
 
     public void setUserName(String userName) {
         this.userName = userName;
+    }
+
+    public Long getDesignerId() {
+        return designerId;
+    }
+
+    public void setDesignerId(Long designerId) {
+        this.designerId = designerId;
+    }
+
+    public Long getFileId() {
+        return fileId;
+    }
+
+    public void setFileId(Long fileId) {
+        this.fileId = fileId;
+    }
+
+    public String getDesignerName() {
+        return designerName;
+    }
+
+    public void setDesignerName(String designerName) {
+        this.designerName = designerName;
     }
 }

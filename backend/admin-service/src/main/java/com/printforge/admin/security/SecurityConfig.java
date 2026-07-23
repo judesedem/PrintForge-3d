@@ -10,6 +10,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+<<<<<<< HEAD
 /**
  * Was missing entirely before this — admin-service had HeaderAuthFilter but
  * no SecurityConfig wiring it in, no @EnableMethodSecurity, and no
@@ -22,6 +23,8 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
  * order-service's payment-webhook exception, since every /api/admin/**
  * endpoint requires an authenticated caller.
  */
+=======
+>>>>>>> b2baa6d320c0e949de10a0a04f3c104364ffcb93
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity

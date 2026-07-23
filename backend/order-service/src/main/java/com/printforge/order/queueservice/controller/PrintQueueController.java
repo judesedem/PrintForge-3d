@@ -25,11 +25,8 @@ import java.util.Map;
 public class PrintQueueController {
 
     private final PrintQueueService printQueueService;
-    private final UserRepository userRepository;
-
-    public PrintQueueController(PrintQueueService printQueueService, UserRepository userRepository) {
+    public PrintQueueController(PrintQueueService printQueueService) {
         this.printQueueService = printQueueService;
-        this.userRepository = userRepository;
     }
 
     // ── PATCH /api/print-jobs/:id/status (Staff only) ────────────────────────
@@ -67,10 +64,5 @@ public class PrintQueueController {
         String status = body.get("status") != null ? body.get("status").toString() : null;
         PrintJob updatedJob = printQueueService.transitionJobStatus(jobId, status);
         return ResponseEntity.ok(updatedJob);
-    }
-
-    private User currentUser(Authentication authentication) {
-        return userRepository.findByEmail(authentication.getName())
-                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 }

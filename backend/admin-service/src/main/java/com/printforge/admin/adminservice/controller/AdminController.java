@@ -1,16 +1,23 @@
 package com.printforge.admin.adminservice.controller;
 
+<<<<<<< HEAD
 import com.printforge.admin.adminservice.dto.RevenueHistoryEntry;
 import com.printforge.admin.adminservice.dto.SuspendUserRequest;
+=======
+>>>>>>> b2baa6d320c0e949de10a0a04f3c104364ffcb93
 import com.printforge.admin.adminservice.service.AdminService;
 import com.printforge.admin.dto.UserDto;
 import com.printforge.admin.entity.User;
 import com.printforge.admin.marketplaceservice.model.DesignListing;
+<<<<<<< HEAD
 import com.printforge.admin.materialservice.dto.UpdateMaterialRequest;
 import com.printforge.admin.materialservice.model.Material;
 import com.printforge.admin.materialservice.service.MaterialService;
 import com.printforge.admin.repository.UserRepository;
 import jakarta.validation.Valid;
+=======
+import com.printforge.admin.repository.UserRepository;
+>>>>>>> b2baa6d320c0e949de10a0a04f3c104364ffcb93
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
@@ -114,4 +121,39 @@ public class AdminController {
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
     }
 
+    @GetMapping("/users")
+    public ResponseEntity<java.util.List<UserDto>> getUsers() {
+        return ResponseEntity.ok(userRepository.findAll().stream()
+                .map(user -> UserDto.builder()
+                        .user_id(user.getUserId())
+                        .full_name(user.getFullName())
+                        .email(user.getEmail())
+                        .role(user.getRole().name())
+                        .profile_picture_url(user.getProfilePictureUrl())
+                        .suspended(user.getSuspended())
+                        .build())
+                .toList());
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/users/{id}")
+    public ResponseEntity<Void> deleteUser(@PathVariable Long id, Authentication authentication) {
+        adminService.deleteUserCascade(id, currentUser(authentication));
+        return ResponseEntity.noContent().build();
+    }
+
+    @PreAuthorize("hasRole('ADMIN')")
+    @DeleteMapping("/jobs/{id}")
+    public ResponseEntity<Void> deleteJob(@PathVariable Long id) {
+        adminService.deleteJob(id);
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/jobs")
+    public ResponseEntity<java.util.List<com.printforge.admin.queueservice.model.PrintJob>> getJobs() {
+        return ResponseEntity.ok(((com.printforge.admin.queueservice.repository.PrintJobRepository) 
+            org.springframework.web.context.support.WebApplicationContextUtils.getWebApplicationContext(
+                ((org.springframework.web.context.request.ServletRequestAttributes) org.springframework.web.context.request.RequestContextHolder.getRequestAttributes()).getRequest().getServletContext()
+            ).getBean(com.printforge.admin.queueservice.repository.PrintJobRepository.class)).findAll());
+    }
 }

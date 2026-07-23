@@ -1,5 +1,5 @@
 import { apiFetch } from './client';
-import type { AuthResponse, LoginPayload, RegisterPayload, UserDto } from './types';
+import type { AuthResponse, LoginPayload, RegisterPayload, UserDto, UpdateProfilePayload } from './types';
 
 /**
  * Email/password registration. Maps to POST /api/auth/register —
@@ -55,11 +55,7 @@ export function logout(token: string): Promise<void> {
 }
 
 /**
- * Maps to POST /api/auth/forgot-password — this endpoint does not exist
- * on the backend yet. forgot-password.tsx calls this and catches the
- * failure itself (the screen shows a generic "reset link sent if account
- * exists" toast either way, so a 404 here degrades invisibly to the user
- * until the real endpoint lands).
+ * Maps to POST /api/auth/forgot-password.
  */
 export function forgotPassword(email: string): Promise<void> {
   return apiFetch<void>('/api/auth/forgot-password', {
@@ -82,5 +78,29 @@ export function changePassword(
     method: 'PATCH',
     token,
     body: { currentPassword, newPassword },
+  });
+}
+
+/**
+ * Maps to PATCH /api/auth/profile.
+ */
+export function updateProfile(
+  token: string,
+  payload: UpdateProfilePayload,
+): Promise<AuthResponse> {
+  return apiFetch<AuthResponse>('/api/auth/profile', {
+    method: 'PATCH',
+    token,
+    body: payload,
+  });
+}
+
+/**
+ * Maps to POST /api/users/upgrade-premium in marketplace-service.
+ */
+export function upgradeToPremium(token: string): Promise<UserDto> {
+  return apiFetch<UserDto>('/api/users/upgrade-premium', {
+    method: 'POST',
+    token,
   });
 }

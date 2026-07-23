@@ -111,6 +111,10 @@ public class DesignListing {
     @Transient
     private Boolean isFavorited;
 
+    // Indicates if the designer is a verified Premium Designer
+    @Transient
+    private Boolean isPremiumDesigner;
+
     // Set manually by the designer at listing creation/edit time — NOT
     // auto-extracted from the uploaded file (that's a separate concern
     // handled by StlGeometryParser/etc. against ModelFile, not this
@@ -197,6 +201,9 @@ public class DesignListing {
 
     public Boolean getIsFavorited() { return isFavorited; }
     public void setIsFavorited(Boolean isFavorited) { this.isFavorited = isFavorited; }
+
+    public Boolean getIsPremiumDesigner() { return isPremiumDesigner; }
+    public void setIsPremiumDesigner(Boolean isPremiumDesigner) { this.isPremiumDesigner = isPremiumDesigner; }
 
     public boolean isOwnershipAttested() { return ownershipAttested; }
     public void setOwnershipAttested(boolean ownershipAttested) { this.ownershipAttested = ownershipAttested; }
