@@ -366,8 +366,6 @@ public class AuthService {
                 .email(user.getEmail())
                 .role(user.getRole().name().toLowerCase())
                 .profile_picture_url(user.getProfilePictureUrl())
-                .phone(user.getPhone())
-                .bio(user.getBio())
                 .is_premium(user.isPremium())
                 .build();
     }
