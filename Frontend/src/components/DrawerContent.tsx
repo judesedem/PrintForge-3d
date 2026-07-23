@@ -77,7 +77,10 @@ export default function DrawerContent(_props: any) {
       <View style={s.divider} />
 
       {/* Logout */}
-      <TouchableOpacity style={s.logoutBtn} onPress={signOut} activeOpacity={0.7}>
+      <TouchableOpacity style={s.logoutBtn} onPress={async () => {
+        await signOut();
+        router.replace('/(auth)/login');
+      }} activeOpacity={0.7}>
         <LogOut size={16} color="#f87171" />
         <Text style={s.logoutText}>Sign out</Text>
       </TouchableOpacity>

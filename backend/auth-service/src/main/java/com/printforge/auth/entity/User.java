@@ -42,6 +42,16 @@ public class User {
     @Column(name = "profile_picture_public_id")
     private String profilePicturePublicId;
 
+    // User's phone number — optional, used for pickup notifications.
+    // Nullable: most users won't set this.
+    @Column(name = "phone")
+    private String phone;
+
+    // Short bio displayed on the user's public profile.
+    // Max 200 chars enforced at the service layer, not here.
+    @Column(name = "bio", columnDefinition = "TEXT")
+    private String bio;
+
     // Admin moderation takedown (#68). Nullable/boxed rather than a
     // not-null primitive — same reasoning as Estimate.java's fileId/userId
     // comment: ddl-auto=update won't retroactively backfill a NOT NULL
@@ -69,4 +79,8 @@ public class User {
     // a real opt-in signal to check instead of retrofitting one.
     @Column(name = "email_opt_in", columnDefinition = "boolean not null default true")
     private boolean emailOptIn;
+
+    // Premium Designer status
+    @Column(name = "is_premium", columnDefinition = "boolean not null default false")
+    private boolean isPremium;
 }

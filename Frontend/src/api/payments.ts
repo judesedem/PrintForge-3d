@@ -6,9 +6,11 @@ import { apiFetch } from './client';
 export type PaymentApiResponse = {
   id: number;
   userId: number;
-  estimateId: number;
+  estimateId: number | null;
   listingId: number | null;
+  requestId: number | null;
   printJobId: number | null;
+  isPremiumUpgrade?: boolean;
   amount: number;
   currency: string;
   status: 'PENDING' | 'COMPLETED' | 'FAILED';
@@ -20,9 +22,11 @@ export type PaymentApiResponse = {
 
 export type Payment = {
   id: string;
-  estimateId: string;
+  estimateId: string | null;
   listingId: string | null;
+  requestId: string | null;
   printJobId: string | null;
+  isPremiumUpgrade: boolean;
   amount: number;
   currency: string;
   status: 'PENDING' | 'COMPLETED' | 'FAILED';
@@ -34,9 +38,11 @@ export type Payment = {
 export function toPayment(res: PaymentApiResponse): Payment {
   return {
     id: String(res.id),
-    estimateId: String(res.estimateId),
+    estimateId: res.estimateId != null ? String(res.estimateId) : null,
     listingId: res.listingId != null ? String(res.listingId) : null,
+    requestId: res.requestId != null ? String(res.requestId) : null,
     printJobId: res.printJobId != null ? String(res.printJobId) : null,
+    isPremiumUpgrade: !!res.isPremiumUpgrade,
     amount: res.amount,
     currency: res.currency,
     status: res.status,
@@ -48,35 +54,21 @@ export function toPayment(res: PaymentApiResponse): Payment {
 
 /**
  * Maps to POST /api/payments/initiate.
- *
- * IMPORTANT — this does NOT take a jobId, and paying does not act on an
- * existing PrintJob. Read PaymentController.java/PaymentService.java
- * directly before using this: the request body is
- * `{ estimateId, listingId? }`, and the Paystack webhook (handleWebhook,
- * server-side, not called from the frontend) is what CREATES a brand new
- * PrintJob — starting at status SUBMITTED — once payment clears. There is
- * no backend endpoint or field connecting a payment to an already-existing
- * PrintJob; PrintJob.estimateId exists on the entity but is never exposed
- * through the jobs-facade response (src/api/jobs.ts's
- * PrintJobApiResponse has no estimate_id field). See Handoff.md's Payments
- * batch entry for the full reasoning and how this reshaped where payment
- * ended up wired into the frontend (marketplace listing detail, not the
- * jobs list, since that's the only screen with a real estimateId to pay
- * against).
- *
- * No @JsonProperty on InitiatePaymentRequest.java, so the body is plain
- * camelCase — not snake_case like RegisterRequest.
  */
 export async function initiatePayment(
   token: string,
-  params: { estimateId: string | number; listingId?: string | number | null }
+  params: { estimateId?: string | number | null; listingId?: string | number | null; requestId?: string | number | null; isPremiumUpgrade?: boolean; color?: string; notes?: string; }
 ): Promise<Payment> {
   const data = await apiFetch<PaymentApiResponse>('/api/payments/initiate', {
     method: 'POST',
     token,
     body: {
-      estimateId: Number(params.estimateId),
+      estimateId: params.estimateId != null ? Number(params.estimateId) : undefined,
       listingId: params.listingId != null ? Number(params.listingId) : undefined,
+      requestId: params.requestId != null ? Number(params.requestId) : undefined,
+      isPremiumUpgrade: params.isPremiumUpgrade,
+      color: params.color,
+      notes: params.notes,
     },
   });
   return toPayment(data);
@@ -106,4 +98,34 @@ export async function retryPayment(token: string, paymentId: string): Promise<Pa
     token,
   });
   return toPayment(data);
+}
+
+export type Withdrawal = {
+  id: string;
+  amount: number;
+  bankCode: string;
+  accountNumber: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED';
+  createdAt: string;
+};
+
+export type WalletInfo = {
+  walletBalance: number;
+  totalEarnings: number;
+  withdrawals: Withdrawal[];
+};
+
+export async function fetchWallet(token: string): Promise<WalletInfo> {
+  return await apiFetch<WalletInfo>('/api/payments/wallet', { token });
+}
+
+export async function withdrawFunds(
+  token: string,
+  params: { amount: number; bankCode: string; accountNumber: string }
+): Promise<Withdrawal> {
+  return await apiFetch<Withdrawal>('/api/payments/withdraw', {
+    method: 'POST',
+    token,
+    body: params,
+  });
 }

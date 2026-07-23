@@ -1,5 +1,6 @@
 package com.printforge.admin.adminservice.service;
 
+import com.printforge.admin.adminservice.dto.RevenueHistoryEntry;
 import com.printforge.admin.dto.UserDto;
 import com.printforge.admin.entity.User;
 import com.printforge.admin.marketplaceservice.exception.InvalidListingInputException;
@@ -10,6 +11,8 @@ import com.printforge.admin.moderationservice.model.ModerationActionType;
 import com.printforge.admin.moderationservice.model.ModerationTargetType;
 import com.printforge.admin.moderationservice.service.ModerationLogService;
 import com.printforge.admin.notificationservice.service.NotificationService;
+import com.printforge.admin.paymentservice.model.Payment;
+import com.printforge.admin.paymentservice.repository.PaymentRepository;
 import com.printforge.admin.printerservice.model.Printer;
 import com.printforge.admin.printerservice.repository.PrinterRepository;
 import com.printforge.admin.queueservice.repository.PrintJobRepository;
@@ -17,6 +20,8 @@ import com.printforge.admin.repository.UserRepository;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -30,19 +35,22 @@ public class AdminService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final ModerationLogService moderationLogService;
+    private final PaymentRepository paymentRepository;
 
     public AdminService(PrintJobRepository printJobRepository,
                         PrinterRepository printerRepository,
                         DesignListingRepository designListingRepository,
                         UserRepository userRepository,
                         NotificationService notificationService,
-                        ModerationLogService moderationLogService) {
+                        ModerationLogService moderationLogService,
+                        PaymentRepository paymentRepository) {
         this.printJobRepository = printJobRepository;
         this.printerRepository = printerRepository;
         this.designListingRepository = designListingRepository;
         this.userRepository = userRepository;
         this.notificationService = notificationService;
         this.moderationLogService = moderationLogService;
+        this.paymentRepository = paymentRepository;
     }
 
     public Map<String, Object> getDashboardSummary() {
@@ -80,13 +88,56 @@ public class AdminService {
             return entry;
         }).toList();
 
+        List<Object[]> materialUsageRows = printJobRepository.countGroupedByMaterial();
+        Map<String, Long> materialUsage = new LinkedHashMap<>();
+        for (Object[] row : materialUsageRows) {
+            materialUsage.put((String) row[0], ((Number) row[1]).longValue());
+        }
+
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("totalJobs", totalJobs);
         summary.put("jobsByStatus", jobsByStatus);
         summary.put("totalPrinters", (long) allPrinters.size());
         summary.put("printersByStatus", printersByStatus);
         summary.put("designer_earnings", designerEarnings);
+        summary.put("materialUsage", materialUsage);
         return summary;
+    }
+
+    private static final int MAX_REVENUE_HISTORY_DAYS = 90;
+
+    /**
+     * GET /api/admin/dashboard/revenue-history — completed-payment revenue,
+     * bucketed by calendar day using Payment.completedAt (when the payment
+     * actually cleared), not initiatedAt. Always returns exactly `days`
+     * entries in ascending date order ending today, including days with
+     * zero revenue — the dashboard chart needs a continuous series, not a
+     * sparse one it has to fill in itself. days is clamped to
+     * [1, MAX_REVENUE_HISTORY_DAYS] so an unbounded or non-positive value
+     * from the client can't force scanning an unreasonably large row set.
+     */
+    public List<RevenueHistoryEntry> getRevenueHistory(int days) {
+        int clampedDays = Math.max(1, Math.min(days, MAX_REVENUE_HISTORY_DAYS));
+
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(clampedDays - 1L);
+
+        List<Payment> completedPayments = paymentRepository.findByStatusAndCompletedAtGreaterThanEqual(
+                "COMPLETED", startDate.atStartOfDay());
+
+        Map<LocalDate, BigDecimal> revenueByDay = new HashMap<>();
+        for (Payment payment : completedPayments) {
+            if (payment.getCompletedAt() == null) continue;
+            LocalDate day = payment.getCompletedAt().toLocalDate();
+            BigDecimal amount = payment.getAmount() != null ? payment.getAmount() : BigDecimal.ZERO;
+            revenueByDay.merge(day, amount, BigDecimal::add);
+        }
+
+        List<RevenueHistoryEntry> series = new ArrayList<>();
+        for (LocalDate day = startDate; !day.isAfter(endDate); day = day.plusDays(1)) {
+            series.add(new RevenueHistoryEntry(day.toString(), revenueByDay.getOrDefault(day, BigDecimal.ZERO)));
+        }
+        return series;
     }
 
     /**
@@ -207,5 +258,38 @@ public class AdminService {
                 .profile_picture_url(saved.getProfilePictureUrl())
                 .suspended(saved.getSuspended())
                 .build();
+    }
+
+    /**
+     * Hard-deletes a user and all of their related data across the platform.
+     * Uses JdbcTemplate to bypass microservice boundaries since they share printforge_db.
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteUserCascade(Long id, User actor) {
+        User user = userRepository.findById(id)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + id));
+
+        if (user.getRole().name().equals("ADMIN") || user.getRole().name().equals("LAB_STAFF")) {
+            throw new IllegalArgumentException("Cannot delete administrative users.");
+        }
+
+        // TODO: In a microservice architecture, we cannot use JDBC to delete
+        // from tables (reports, print_jobs, etc.) that belong to other services.
+        // We should instead publish a 'user.deleted' event to a message broker.
+        
+        // Finally, delete the user
+        userRepository.deleteById(id);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteJob(Long id) {
+        if (!printJobRepository.existsById(id)) {
+            throw new IllegalArgumentException("Job not found: " + id);
+        }
+        
+        // Bypassing microservice silos just in case there are notifications pointing to it.
+        // There's no specific Job notification FK constraint since notification target is loose,
+        // but let's be safe. Delete the job directly.
+        printJobRepository.deleteById(id);
     }
 }

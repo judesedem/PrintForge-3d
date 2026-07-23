@@ -10,7 +10,11 @@ import {
   Animated,
   Easing,
   Modal,
+  Linking,
+  TextInput,
+  Alert,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ShoppingBag,
@@ -26,28 +30,30 @@ import {
   DollarSign,
   Users,
   Grid3x3,
+  Briefcase,
 } from "lucide-react-native";
+import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
 import { useSession } from "../../../src/SessionContext";
 import { useTheme } from "../../../src/ThemeContext";
 import { Colors } from "../../../src/theme";
 import { useToast } from "../../../src/ToastContext";
-import { fetchMyPayments, Payment } from "../../../src/api/payments";
-// TODO(backend): no fetchUserStats / fetchUserDesigns endpoints exist yet.
-// GET /api/users/{id}/stats and GET /api/users/{id}/designs are on the
-// "not wired" list — swap the mock data below for real calls once those
-// land. Keeping the imports commented so it's a one-line swap later.
+import { fetchMyPayments, Payment, initiatePayment, fetchPayment, fetchWallet, withdrawFunds, WalletInfo } from "../../../src/api/payments";
+import { fetchMyListings } from "../../../src/api/marketplace";
+import { fetchAcceptedRequests, deliverDesignRequest, DesignRequest } from "../../../src/api/design-requests";
+import { uploadFile } from "../../../src/api/files";
+import { upgradeToPremium, deleteAccount } from "../../../src/api/auth";
+// TODO(backend): no fetchUserStats endpoint exists yet.
+// GET /api/users/{id}/stats is on the "not wired" list.
 // import { fetchUserStats } from "../../../src/api/users";
-// import { fetchUserDesigns } from "../../../src/api/marketplace";
 
 
 // Following count has no backend model yet — always 0 until a follow API
 // exists.
 const FOLLOWING_COUNT = 0;
 
-// TODO(backend): mock designer stats + designs until stats/designs
-// endpoints exist. Shaped to match what those endpoints will likely
-// return so swapping in real data later is a drop-in replacement.
+// TODO(backend): fetchUserStats endpoint does not exist yet.
+// Shaped to match what those endpoints will likely return.
 type DesignerStats = {
   designCount: number;
   followerCount: number;
@@ -58,21 +64,6 @@ type DesignThumb = {
   id: string;
   imageUrl: string;
 };
-
-const MOCK_DESIGNER_STATS: DesignerStats = {
-  designCount: 24,
-  followerCount: 1200,
-  earnings: 340,
-};
-
-const MOCK_DESIGNS: DesignThumb[] = [
-  { id: "1", imageUrl: "https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=300" },
-  { id: "2", imageUrl: "https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=300" },
-  { id: "3", imageUrl: "https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=300" },
-  { id: "4", imageUrl: "https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=300" },
-  { id: "5", imageUrl: "https://images.pexels.com/photos/4488626/pexels-photo-4488626.jpeg?auto=compress&cs=tinysrgb&w=300" },
-  { id: "6", imageUrl: "https://images.pexels.com/photos/4488637/pexels-photo-4488637.jpeg?auto=compress&cs=tinysrgb&w=300" },
-];
 
 function formatFollowerCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -110,12 +101,12 @@ type BadgeVisual = { bg: string; text: string; label: string };
 function paymentStatusVisual(status: Payment["status"], colors: Colors): BadgeVisual {
   switch (status) {
     case "COMPLETED":
-      return { bg: colors.statusCompleted.bg, text: colors.statusCompleted.text, label: "Ready for Pickup" };
+      return { bg: colors.statusCompleted.bg, text: colors.statusCompleted.text, label: "Paid" };
     case "FAILED":
-      return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: "Failed" };
+      return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: "Payment Failed" };
     case "PENDING":
     default:
-      return { bg: colors.statusPrinting.bg, text: colors.statusPrinting.text, label: "Printing" };
+      return { bg: colors.statusPrinting.bg, text: colors.statusPrinting.text, label: "Payment Pending" };
   }
 }
 
@@ -251,25 +242,41 @@ function BecomeDesignerModal({
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { appUser, role, signOut, token, authLoading } = useSession();
+  const { appUser, role, signOut, token, authLoading, updateUser } = useSession();
   const { isDark, toggleTheme, colors } = useTheme();
   const styles = getStyles(colors);
   const { showToast } = useToast();
 
   const [showModal, setShowModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deletingAccount, setDeletingAccount] = useState(false);
   const [payments, setPayments] = useState<Payment[]>([]);
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
 
-  // TODO(backend): replace with real fetchUserStats(token) /
-  // fetchUserDesigns(token) once those endpoints exist. Left as static
-  // mock data + no loading/error state since there's nothing to fetch yet.
-  const [designerStats] = useState<DesignerStats>(MOCK_DESIGNER_STATS);
-  const [designs] = useState<DesignThumb[]>(MOCK_DESIGNS);
+  const [designerStats, setDesignerStats] = useState<DesignerStats>({ designCount: 0, followerCount: 0, earnings: 0 });
+  const [designs, setDesigns] = useState<DesignThumb[]>([]);
+  const [acceptedRequests, setAcceptedRequests] = useState<DesignRequest[]>([]);
+  const [uploadingRequestId, setUploadingRequestId] = useState<string | null>(null);
+
+  const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawBankCode, setWithdrawBankCode] = useState("");
+  const [withdrawAccount, setWithdrawAccount] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [showBankPicker, setShowBankPicker] = useState(false);
+
+  const BANK_CODES = [
+    { label: "MTN Mobile Money", value: "MTN" },
+    { label: "Telecel / Vodafone Cash", value: "VOD" },
+    { label: "AirtelTigo Money", value: "ATL" },
+  ];
 
   const isDesigner = role === "designer";
 
-  const loadPayments = useCallback(async () => {
+  const loadData = useCallback(async () => {
     if (!token) {
       setPayments([]);
       setPaymentsLoading(false);
@@ -278,16 +285,37 @@ export default function ProfileScreen() {
     setPaymentsLoading(true);
     setPaymentsError(null);
     try {
-      const data = await fetchMyPayments(token);
-      setPayments(data);
+      const [paymentsData, listingsData, requestsData, walletData] = await Promise.all([
+        fetchMyPayments(token),
+        isDesigner ? fetchMyListings(token) : Promise.resolve([]),
+        isDesigner ? fetchAcceptedRequests(token) : Promise.resolve([]),
+        isDesigner ? fetchWallet(token).catch(() => null) : Promise.resolve(null),
+      ]);
+      
+      setPayments(paymentsData);
+      setAcceptedRequests(requestsData);
+      setWalletInfo(walletData);
+      
+      if (isDesigner) {
+        setDesignerStats({
+          designCount: listingsData.length,
+          followerCount: 0,
+          earnings: walletData ? (walletData.totalEarnings ?? 0) : 0,
+        });
+        setDesigns(
+          listingsData
+            .filter((l) => !!l.thumbnailUrl)
+            .map((l) => ({ id: l.id, imageUrl: l.thumbnailUrl }))
+        );
+      }
     } catch (err) {
       setPaymentsError(
-        err instanceof Error ? err.message : "Failed to load payment history",
+        err instanceof Error ? err.message : "Failed to load data",
       );
     } finally {
       setPaymentsLoading(false);
     }
-  }, [token]);
+  }, [token, isDesigner]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -296,14 +324,79 @@ export default function ProfileScreen() {
       setPaymentsLoading(false);
       return;
     }
-    loadPayments();
-  }, [authLoading, token, loadPayments]);
+    loadData();
+  }, [authLoading, token, loadData]);
 
   const name = appUser?.full_name ?? "PrintForge user";
 
   const handleSignOut = async () => {
     await signOut();
     router.replace("/(auth)/login");
+  };
+
+  const handleWithdrawal = async () => {
+    if (!token) return;
+    if (!withdrawAmount || isNaN(Number(withdrawAmount))) {
+      showToast("Please enter a valid amount");
+      return;
+    }
+    if (!withdrawBankCode || !withdrawAccount) {
+      showToast("Please enter bank code and account number");
+      return;
+    }
+
+    setWithdrawing(true);
+    try {
+      await withdrawFunds(token, {
+        amount: Number(withdrawAmount),
+        bankCode: withdrawBankCode,
+        accountNumber: withdrawAccount,
+      });
+      showToast("Withdrawal requested successfully!");
+      setShowWithdrawModal(false);
+      setWithdrawAmount("");
+      setWithdrawBankCode("");
+      setWithdrawAccount("");
+      loadData();
+    } catch (e: any) {
+      Alert.alert("Withdrawal Failed", e.message || "Failed to withdraw funds");
+    } finally {
+      setWithdrawing(false);
+    }
+  };
+
+  const handleUploadDeliver = async (req: DesignRequest) => {
+    if (!token) return;
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: "*/*",
+        copyToCacheDirectory: true,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      setUploadingRequestId(req.id);
+      
+      showToast("Uploading file...");
+      const fileRes = await uploadFile(token, {
+        uri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType,
+      });
+
+      showToast("File uploaded, marking as delivered...");
+      await deliverDesignRequest(token, req.id, fileRes.id);
+      
+      showToast("Design successfully delivered!");
+      loadData();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Failed to deliver file");
+    } finally {
+      setUploadingRequestId(null);
+    }
   };
 
   return (
@@ -363,17 +456,71 @@ export default function ProfileScreen() {
             )}
           </View>
 
-          <Text style={styles.displayName}>{name}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'center', marginTop: 16, marginBottom: 2 }}>
+            <Text style={[styles.displayName, { marginTop: 0, marginBottom: 0 }]}>{name}</Text>
+            {appUser?.is_premium && (
+              <View style={[styles.badge, { backgroundColor: 'rgba(34,197,94,0.15)', marginLeft: 8 }]}>
+                <Text style={[styles.badgeText, { color: '#22C55E' }]}>Verified</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.subtitle}>
             {isDesigner ? "PrintForge designer" : "University print account"}
           </Text>
 
+          {!appUser?.is_premium && isDesigner && (
+            <TouchableOpacity
+              style={[styles.editProfileBtn, { marginBottom: 12, backgroundColor: colors.primary, borderColor: colors.primary }]}
+              activeOpacity={0.7}
+              onPress={async () => {
+                if (token) {
+                  const openPaymentUrl = async (url: string, id: string) => {
+                    await WebBrowser.openBrowserAsync(url);
+                    try {
+                      // Fetching the payment auto-verifies it if pending
+                      await fetchPayment(token, id);
+                    } catch (e) {
+                      // ignore
+                    }
+                    // Refresh data after payment attempt
+                    loadData();
+                  };
+
+                  const existing = payments.find(p => p.isPremiumUpgrade && p.status === 'PENDING');
+                  if (existing && existing.checkoutUrl) {
+                    await openPaymentUrl(existing.checkoutUrl, existing.id);
+                    return;
+                  }
+                  try {
+                    showToast("Initiating secure payment...");
+                    const payment = await initiatePayment(token, { isPremiumUpgrade: true });
+                    if (payment.checkoutUrl) {
+                      await openPaymentUrl(payment.checkoutUrl, payment.id);
+                    }
+                  } catch (e: any) {
+                    showToast(e.message || "Failed to initiate payment");
+                  }
+                }
+              }}
+            >
+              <Text style={[styles.editProfileText, { color: colors.onPrimary }]}>Upgrade to Premium</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity
             style={styles.editProfileBtn}
             activeOpacity={0.7}
-            onPress={() => showToast("Profile editing is coming soon.")}
+            onPress={() => router.push("/(app)/edit-profile")}
           >
             <Text style={styles.editProfileText}>Edit Profile</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity
+            style={[styles.editProfileBtn, { marginTop: 12, backgroundColor: 'transparent', borderColor: colors.border }]}
+            activeOpacity={0.7}
+            onPress={() => router.push("/(app)/design-requests")}
+          >
+            <Text style={[styles.editProfileText, { color: colors.foreground }]}>My Design Requests</Text>
           </TouchableOpacity>
         </View>
 
@@ -427,6 +574,86 @@ export default function ProfileScreen() {
 
         {isDesigner && (
           <>
+            <View style={styles.divider} />
+            
+            <View style={styles.ordersSection}>
+              <View style={styles.ordersHeading}>
+                <Briefcase size={16} color={colors.primary} />
+                <Text style={styles.ordersHeadingText}>Accepted Requests</Text>
+              </View>
+
+              {acceptedRequests.length === 0 ? (
+                <Text style={styles.orderMeta}>No accepted requests yet</Text>
+              ) : (
+                <View>
+                  {acceptedRequests.map((req, idx) => {
+                    const isLast = idx === acceptedRequests.length - 1;
+                    return (
+                      <View
+                        key={req.id}
+                        style={[styles.orderRow, !isLast && styles.orderRowBorder]}
+                      >
+                        <View style={styles.orderLeft}>
+                          <Text style={styles.orderName}>{req.title}</Text>
+                          <Text style={styles.orderMeta}>
+                            Requested by {req.userName}
+                          </Text>
+                          <Text style={styles.orderMeta}>
+                            Status: {req.status}
+                          </Text>
+                        </View>
+                        {req.status === 'ACCEPTED' && (
+                          <TouchableOpacity
+                            style={[styles.badge, { backgroundColor: colors.primary }]}
+                            onPress={() => handleUploadDeliver(req)}
+                            disabled={uploadingRequestId === req.id}
+                          >
+                            <Text style={[styles.badgeText, { color: colors.onPrimary }]}>
+                              {uploadingRequestId === req.id ? "Uploading..." : "Upload & Deliver"}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                        {req.status === 'FULFILLED' && (
+                          <View style={[styles.badge, { backgroundColor: colors.statusCompleted.bg }]}>
+                            <Text style={[styles.badgeText, { color: colors.statusCompleted.text }]}>Delivered</Text>
+                          </View>
+                        )}
+                      </View>
+                    );
+                  })}
+                </View>
+              )}
+            </View>
+
+            <View style={styles.divider} />
+
+            <View style={styles.ordersSection}>
+              <View style={styles.ordersHeading}>
+                <DollarSign size={16} color={colors.primary} />
+                <Text style={styles.ordersHeadingText}>Wallet & Earnings</Text>
+              </View>
+
+              {walletInfo ? (
+                <View style={styles.orderRow}>
+                  <View style={styles.orderLeft}>
+                    <Text style={styles.orderName}>Available Balance</Text>
+                    <Text style={[styles.orderMeta, { fontSize: 16, color: colors.primary, fontWeight: '600', marginTop: 4 }]}>
+                      GH₵ {(walletInfo.walletBalance ?? 0).toFixed(2)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.editProfileBtn, { backgroundColor: colors.primary, borderColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8 }]}
+                    activeOpacity={0.7}
+                    onPress={() => setShowWithdrawModal(true)}
+                  >
+                    <Text style={[styles.editProfileText, { color: colors.onPrimary }]}>Withdraw</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Text style={styles.orderMeta}>Loading wallet...</Text>
+              )}
+            </View>
+
             <View style={styles.divider} />
             <View style={styles.gridHeaderRow}>
               <Grid3x3 size={16} color={colors.foreground} />
@@ -498,9 +725,155 @@ export default function ProfileScreen() {
             </View>
           </TouchableOpacity>
 
+          <TouchableOpacity
+            style={styles.settingsRow}
+            onPress={() => setShowDeleteModal(true)}
+          >
+            <View style={styles.settingsRowLeft}>
+              <X size={18} color={colors.destructive} />
+              <Text style={[styles.settingsRowText, { color: colors.destructive }]}>Delete Account</Text>
+            </View>
+          </TouchableOpacity>
+
           <Text style={styles.versionText}>PrintForge 3D · v1.0.0</Text>
         </View>
       </ScrollView>
+
+      {/* Delete Account Modal */}
+      <Modal visible={showDeleteModal} transparent animationType="slide" onRequestClose={() => setShowDeleteModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowDeleteModal(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
+            <View style={styles.dragHandle} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.modalTitle, { marginBottom: 0 }]}>Delete Account</Text>
+              <Pressable onPress={() => setShowDeleteModal(false)} style={styles.modalCloseBtn}>
+                <X size={20} color={colors.mutedFg} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalSubtitle, { marginBottom: 16 }]}>
+              Enter your password to confirm account deletion. This action is permanent.
+            </Text>
+            <TextInput
+              style={[styles.input, { marginBottom: 24 }]}
+              placeholder="Password"
+              placeholderTextColor={colors.mutedFg}
+              secureTextEntry
+              value={deletePassword}
+              onChangeText={setDeletePassword}
+            />
+            <TouchableOpacity
+              style={[styles.modalCta, { backgroundColor: colors.destructive, shadowColor: colors.destructive }]}
+              activeOpacity={0.8}
+              disabled={deletingAccount}
+              onPress={async () => {
+                if (!deletePassword) {
+                  showToast("Password is required");
+                  return;
+                }
+                if (token) {
+                  setDeletingAccount(true);
+                  try {
+                    await deleteAccount(token, deletePassword);
+                    showToast("Account deleted successfully");
+                    signOut();
+                  } catch (e: any) {
+                    showToast(e.message || "Failed to delete account");
+                  } finally {
+                    setDeletingAccount(false);
+                    setShowDeleteModal(false);
+                    setDeletePassword("");
+                  }
+                }
+              }}
+            >
+              <Text style={styles.modalCtaText}>
+                {deletingAccount ? "Deleting..." : "Confirm Delete"}
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.maybeLaterBtn}
+              onPress={() => setShowDeleteModal(false)}
+            >
+              <Text style={styles.maybeLaterText}>Cancel</Text>
+            </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Withdrawal Modal */}
+      <Modal visible={showWithdrawModal} transparent animationType="slide" onRequestClose={() => setShowWithdrawModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowWithdrawModal(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
+            <View style={styles.dragHandle} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.modalTitle, { marginBottom: 0 }]}>Withdraw Funds</Text>
+              <Pressable onPress={() => setShowWithdrawModal(false)} style={styles.modalCloseBtn}>
+                <X size={20} color={colors.mutedFg} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalSubtitle, { marginBottom: 16 }]}>
+              Available to withdraw: GH₵ {(walletInfo?.walletBalance ?? 0).toFixed(2)}
+            </Text>
+            
+            <TextInput
+              style={[styles.input, { marginBottom: 12 }]}
+              placeholder="Amount (e.g. 50)"
+              placeholderTextColor={colors.mutedFg}
+              keyboardType="numeric"
+              value={withdrawAmount}
+              onChangeText={setWithdrawAmount}
+            />
+            
+            <Pressable
+              style={[styles.input, { marginBottom: 12, justifyContent: 'center' }]}
+              onPress={() => setShowBankPicker(!showBankPicker)}
+            >
+              <Text style={{ color: withdrawBankCode ? colors.foreground : colors.mutedFg }}>
+                {BANK_CODES.find(b => b.value === withdrawBankCode)?.label || "Select Mobile Money Network"}
+              </Text>
+            </Pressable>
+
+            {showBankPicker && (
+              <View style={{ backgroundColor: colors.background, borderRadius: 8, borderColor: colors.border, borderWidth: 1, marginBottom: 12, padding: 8 }}>
+                {BANK_CODES.map(b => (
+                  <TouchableOpacity
+                    key={b.value}
+                    style={{ paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: b.value !== 'ATL' ? 1 : 0, borderBottomColor: colors.border }}
+                    onPress={() => {
+                      setWithdrawBankCode(b.value);
+                      setShowBankPicker(false);
+                    }}
+                  >
+                    <Text style={{ color: colors.foreground }}>{b.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <TextInput
+              style={[styles.input, { marginBottom: 24 }]}
+              placeholder="Account Number (Mobile Money)"
+              placeholderTextColor={colors.mutedFg}
+              keyboardType="numeric"
+              value={withdrawAccount}
+              onChangeText={setWithdrawAccount}
+            />
+
+            <Pressable
+              style={styles.modalCta}
+              disabled={withdrawing}
+              onPress={handleWithdrawal}
+            >
+              <Text style={styles.modalCtaText}>{withdrawing ? "Processing..." : "Confirm Withdrawal"}</Text>
+              {!withdrawing && <ChevronRight size={18} strokeWidth={2.5} color={colors.onPrimary} />}
+            </Pressable>
+
+            <Pressable onPress={() => setShowWithdrawModal(false)} style={styles.maybeLaterBtn}>
+              <Text style={styles.maybeLaterText}>Cancel</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <BecomeDesignerModal
         visible={showModal}
@@ -825,6 +1198,15 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     color: colors.mutedFg,
     textAlign: "center",
     marginBottom: 24,
+  },
+  input: {
+    height: 48,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    color: colors.foreground,
+    backgroundColor: colors.background,
   },
   benefitsContainer: {
     gap: 12,

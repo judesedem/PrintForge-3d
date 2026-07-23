@@ -69,4 +69,16 @@ public class User {
     // a real opt-in signal to check instead of retrofitting one.
     @Column(name = "email_opt_in", columnDefinition = "boolean not null default true")
     private boolean emailOptIn;
+
+    // Premium Designer status
+    @Column(name = "is_premium", columnDefinition = "boolean not null default false")
+    private boolean isPremium;
+
+    // The current available balance the designer can withdraw
+    @Column(name = "wallet_balance", precision = 10, scale = 2)
+    private java.math.BigDecimal walletBalance = java.math.BigDecimal.ZERO;
+
+    // The lifetime earnings this designer has made
+    @Column(name = "total_earnings", precision = 10, scale = 2)
+    private java.math.BigDecimal totalEarnings = java.math.BigDecimal.ZERO;
 }

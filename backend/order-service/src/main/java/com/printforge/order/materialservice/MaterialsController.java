@@ -1,6 +1,8 @@
 package com.printforge.order.materialservice;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.printforge.order.materialservice.model.Material;
+import com.printforge.order.materialservice.repository.MaterialRepository;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -10,57 +12,53 @@ import java.util.List;
 
 /**
  * GET /api/materials — returns the available print materials with colors
- * and pricing. Hardcoded for now (no DB table needed for CodeFest scope);
- * matches the Material TypeScript interface the frontend expects.
+ * and pricing. Backed by the `materials` table (see materialservice.model
+ * .Material) — the same table EstimateService (in this service AND
+ * marketplace-service) reads cost_per_gram/baseMinutesPerGram/density
+ * from for its cost calculation, so this listing can never drift out of
+ * sync with what a customer is actually charged the way it previously did
+ * (PETG/CARBON_FIBER had two different hardcoded cost_per_gram values
+ * before this migration — see config/MaterialSeeder.java's javadoc for the
+ * full history). Admin edits via PATCH /api/admin/materials/{name}
+ * (admin-service) show up here immediately, same table, no caching.
  *
- * cost_per_gram is expressed in GH₵ per gram and matches the rates used by
- * EstimateService (PLA: 0.05, RESIN: 0.15, ABS: 0.08). Previously this
- * field was named cost_per_unit and held values 100× too large (5.00,
- * 15.00, 8.00), causing a visible mismatch between the materials listing
- * and any cost estimate shown alongside it.
+ * material_id is now the real numeric row id (as a string) rather than the
+ * old hardcoded "mat-1".."mat-5" — the frontend only ever treats this field
+ * as an opaque string key, never parses or compares it, so this is not a
+ * breaking change.
  */
 @RestController
 @RequestMapping("/api/materials")
 public class MaterialsController {
 
+    private final MaterialRepository materialRepository;
+
+    public MaterialsController(MaterialRepository materialRepository) {
+        this.materialRepository = materialRepository;
+    }
+
     @GetMapping
     public ResponseEntity<List<MaterialDto>> getMaterials() {
-        return ResponseEntity.ok(List.of(
-            new MaterialDto(
-                "mat-1", "PLA",
-                List.of("White", "Black", "Grey", "Red", "Blue", "Green", "Yellow", "Orange"),
-                0.05, "available",
-                "Standard thermoplastic. Great for most prints — easy to use, low warp, good detail."
-            ),
-            new MaterialDto(
-                "mat-2", "RESIN",
-                List.of("Clear", "White", "Grey", "Black"),
-                0.15, "available",
-                "High-detail photopolymer resin. Best for miniatures, jewellery, and fine detail work."
-            ),
-            new MaterialDto(
-                "mat-3", "ABS",
-                List.of("Black", "White", "Grey"),
-                0.08, "low",
-                "Engineering-grade plastic. More durable and heat-resistant than PLA. Low stock."
-            ),
-            new MaterialDto(
-                "mat-4", "PETG",
-                List.of("Clear", "White", "Black", "Grey", "Blue", "Red"),
-                0.09, "available",
-                "Durable and impact-resistant with better temperature resistance than PLA. Good for functional parts."
-            ),
+        List<MaterialDto> materials = materialRepository.findAll().stream()
+                .map(MaterialsController::toDto)
+                .toList();
+        return ResponseEntity.ok(materials);
+    }
 
-            new MaterialDto(
-                "mat-5", "CARBON_FIBER",
-                List.of("Black"),
-                0.20, "available",
-                "Carbon-fiber-reinforced filament. Extra stiffness and strength — ideal for drone mounts, brackets, and load-bearing parts."
-)
-        ));
+    private static MaterialDto toDto(Material material) {
+        return new MaterialDto(
+                String.valueOf(material.getId()),
+                material.getName(),
+                material.getColors(),
+                material.getCostPerGram(),
+                material.getAvailabilityStatus(),
+                material.getDescription()
+        );
     }
 
     // ── DTO ─────────────────────────────────────────────────────────────────
+    // Unchanged shape from before this migration — the frontend contract
+    // stays identical.
 
     public static class MaterialDto {
 

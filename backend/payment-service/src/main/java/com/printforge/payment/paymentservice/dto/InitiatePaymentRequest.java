@@ -1,14 +1,18 @@
 package com.printforge.payment.paymentservice.dto;
 
-import jakarta.validation.constraints.NotNull;
-
 public class InitiatePaymentRequest {
 
-    @NotNull(message = "estimateId is required")
+    // Optional — provided for standard prints
     private Long estimateId;
 
-    // Optional — only provided when ordering from the marketplace
+    // Optional — provided when ordering from the marketplace
     private Long listingId;
+    
+    // Optional — provided when paying for a design request
+    private Long requestId;
+
+    // Optional — provided when upgrading to Premium Designer status
+    private Boolean isPremiumUpgrade;
 
     // Optional — the color/notes the customer chose at order-submission
     // time (see PrintJobFacadeController.submitMarketplaceOrder()/
@@ -23,6 +27,12 @@ public class InitiatePaymentRequest {
 
     public Long getListingId() { return listingId; }
     public void setListingId(Long listingId) { this.listingId = listingId; }
+    
+    public Long getRequestId() { return requestId; }
+    public void setRequestId(Long requestId) { this.requestId = requestId; }
+
+    public Boolean getIsPremiumUpgrade() { return isPremiumUpgrade; }
+    public void setIsPremiumUpgrade(Boolean isPremiumUpgrade) { this.isPremiumUpgrade = isPremiumUpgrade; }
 
     public String getColor() { return color; }
     public void setColor(String color) { this.color = color; }

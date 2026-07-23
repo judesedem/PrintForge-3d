@@ -12,68 +12,8 @@ const WHITE_20 = 'rgba(255,255,255,0.2)';
 const ORANGE = '#FF6A00';
 const ORANGE_30 = 'rgba(255,106,0,0.3)';
 
-type Designer = {
-  id: string;
-  name: string;
-  verified: boolean;
-  designs: string;
-  followers: string;
-  following: boolean;
-  avatar: string;
-};
-
-const MOCK_FOLLOWING: Designer[] = [
-  {
-    id: '1',
-    name: 'Marcus Chen',
-    verified: true,
-    designs: '24 designs',
-    followers: '1.2k followers',
-    following: true,
-    avatar:
-      'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
-  },
-  {
-    id: '2',
-    name: 'Priya Patel',
-    verified: true,
-    designs: '18 designs',
-    followers: '890 followers',
-    following: true,
-    avatar:
-      'https://images.pexels.com/photos/415829/pexels-photo-415829.jpeg?auto=compress&cs=tinysrgb&w=100',
-  },
-  {
-    id: '3',
-    name: 'GearWorks Lab',
-    verified: true,
-    designs: '56 designs',
-    followers: '3.4k followers',
-    following: true,
-    avatar:
-      'https://images.pexels.com/photos/733872/pexels-photo-733872.jpeg?auto=compress&cs=tinysrgb&w=100',
-  },
-  {
-    id: '4',
-    name: 'Jonas Weiss',
-    verified: false,
-    designs: '8 designs',
-    followers: '234 followers',
-    following: true,
-    avatar:
-      'https://images.pexels.com/photos/614810/pexels-photo-614810.jpeg?auto=compress&cs=tinysrgb&w=100',
-  },
-];
-
 export default function FollowingScreen() {
   const router = useRouter();
-  const [designers, setDesigners] = useState<Designer[]>(MOCK_FOLLOWING);
-
-  const toggleFollow = (id: string) => {
-    setDesigners((prev) =>
-      prev.map((d) => (d.id === id ? { ...d, following: !d.following } : d))
-    );
-  };
 
   return (
     <View style={styles.screen}>
@@ -94,64 +34,11 @@ export default function FollowingScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        {designers.map((item) => (
-          <Pressable
-            key={item.id}
-            style={({ pressed }) => [styles.row, pressed && styles.pressed]}
-            onPress={() =>
-              router.push({
-                pathname: '/(app)/marketplace/designer/[id]',
-                params: {
-                  id: item.id,
-                  name: item.name,
-                  avatar: item.avatar,
-                  verified: String(item.verified),
-                },
-              })
-            }
-          >
-            <Image source={{ uri: item.avatar }} style={styles.avatar} />
-
-            <View style={styles.infoCol}>
-              <View style={styles.nameRow}>
-                <Text style={styles.name}>{item.name}</Text>
-                {item.verified ? (
-                  <BadgeCheck size={14} color={ORANGE} style={{ marginLeft: 4 }} />
-                ) : null}
-              </View>
-              <Text style={styles.stats}>
-                {`${item.designs} · ${item.followers}`}
-              </Text>
-            </View>
-
-            <Pressable
-              onPress={() => toggleFollow(item.id)}
-              hitSlop={6}
-              style={({ pressed }) => [
-                styles.followPill,
-                item.following ? styles.followPillFollowing : styles.followPillUnfollowed,
-                pressed && styles.pressed,
-              ]}
-            >
-              <Text
-                style={[
-                  styles.followPillText,
-                  item.following ? styles.followTextFollowing : styles.followTextUnfollowed,
-                ]}
-              >
-                {item.following ? 'Following' : 'Follow'}
-              </Text>
-            </Pressable>
-
-            <ChevronRight size={16} color={WHITE_20} style={{ marginLeft: 8 }} />
-          </Pressable>
-        ))}
-      </ScrollView>
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <Text style={{ color: WHITE_50, textAlign: 'center' }}>
+          You aren't following any designers yet.
+        </Text>
+      </View>
     </View>
   );
 }

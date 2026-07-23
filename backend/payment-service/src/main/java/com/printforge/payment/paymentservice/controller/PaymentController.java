@@ -2,7 +2,9 @@ package com.printforge.payment.paymentservice.controller;
 
 import com.printforge.payment.entity.User;
 import com.printforge.payment.paymentservice.dto.InitiatePaymentRequest;
+import com.printforge.payment.paymentservice.dto.WithdrawalRequestDTO;
 import com.printforge.payment.paymentservice.model.Payment;
+import com.printforge.payment.paymentservice.model.Withdrawal;
 import com.printforge.payment.paymentservice.service.PaymentService;
 import com.printforge.payment.repository.UserRepository;
 import jakarta.validation.Valid;
@@ -11,7 +13,9 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Payment endpoints.
@@ -44,10 +48,12 @@ public class PaymentController {
         Payment payment = paymentService.initiatePayment(
                 request.getEstimateId(),
                 request.getListingId(),
+                request.getRequestId(),
                 caller.getUserId(),
                 caller.getEmail(),
                 request.getColor(),
-                request.getNotes()
+                request.getNotes(),
+                request.getIsPremiumUpgrade()
         );
         return ResponseEntity.ok(payment);
     }
@@ -102,10 +108,59 @@ public class PaymentController {
         return ResponseEntity.ok(paymentService.getPaymentsForUser(caller.getUserId()));
     }
 
+    // ── Wallet & Withdrawals ─────────────────────────────────────────────────
+
+    @GetMapping("/wallet")
+    public ResponseEntity<Map<String, Object>> getWalletInfo(Authentication authentication) {
+        User caller = currentUser(authentication);
+        
+        List<Withdrawal> withdrawals = paymentService.getWithdrawalsForUser(caller.getUserId());
+        
+        Map<String, Object> response = new HashMap<>();
+        response.put("walletBalance", caller.getWalletBalance());
+        response.put("totalEarnings", caller.getTotalEarnings());
+        response.put("withdrawals", withdrawals);
+        
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/withdraw")
+    public ResponseEntity<Withdrawal> withdrawFunds(
+            @Valid @RequestBody WithdrawalRequestDTO request,
+            Authentication authentication) {
+        
+        User caller = currentUser(authentication);
+        Withdrawal withdrawal = paymentService.requestWithdrawal(
+                caller.getUserId(),
+                request.getAmount(),
+                request.getBankCode(),
+                request.getAccountNumber()
+        );
+        
+        return ResponseEntity.ok(withdrawal);
+    }
+
     // ── Helper ───────────────────────────────────────────────────────────────
 
     private User currentUser(Authentication authentication) {
         return userRepository.findByEmail(authentication.getName())
                 .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+    }
+
+    @ExceptionHandler({
+        com.printforge.payment.paymentservice.exception.PaymentFailedException.class, 
+        IllegalArgumentException.class,
+        org.springframework.web.bind.MethodArgumentNotValidException.class
+    })
+    public ResponseEntity<Map<String, String>> handlePaymentException(Exception ex) {
+        Map<String, String> response = new HashMap<>();
+        if (ex instanceof org.springframework.web.bind.MethodArgumentNotValidException) {
+            org.springframework.web.bind.MethodArgumentNotValidException validationEx = (org.springframework.web.bind.MethodArgumentNotValidException) ex;
+            String defaultMessage = validationEx.getBindingResult().getAllErrors().get(0).getDefaultMessage();
+            response.put("message", defaultMessage);
+        } else {
+            response.put("message", ex.getMessage());
+        }
+        return ResponseEntity.badRequest().body(response);
     }
 }

@@ -18,13 +18,8 @@ import { forgotPassword } from "../../src/api/auth";
 import { designTokens } from "../../src/theme";
 
 /**
- * Forgot Password — same hero/card visual shell as login.tsx. The real
- * POST /api/auth/forgot-password endpoint doesn't exist on the backend
- * yet, so a failure here (404, or any other error) degrades gracefully:
- * the user still sees "Reset link sent if account exists" and gets
- * navigated back, rather than a broken/dead screen. This also means a
- * real backend rollout later needs zero frontend changes — the happy
- * path already matches.
+ * Forgot Password — same hero/card visual shell as login.tsx.
+ * Calls the backend to issue a password reset token via email.
  */
 
 const HERO_IMAGE =
@@ -45,7 +40,7 @@ export default function ForgotPasswordScreen() {
 
   const handleSubmit = async () => {
     if (!email.trim()) {
-      setError("Enter your university email.");
+      setError("Enter your email.");
       return;
     }
     setError(null);
@@ -55,21 +50,11 @@ export default function ForgotPasswordScreen() {
       showToast("Reset link sent if account exists.");
       setTimeout(() => router.back(), 2000);
     } catch (err) {
-      // 404 specifically means the endpoint isn't built yet — degrade
-      // gracefully rather than show the user a broken/dead screen (a
-      // real backend rollout later needs no frontend change, since the
-      // success path already matches). Any other failure (network error,
-      // 500, etc.) is a real problem worth surfacing inline.
-      if (err instanceof ApiError && err.status === 404) {
-        showToast("Reset link sent if account exists.");
-        setTimeout(() => router.back(), 2000);
-      } else {
-        setError(
-          err instanceof ApiError
-            ? err.message
-            : "Something went wrong. Try again.",
-        );
-      }
+      setError(
+        err instanceof ApiError
+          ? err.message
+          : "Something went wrong. Try again.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -101,7 +86,7 @@ export default function ForgotPasswordScreen() {
             <View style={s.card}>
               <Text style={s.heading}>Forgot Password</Text>
               <Text style={s.subtitle}>
-                Enter your university email and we&apos;ll send you a reset
+                Enter your email and we&apos;ll send you a reset
                 link.
               </Text>
 
@@ -118,7 +103,7 @@ export default function ForgotPasswordScreen() {
                   autoCapitalize="none"
                   autoComplete="email"
                   keyboardType="email-address"
-                  placeholder="University email"
+                  placeholder="Email"
                   placeholderTextColor={CARD_MUTED}
                   style={s.input}
                   value={email}

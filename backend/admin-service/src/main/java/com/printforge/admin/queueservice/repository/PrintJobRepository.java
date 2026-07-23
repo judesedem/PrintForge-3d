@@ -31,4 +31,10 @@ public interface PrintJobRepository extends JpaRepository<PrintJob, Long> {
      */
     @Query("SELECT COUNT(j) FROM PrintJob j")
     long countAllJobs();
+
+    /**
+     * Material usage trends for analytics.
+     */
+    @Query("SELECT j.material, COUNT(j) FROM PrintJob j WHERE j.material IS NOT NULL GROUP BY j.material")
+    List<Object[]> countGroupedByMaterial();
 }

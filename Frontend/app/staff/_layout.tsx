@@ -16,6 +16,7 @@ export default function StaffDrawerLayout() {
         swipeEdgeWidth: 40,
       }}
     >
+      <Drawer.Screen name="dashboard" options={{ drawerLabel: 'Dashboard' }} />
       <Drawer.Screen name="board" options={{ drawerLabel: 'Queue Board' }} />
       <Drawer.Screen name="queue" options={{ drawerLabel: 'Print Queue' }} />
     </Drawer>

@@ -6,31 +6,6 @@ import { ArrowLeft, BadgeCheck, Grid3x3 } from 'lucide-react-native';
 import { useTheme } from '@/ThemeContext';
 import { Colors, designTokens } from '@/theme';
 
-/**
- * Designer public profile — NEW in Bolt redesign Pass 2.
- *
- * Entirely mock-backed for now: there is no designer/user public-profile
- * endpoint, no follower model, and no per-designer listings query. The
- * screen receives display fields (name/avatar/verified) as route params
- * from the Home feed's mock cards; stats are 0 and the follow toggle is
- * local state only.
- *
- * The design-grid thumbnails are the shared mock Pexels set and do NOT
- * navigate — they have no real listing ids, and pushing a fake id into
- * marketplace/[id] would just error against the real API. When a real
- * designer/listings endpoint exists, wire real ids here and re-enable
- * navigation.
- */
-
-const MOCK_DESIGN_IMAGES = [
-  'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/4488626/pexels-photo-4488626.jpeg?auto=compress&cs=tinysrgb&w=300',
-  'https://images.pexels.com/photos/4488637/pexels-photo-4488637.jpeg?auto=compress&cs=tinysrgb&w=300',
-];
-
 export default function DesignerProfileScreen() {
   const router = useRouter();
   const { colors } = useTheme();
@@ -113,10 +88,11 @@ export default function DesignerProfileScreen() {
           <Grid3x3 size={16} color={colors.primary} />
           <Text style={s.sectionTitle}>DESIGNS</Text>
         </View>
+        
         <View style={s.designGrid}>
-          {MOCK_DESIGN_IMAGES.map(uri => (
-            <Image key={uri} source={{ uri }} style={s.designThumb} />
-          ))}
+          <Text style={{ color: colors.mutedFg, fontSize: 12, marginTop: 10 }}>
+            No designs available to view yet.
+          </Text>
         </View>
       </ScrollView>
     </SafeAreaView>
@@ -244,6 +220,8 @@ function makeStyles(colors: Colors) {
       flexDirection: 'row',
       flexWrap: 'wrap',
       gap: 6,
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     designThumb: {
       width: '32%',

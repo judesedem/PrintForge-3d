@@ -8,6 +8,7 @@ import com.printforge.order.fileservice.model.ModelFile;
 import com.printforge.order.fileservice.repository.ModelFileRepository;
 import com.printforge.order.labservice.model.LabLocation;
 import com.printforge.order.labservice.service.LabLocationService;
+import com.printforge.order.notificationservice.model.NotificationType;
 import com.printforge.order.notificationservice.service.NotificationService;
 import com.printforge.order.queueservice.exception.InvalidJobStatusException;
 import com.printforge.order.queueservice.exception.PrintJobNotFoundException;
@@ -29,17 +30,21 @@ import java.util.Set;
 public class PrintQueueService {
 
     private static final Set<String> VALID_STATUSES =
-            Set.of("SUBMITTED", "APPROVED", "QUEUED", "PRINTING", "COMPLETED", "REJECTED");
+            Set.of("SUBMITTED", "APPROVED", "QUEUED", "PRINTING", "COMPLETED", "REJECTED", "FAILED");
 
     // Used only by transitionJobStatus() below (PATCH /api/print-jobs/{id}/transition).
     // READY and COLLECTED are new statuses that the older free-form
     // updateJobStatus()/VALID_STATUSES above deliberately doesn't know
     // about — this is a separate, stricter state machine layered on top,
-    // not a replacement for it.
+    // not a replacement for it. FAILED *is* also a VALID_STATUSES member
+    // (updateJobStatus needs to reach it too), but it's listed here as well
+    // so this method enforces the same PRINTING-only precondition rather
+    // than treating it as a free jump like the rest of VALID_STATUSES.
     private static final java.util.Map<String, String> REQUIRED_PREVIOUS_STATUS = java.util.Map.of(
             "PRINTING", "APPROVED",
             "READY", "PRINTING",
-            "COLLECTED", "READY"
+            "COLLECTED", "READY",
+            "FAILED", "PRINTING"
     );
 
     private final PrintJobRepository printJobRepository;
@@ -162,6 +167,19 @@ public class PrintQueueService {
             throw new InvalidJobStatusException(
                     "Invalid status '" + newStatus + "'. Must be one of: " + VALID_STATUSES);
         }
+
+        // Unlike the rest of VALID_STATUSES (which this method otherwise lets
+        // jump to from any current status), FAILED needs one targeted
+        // precondition: a job only fails mid-print, never before PRINTING
+        // starts or after it's already finished. Same REQUIRED_PREVIOUS_STATUS
+        // map transitionJobStatus() uses below, reused here so the two methods
+        // can't drift on what "valid transition into FAILED" means.
+        if ("FAILED".equals(normalizedStatus) && !REQUIRED_PREVIOUS_STATUS.get("FAILED").equals(job.getStatus())) {
+            throw new InvalidJobStatusException(
+                    "Cannot mark job as FAILED from status '" + job.getStatus() + "'. " +
+                            "A job can only fail while PRINTING.");
+        }
+
         job.setStatus(normalizedStatus);
 
         // Printer assignment with cascading status
@@ -195,7 +213,10 @@ public class PrintQueueService {
         // Timestamps and printer cleanup on terminal statuses
         if ("PRINTING".equals(normalizedStatus) && job.getStartedAt() == null) {
             job.setStartedAt(LocalDateTime.now());
-        } else if ("COMPLETED".equals(normalizedStatus) || "REJECTED".equals(normalizedStatus)) {
+        } else if ("COMPLETED".equals(normalizedStatus) || "REJECTED".equals(normalizedStatus)
+                || "FAILED".equals(normalizedStatus)) {
+            // FAILED shares completedAt as its terminal timestamp, same as
+            // REJECTED already does — there's no separate failedAt field.
             if (job.getCompletedAt() == null) job.setCompletedAt(LocalDateTime.now());
             String assignedPrinter = job.getAssignedPrinter();
             if (assignedPrinter != null && !assignedPrinter.isBlank()) {
@@ -214,17 +235,22 @@ public class PrintQueueService {
                     job.getUserId(),
                     "Print Started",
                     "Your print job has started printing!",
-                    "info");
+                    NotificationType.JOB_STARTED);
             case "COMPLETED" -> notificationService.createNotification(
                     job.getUserId(),
                     "Print Complete",
                     "Your print job is complete and ready for collection.",
-                    "success");
+                    NotificationType.JOB_COMPLETED);
             case "REJECTED" -> notificationService.createNotification(
                     job.getUserId(),
                     "Job Rejected",
                     "Your print job was rejected. Check operator notes.",
-                    "error");
+                    NotificationType.JOB_REJECTED);
+            case "FAILED" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Print Failed",
+                    "Your print job failed during printing. Our team has been notified.",
+                    NotificationType.JOB_FAILED);
         }
 
         return saved;
@@ -232,11 +258,14 @@ public class PrintQueueService {
 
     /**
      * Strict staff-driven lifecycle used by PATCH /api/print-jobs/{id}/transition:
-     * APPROVED → PRINTING → READY → COLLECTED only, one step at a time.
-     * Deliberately separate from updateJobStatus() above (which stays
-     * exactly as it was) rather than extending it, since updateJobStatus()
-     * is unconditional (any VALID_STATUSES value from any current status)
-     * and this needs to reject out-of-order jumps with a 400.
+     * APPROVED → PRINTING → READY → COLLECTED, one step at a time, plus the
+     * one branch off that line: PRINTING → FAILED, when a print fails
+     * mid-job instead of completing. Deliberately separate from
+     * updateJobStatus() above (which stays exactly as it was) rather than
+     * extending it, since updateJobStatus() is unconditional (any
+     * VALID_STATUSES value from any current status, aside from the single
+     * targeted FAILED precondition it also enforces) and this needs to
+     * reject out-of-order jumps with a 400.
      */
     public PrintJob transitionJobStatus(Long jobId, String requestedStatus) {
         PrintJob job = printJobRepository.findById(jobId)
@@ -246,14 +275,14 @@ public class PrintQueueService {
         String requiredFrom = REQUIRED_PREVIOUS_STATUS.get(normalized);
         if (requiredFrom == null) {
             throw new InvalidJobStatusException(
-                    "Invalid status '" + requestedStatus + "'. Must be one of: PRINTING, READY, COLLECTED.");
+                    "Invalid status '" + requestedStatus + "'. Must be one of: PRINTING, READY, COLLECTED, FAILED.");
         }
 
         String currentStatus = job.getStatus();
         if (!requiredFrom.equals(currentStatus)) {
             throw new InvalidJobStatusException(
                     "Cannot transition from '" + currentStatus + "' to '" + normalized + "'. " +
-                            "Valid transitions: APPROVED→PRINTING, PRINTING→READY, READY→COLLECTED.");
+                            "Valid transitions: APPROVED→PRINTING, PRINTING→READY, READY→COLLECTED, PRINTING→FAILED.");
         }
 
         job.setStatus(normalized);
@@ -261,6 +290,19 @@ public class PrintQueueService {
             job.setStartedAt(LocalDateTime.now());
         } else if ("COLLECTED".equals(normalized) && job.getCompletedAt() == null) {
             job.setCompletedAt(LocalDateTime.now());
+        } else if ("FAILED".equals(normalized)) {
+            // Same terminal-status printer cleanup updateJobStatus() does for
+            // COMPLETED/REJECTED/FAILED — without this a failed job would
+            // leave its printer stuck BUSY forever, since transitionJobStatus()
+            // has no other path back to AVAILABLE for it.
+            if (job.getCompletedAt() == null) job.setCompletedAt(LocalDateTime.now());
+            String assignedPrinter = job.getAssignedPrinter();
+            if (assignedPrinter != null && !assignedPrinter.isBlank()) {
+                printerRepository.findByPrinterName(assignedPrinter).ifPresent(p -> {
+                    p.setStatus("AVAILABLE");
+                    printerRepository.save(p);
+                });
+            }
         }
 
         PrintJob saved = printJobRepository.save(job);
@@ -274,18 +316,23 @@ public class PrintQueueService {
                     job.getUserId(),
                     "Print Started",
                     "Your print job " + jobName + " has started printing!",
-                    "info");
+                    NotificationType.JOB_STARTED);
             case "READY" -> notificationService.createNotification(
                     job.getUserId(),
                     "Ready for Pickup",
                     readyForPickupMessage(job, jobName),
-                    "success",
+                    NotificationType.SUCCESS,
                     "printforge://jobs/" + job.getId());
             case "COLLECTED" -> notificationService.createNotification(
                     job.getUserId(),
                     "Collected",
                     "Thank you for collecting " + jobName + "!",
-                    "success");
+                    NotificationType.SUCCESS);
+            case "FAILED" -> notificationService.createNotification(
+                    job.getUserId(),
+                    "Print Failed",
+                    "Your print job " + jobName + " failed during printing. Our team has been notified.",
+                    NotificationType.JOB_FAILED);
         }
 
         return saved;

@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Heart, Search } from 'lucide-react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useTheme } from '@/ThemeContext';
 import { useSession } from '@/SessionContext';
 import { Colors, designTokens } from '@/theme';
@@ -26,58 +26,10 @@ type GridItem = {
   price: string | null;
   img: string;
   listingId: string | null;
+  designerName?: string;
+  isPremiumDesigner?: boolean;
+  category?: string;
 };
-
-const MOCK_GRID: GridItem[] = [
-  {
-    id: 'mock-1',
-    name: 'Helical Gear',
-    likes: 1200,
-    price: 'GH₵ 3.99',
-    img: 'https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=300',
-    listingId: null,
-  },
-  {
-    id: 'mock-2',
-    name: 'GoPro Mount',
-    likes: 890,
-    price: 'GH₵ 4.99',
-    img: 'https://images.pexels.com/photos/3825586/pexels-photo-3825586.jpeg?auto=compress&cs=tinysrgb&w=300',
-    listingId: null,
-  },
-  {
-    id: 'mock-3',
-    name: 'Pi Case',
-    likes: 567,
-    price: 'GH₵ 1.49',
-    img: 'https://images.pexels.com/photos/4488649/pexels-photo-4488649.jpeg?auto=compress&cs=tinysrgb&w=300',
-    listingId: null,
-  },
-  {
-    id: 'mock-4',
-    name: 'Drone Frame',
-    likes: 2100,
-    price: 'GH₵ 4.99',
-    img: 'https://images.pexels.com/photos/2582937/pexels-photo-2582937.jpeg?auto=compress&cs=tinysrgb&w=300',
-    listingId: null,
-  },
-  {
-    id: 'mock-5',
-    name: 'Cable Clip',
-    likes: 340,
-    price: null,
-    img: 'https://images.pexels.com/photos/4488626/pexels-photo-4488626.jpeg?auto=compress&cs=tinysrgb&w=300',
-    listingId: null,
-  },
-  {
-    id: 'mock-6',
-    name: 'Vase Spiral',
-    likes: 780,
-    price: 'GH₵ 0.99',
-    img: 'https://images.pexels.com/photos/4488637/pexels-photo-4488637.jpeg?auto=compress&cs=tinysrgb&w=300',
-    listingId: null,
-  },
-];
 
 const FREE_BADGE_BG = '#10B981';
 
@@ -110,18 +62,19 @@ export default function DesignsTab() {
     }
   }, [token]);
 
-  useEffect(() => {
-    if (authLoading) return;
-    if (!token) {
-      setListings([]);
-      setLoading(false);
-      return;
-    }
-    load();
-  }, [authLoading, token, load]);
+  useFocusEffect(
+    useCallback(() => {
+      if (authLoading) return;
+      if (!token) {
+        setListings([]);
+        setLoading(false);
+        return;
+      }
+      load();
+    }, [authLoading, token, load])
+  );
 
   const gridData: GridItem[] = useMemo(() => {
-    if (listings.length === 0) return MOCK_GRID;
     return listings.map(listing => ({
       id: listing.id,
       name: listing.title,
@@ -129,12 +82,17 @@ export default function DesignsTab() {
       price: listing.price > 0 ? `GH₵ ${listing.price.toFixed(2)}` : null,
       img: listing.thumbnailUrl,
       listingId: listing.id,
+      designerName: listing.designerName,
+      isPremiumDesigner: listing.isPremiumDesigner,
+      category: listing.category,
     }));
   }, [listings]);
 
-  const filtered = gridData.filter(item =>
-    item.name.toLowerCase().includes(search.trim().toLowerCase())
-  );
+  const filtered = gridData.filter(item => {
+    const matchesSearch = item.name.toLowerCase().includes(search.trim().toLowerCase());
+    const matchesCategory = category === 'All' || (item.category && item.category.toUpperCase() === category.toUpperCase());
+    return matchesSearch && matchesCategory;
+  });
 
   const rows = useMemo(() => {
     const result: GridItem[][] = [];
@@ -170,6 +128,18 @@ export default function DesignsTab() {
         <Text style={s.cardName} numberOfLines={1}>
           {item.name}
         </Text>
+        {item.designerName && (
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 2, marginBottom: 4 }}>
+            <Text style={{ fontSize: 10, color: '#6B7280', marginRight: 4 }} numberOfLines={1}>
+              by {item.designerName}
+            </Text>
+            {item.isPremiumDesigner && (
+              <View style={[s.priceBadge, { position: 'relative', top: 0, right: 0, paddingHorizontal: 4, paddingVertical: 2, backgroundColor: 'rgba(34,197,94,0.15)' }]}>
+                <Text style={[s.priceText, { color: '#22C55E', fontSize: 8 }]}>Verified</Text>
+              </View>
+            )}
+          </View>
+        )}
         <View style={s.likesRow}>
           <Heart size={12} color="#6B7280" />
           <Text style={s.likesText}>{item.likes.toLocaleString()}</Text>
