@@ -10,6 +10,9 @@ import com.printforge.payment.paymentservice.model.Payment;
 import com.printforge.payment.paymentservice.repository.PaymentRepository;
 import com.printforge.payment.queueservice.model.PrintJob;
 import com.printforge.payment.queueservice.repository.PrintJobRepository;
+import com.printforge.payment.repository.UserRepository;
+import com.printforge.payment.marketplaceservice.repository.DesignRequestRepository;
+import com.printforge.payment.paymentservice.repository.WithdrawalRepository;
 import com.printforge.payment.settingsservice.model.FeatureToggle;
 import com.printforge.payment.settingsservice.model.FeatureToggleKeys;
 import com.printforge.payment.settingsservice.repository.FeatureToggleRepository;
@@ -42,8 +45,11 @@ class PaymentServiceTest {
     PaymentRepository paymentRepository;
     EstimateRepository estimateRepository;
     DesignListingRepository listingRepository;
+    DesignRequestRepository requestRepository;
     PrintJobRepository printJobRepository;
     NotificationService notificationService;
+    UserRepository userRepository;
+    WithdrawalRepository withdrawalRepository;
     FeatureToggleRepository featureToggleRepository;
     PaymentService service;
 
@@ -52,11 +58,15 @@ class PaymentServiceTest {
         paymentRepository = Mockito.mock(PaymentRepository.class);
         estimateRepository = Mockito.mock(EstimateRepository.class);
         listingRepository = Mockito.mock(DesignListingRepository.class);
+        requestRepository = Mockito.mock(DesignRequestRepository.class);
         printJobRepository = Mockito.mock(PrintJobRepository.class);
         notificationService = Mockito.mock(NotificationService.class);
+        userRepository = Mockito.mock(UserRepository.class);
+        withdrawalRepository = Mockito.mock(WithdrawalRepository.class);
         featureToggleRepository = Mockito.mock(FeatureToggleRepository.class);
         service = new PaymentService(paymentRepository, estimateRepository, listingRepository,
-                printJobRepository, notificationService, featureToggleRepository);
+                requestRepository, printJobRepository, notificationService, userRepository,
+                withdrawalRepository, featureToggleRepository);
 
         // Fail-open default: no row for a key means enabled, matching
         // SettingsService.isFeatureEnabled()'s semantics. Individual tests
