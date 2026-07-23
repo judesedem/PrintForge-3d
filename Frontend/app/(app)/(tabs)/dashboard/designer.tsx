@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View, ActionSheetIOS, Platform } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View, ActionSheetIOS, Platform, AlertButton } from 'react-native';
 import {
   Bell,
   Boxes,
@@ -132,7 +132,7 @@ export default function DesignerDashboard() {
       );
     } else {
       // Fallback for Android
-      const buttons = [
+      const buttons: AlertButton[] = [
         {
           text: isDraft ? 'Publish' : 'Unpublish',
           onPress: () => handleTogglePublish(listing),

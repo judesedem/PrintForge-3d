@@ -12,6 +12,7 @@ import {
   Modal,
   Linking,
   TextInput,
+  Alert,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -37,7 +38,7 @@ import { useSession } from "../../../src/SessionContext";
 import { useTheme } from "../../../src/ThemeContext";
 import { Colors } from "../../../src/theme";
 import { useToast } from "../../../src/ToastContext";
-import { fetchMyPayments, Payment, initiatePayment, fetchPayment } from "../../../src/api/payments";
+import { fetchMyPayments, Payment, initiatePayment, fetchPayment, fetchWallet, withdrawFunds, WalletInfo } from "../../../src/api/payments";
 import { fetchMyListings } from "../../../src/api/marketplace";
 import { fetchAcceptedRequests, deliverDesignRequest, DesignRequest } from "../../../src/api/design-requests";
 import { uploadFile } from "../../../src/api/files";
@@ -259,6 +260,20 @@ export default function ProfileScreen() {
   const [acceptedRequests, setAcceptedRequests] = useState<DesignRequest[]>([]);
   const [uploadingRequestId, setUploadingRequestId] = useState<string | null>(null);
 
+  const [walletInfo, setWalletInfo] = useState<WalletInfo | null>(null);
+  const [showWithdrawModal, setShowWithdrawModal] = useState(false);
+  const [withdrawAmount, setWithdrawAmount] = useState("");
+  const [withdrawBankCode, setWithdrawBankCode] = useState("");
+  const [withdrawAccount, setWithdrawAccount] = useState("");
+  const [withdrawing, setWithdrawing] = useState(false);
+  const [showBankPicker, setShowBankPicker] = useState(false);
+
+  const BANK_CODES = [
+    { label: "MTN Mobile Money", value: "MTN" },
+    { label: "Telecel / Vodafone Cash", value: "VOD" },
+    { label: "AirtelTigo Money", value: "ATL" },
+  ];
+
   const isDesigner = role === "designer";
 
   const loadData = useCallback(async () => {
@@ -270,21 +285,22 @@ export default function ProfileScreen() {
     setPaymentsLoading(true);
     setPaymentsError(null);
     try {
-      const [paymentsData, listingsData, requestsData] = await Promise.all([
+      const [paymentsData, listingsData, requestsData, walletData] = await Promise.all([
         fetchMyPayments(token),
         isDesigner ? fetchMyListings(token) : Promise.resolve([]),
         isDesigner ? fetchAcceptedRequests(token) : Promise.resolve([]),
+        isDesigner ? fetchWallet(token).catch(() => null) : Promise.resolve(null),
       ]);
       
       setPayments(paymentsData);
       setAcceptedRequests(requestsData);
+      setWalletInfo(walletData);
       
       if (isDesigner) {
-        const totalEarnings = listingsData.reduce((sum, l) => sum + l.totalEarnings, 0);
         setDesignerStats({
           designCount: listingsData.length,
           followerCount: 0,
-          earnings: totalEarnings,
+          earnings: walletData ? (walletData.totalEarnings ?? 0) : 0,
         });
         setDesigns(
           listingsData
@@ -316,6 +332,37 @@ export default function ProfileScreen() {
   const handleSignOut = async () => {
     await signOut();
     router.replace("/(auth)/login");
+  };
+
+  const handleWithdrawal = async () => {
+    if (!token) return;
+    if (!withdrawAmount || isNaN(Number(withdrawAmount))) {
+      showToast("Please enter a valid amount");
+      return;
+    }
+    if (!withdrawBankCode || !withdrawAccount) {
+      showToast("Please enter bank code and account number");
+      return;
+    }
+
+    setWithdrawing(true);
+    try {
+      await withdrawFunds(token, {
+        amount: Number(withdrawAmount),
+        bankCode: withdrawBankCode,
+        accountNumber: withdrawAccount,
+      });
+      showToast("Withdrawal requested successfully!");
+      setShowWithdrawModal(false);
+      setWithdrawAmount("");
+      setWithdrawBankCode("");
+      setWithdrawAccount("");
+      loadData();
+    } catch (e: any) {
+      Alert.alert("Withdrawal Failed", e.message || "Failed to withdraw funds");
+    } finally {
+      setWithdrawing(false);
+    }
   };
 
   const handleUploadDeliver = async (req: DesignRequest) => {
@@ -579,6 +626,35 @@ export default function ProfileScreen() {
             </View>
 
             <View style={styles.divider} />
+
+            <View style={styles.ordersSection}>
+              <View style={styles.ordersHeading}>
+                <DollarSign size={16} color={colors.primary} />
+                <Text style={styles.ordersHeadingText}>Wallet & Earnings</Text>
+              </View>
+
+              {walletInfo ? (
+                <View style={styles.orderRow}>
+                  <View style={styles.orderLeft}>
+                    <Text style={styles.orderName}>Available Balance</Text>
+                    <Text style={[styles.orderMeta, { fontSize: 16, color: colors.primary, fontWeight: '600', marginTop: 4 }]}>
+                      GH₵ {(walletInfo.walletBalance ?? 0).toFixed(2)}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[styles.editProfileBtn, { backgroundColor: colors.primary, borderColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8 }]}
+                    activeOpacity={0.7}
+                    onPress={() => setShowWithdrawModal(true)}
+                  >
+                    <Text style={[styles.editProfileText, { color: colors.onPrimary }]}>Withdraw</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <Text style={styles.orderMeta}>Loading wallet...</Text>
+              )}
+            </View>
+
+            <View style={styles.divider} />
             <View style={styles.gridHeaderRow}>
               <Grid3x3 size={16} color={colors.foreground} />
               <Text style={styles.gridHeaderText}>My Designs</Text>
@@ -720,6 +796,81 @@ export default function ProfileScreen() {
             >
               <Text style={styles.maybeLaterText}>Cancel</Text>
             </TouchableOpacity>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Withdrawal Modal */}
+      <Modal visible={showWithdrawModal} transparent animationType="slide" onRequestClose={() => setShowWithdrawModal(false)}>
+        <Pressable style={styles.modalOverlay} onPress={() => setShowWithdrawModal(false)}>
+          <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
+            <View style={styles.dragHandle} />
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.modalTitle, { marginBottom: 0 }]}>Withdraw Funds</Text>
+              <Pressable onPress={() => setShowWithdrawModal(false)} style={styles.modalCloseBtn}>
+                <X size={20} color={colors.mutedFg} />
+              </Pressable>
+            </View>
+            <Text style={[styles.modalSubtitle, { marginBottom: 16 }]}>
+              Available to withdraw: GH₵ {(walletInfo?.walletBalance ?? 0).toFixed(2)}
+            </Text>
+            
+            <TextInput
+              style={[styles.input, { marginBottom: 12 }]}
+              placeholder="Amount (e.g. 50)"
+              placeholderTextColor={colors.mutedFg}
+              keyboardType="numeric"
+              value={withdrawAmount}
+              onChangeText={setWithdrawAmount}
+            />
+            
+            <Pressable
+              style={[styles.input, { marginBottom: 12, justifyContent: 'center' }]}
+              onPress={() => setShowBankPicker(!showBankPicker)}
+            >
+              <Text style={{ color: withdrawBankCode ? colors.foreground : colors.mutedFg }}>
+                {BANK_CODES.find(b => b.value === withdrawBankCode)?.label || "Select Mobile Money Network"}
+              </Text>
+            </Pressable>
+
+            {showBankPicker && (
+              <View style={{ backgroundColor: colors.background, borderRadius: 8, borderColor: colors.border, borderWidth: 1, marginBottom: 12, padding: 8 }}>
+                {BANK_CODES.map(b => (
+                  <TouchableOpacity
+                    key={b.value}
+                    style={{ paddingVertical: 12, paddingHorizontal: 8, borderBottomWidth: b.value !== 'ATL' ? 1 : 0, borderBottomColor: colors.border }}
+                    onPress={() => {
+                      setWithdrawBankCode(b.value);
+                      setShowBankPicker(false);
+                    }}
+                  >
+                    <Text style={{ color: colors.foreground }}>{b.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            <TextInput
+              style={[styles.input, { marginBottom: 24 }]}
+              placeholder="Account Number (Mobile Money)"
+              placeholderTextColor={colors.mutedFg}
+              keyboardType="numeric"
+              value={withdrawAccount}
+              onChangeText={setWithdrawAccount}
+            />
+
+            <Pressable
+              style={styles.modalCta}
+              disabled={withdrawing}
+              onPress={handleWithdrawal}
+            >
+              <Text style={styles.modalCtaText}>{withdrawing ? "Processing..." : "Confirm Withdrawal"}</Text>
+              {!withdrawing && <ChevronRight size={18} strokeWidth={2.5} color={colors.onPrimary} />}
+            </Pressable>
+
+            <Pressable onPress={() => setShowWithdrawModal(false)} style={styles.maybeLaterBtn}>
+              <Text style={styles.maybeLaterText}>Cancel</Text>
+            </Pressable>
           </Pressable>
         </Pressable>
       </Modal>

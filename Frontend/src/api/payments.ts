@@ -99,3 +99,33 @@ export async function retryPayment(token: string, paymentId: string): Promise<Pa
   });
   return toPayment(data);
 }
+
+export type Withdrawal = {
+  id: string;
+  amount: number;
+  bankCode: string;
+  accountNumber: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED';
+  createdAt: string;
+};
+
+export type WalletInfo = {
+  walletBalance: number;
+  totalEarnings: number;
+  withdrawals: Withdrawal[];
+};
+
+export async function fetchWallet(token: string): Promise<WalletInfo> {
+  return await apiFetch<WalletInfo>('/api/payments/wallet', { token });
+}
+
+export async function withdrawFunds(
+  token: string,
+  params: { amount: number; bankCode: string; accountNumber: string }
+): Promise<Withdrawal> {
+  return await apiFetch<Withdrawal>('/api/payments/withdraw', {
+    method: 'POST',
+    token,
+    body: params,
+  });
+}
