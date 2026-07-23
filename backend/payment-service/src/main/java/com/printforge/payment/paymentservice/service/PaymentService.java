@@ -4,6 +4,7 @@ import com.printforge.payment.marketplaceservice.repository.DesignRequestReposit
 import com.printforge.payment.marketplaceservice.model.DesignRequest;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.printforge.payment.estimateservice.model.Estimate;
 import com.printforge.payment.estimateservice.repository.EstimateRepository;
 import com.printforge.payment.estimateservice.exception.EstimateNotFoundException;
@@ -12,7 +13,9 @@ import com.printforge.payment.paymentservice.exception.DuplicatePaymentException
 import com.printforge.payment.paymentservice.exception.PaymentFailedException;
 import com.printforge.payment.paymentservice.exception.PaymentNotFoundException;
 import com.printforge.payment.paymentservice.model.Payment;
+import com.printforge.payment.paymentservice.model.Withdrawal;
 import com.printforge.payment.paymentservice.repository.PaymentRepository;
+import com.printforge.payment.paymentservice.repository.WithdrawalRepository;
 import com.printforge.payment.notificationservice.service.NotificationService;
 import com.printforge.payment.queueservice.model.PrintJob;
 import com.printforge.payment.queueservice.repository.PrintJobRepository;
@@ -20,10 +23,7 @@ import com.printforge.payment.repository.UserRepository;
 import com.printforge.payment.entity.User;
 import com.printforge.payment.paymentservice.model.Withdrawal;
 import com.printforge.payment.paymentservice.repository.WithdrawalRepository;
-import com.printforge.payment.settingsservice.model.FeatureToggle;
-import com.printforge.payment.settingsservice.repository.FeatureToggleRepository;
-import com.printforge.payment.notificationservice.model.NotificationType;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
@@ -60,7 +60,7 @@ public class PaymentService {
     private final NotificationService notificationService;
     private final UserRepository userRepository;
     private final WithdrawalRepository withdrawalRepository;
-    private final FeatureToggleRepository featureToggleRepository;
+
     private final HttpClient httpClient;
     private final ObjectMapper objectMapper;
 
@@ -74,8 +74,7 @@ public class PaymentService {
                           PrintJobRepository printJobRepository,
                           NotificationService notificationService,
                           UserRepository userRepository,
-                          WithdrawalRepository withdrawalRepository,
-                          FeatureToggleRepository featureToggleRepository) {
+                          WithdrawalRepository withdrawalRepository) {
         this.paymentRepository  = paymentRepository;
         this.estimateRepository = estimateRepository;
         this.listingRepository  = listingRepository;
@@ -84,7 +83,7 @@ public class PaymentService {
         this.notificationService = notificationService;
         this.userRepository = userRepository;
         this.withdrawalRepository = withdrawalRepository;
-        this.featureToggleRepository = featureToggleRepository;
+
         // Connect timeout only bounds establishing the TCP/TLS connection —
         // it does not bound waiting for a response once connected, which is
         // why each individual HttpRequest below also sets its own .timeout().
@@ -319,24 +318,24 @@ public class PaymentService {
                 payment.getUserId(),
                 "Payment Confirmed",
                 "Your payment was successful. Your print job has been submitted and is in the queue.",
-                NotificationType.PAYMENT_CONFIRMED);
+                "success");
 
         if (payment.getListingId() != null) {
             listingRepository.findById(payment.getListingId()).ifPresent(listing -> {
                 listing.setTotalOrders(listing.getTotalOrders() + 1);
-
-                if (isFeatureEnabled(com.printforge.payment.settingsservice.model.FeatureToggleKeys.DESIGNER_EARNINGS)) {
-                    BigDecimal basePrice = listing.getBasePrice() != null
-                            ? listing.getBasePrice() : BigDecimal.ZERO;
-                    BigDecimal platformFee = basePrice.multiply(new BigDecimal("0.15"));
-                    BigDecimal designerEarning = basePrice.subtract(platformFee);
-
-                    BigDecimal prev = listing.getTotalEarnings() != null
-                            ? listing.getTotalEarnings() : BigDecimal.ZERO;
-                    listing.setTotalEarnings(prev.add(designerEarning));
-                    listingRepository.save(listing);
-                    
-                    // Credit the designer's wallet
+                
+                BigDecimal basePrice = listing.getBasePrice() != null
+                        ? listing.getBasePrice() : BigDecimal.ZERO;
+                // Deduct 15% platform commission
+                BigDecimal platformFee = basePrice.multiply(new BigDecimal("0.15"));
+                BigDecimal designerEarning = basePrice.subtract(platformFee);
+                
+                BigDecimal prev = listing.getTotalEarnings() != null
+                        ? listing.getTotalEarnings() : BigDecimal.ZERO;
+                listing.setTotalEarnings(prev.add(designerEarning));
+                
+                // Credit the designer's wallet
+                if (listing.getDesignerId() != null) {
                     userRepository.findById(listing.getDesignerId()).ifPresent(designer -> {
                         BigDecimal currentWallet = designer.getWalletBalance() != null ? designer.getWalletBalance() : BigDecimal.ZERO;
                         BigDecimal currentEarnings = designer.getTotalEarnings() != null ? designer.getTotalEarnings() : BigDecimal.ZERO;
@@ -345,15 +344,14 @@ public class PaymentService {
                         designer.setTotalEarnings(currentEarnings.add(designerEarning));
                         userRepository.save(designer);
                     });
-
+                    
                     notificationService.createNotification(
                             listing.getDesignerId(),
-                            "Listing Sale",
-                            "Someone printed your design! You earned GH₵ " + designerEarning.setScale(2, java.math.RoundingMode.HALF_UP),
-                            NotificationType.LISTING_SALE);
-                } else {
-                    listingRepository.save(listing);
+                            "Listing Sold",
+                            "Your listing '" + listing.getTitle() + "' was just ordered!",
+                            "success");
                 }
+                listingRepository.save(listing);
             });
         }
         return savedPayment;
@@ -605,18 +603,6 @@ public class PaymentService {
         } catch (Exception e) {
             throw new PaymentFailedException("Could not verify transaction with Paystack: " + e.getMessage());
         }
-    }
-
-    /**
-     * Read-side check duplicated from admin-service's SettingsService.
-     * isFeatureEnabled() — same fail-open semantics: a missing/unrecognized
-     * key is treated as enabled, never as disabled, since there's no REST
-     * call between services to ask admin-service directly.
-     */
-    private boolean isFeatureEnabled(String featureName) {
-        return featureToggleRepository.findByFeatureName(featureName)
-                .map(FeatureToggle::isEnabled)
-                .orElse(true);
     }
 
     /**

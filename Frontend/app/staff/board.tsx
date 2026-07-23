@@ -28,7 +28,6 @@ const openDrawer = (nav: any) => nav.dispatch({ type: 'OPEN_DRAWER' });
 import { T } from '@/constants/theme';
 import {
   BOARD_COLUMNS,
-
   BOARD_PRINTERS,
   LOCATION_MAP,
   type BoardJob,
@@ -44,6 +43,8 @@ import { BoardToast } from '@/components/board/BoardToast';
 import { useSession } from '@/SessionContext';
 import { useJobs } from '@/JobsContext';
 import { approveJob, rejectJob, updateJobStatus } from '@/api/jobs';
+
+
 const HEADER_H   = 52;
 const COLUMN_GAP = 12;
 const BOARD_PAD  = 16;
@@ -84,6 +85,7 @@ export default function BoardScreen() {
     assignedPrinter: j.printer || undefined,
     pickupLocation: j.location || undefined,
   }));
+
   const [modal,      setModal]      = useState<ModalState>(null);
   const [toast,      setToast]      = useState<ToastState>({ visible: false, message: '', jobId: '' });
   const [refreshing, setRefreshing] = useState(false);

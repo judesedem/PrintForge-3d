@@ -249,21 +249,6 @@ public class AuthService {
             user.setProfilePictureUrl(url);
         }
 
-        if (request.getPhone() != null) {
-            String phone = request.getPhone().trim();
-            // Allow empty string to clear the phone number
-            user.setPhone(phone.isEmpty() ? null : phone);
-        }
-
-        if (request.getBio() != null) {
-            String bio = request.getBio().trim();
-            if (bio.length() > 200) {
-                throw new InvalidProfileInputException("Bio must be 200 characters or fewer");
-            }
-            // Allow empty string to clear the bio
-            user.setBio(bio.isEmpty() ? null : bio);
-        }
-
         User saved = userRepository.save(user);
         String token = jwtService.generateToken(saved.getEmail(), saved.getRole().name());
 
@@ -381,8 +366,6 @@ public class AuthService {
                 .email(user.getEmail())
                 .role(user.getRole().name().toLowerCase())
                 .profile_picture_url(user.getProfilePictureUrl())
-                .phone(user.getPhone())
-                .bio(user.getBio())
                 .is_premium(user.isPremium())
                 .build();
     }

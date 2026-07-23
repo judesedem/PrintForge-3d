@@ -12,13 +12,7 @@ import { useSession } from '@/SessionContext';
 
 const MENU_ITEMS = [
   { route: '/staff/dashboard',     label: 'Dashboard',     icon: LayoutDashboard },
-  { route: '/staff/users',         label: 'Users',         icon: Users },
   { route: '/staff/queue',         label: 'Print Queue',   icon: ClipboardList },
-  { route: '/staff/printers',      label: 'Fleet',         icon: Printer },
-  { route: '/staff/payments',      label: 'Payments',      icon: CreditCard },
-  { route: '/staff/marketplace',   label: 'Marketplace',   icon: ShoppingBag },
-  { route: '/staff/notifications', label: 'Notifications', icon: Bell },
-  { route: '/staff/settings',      label: 'Settings',      icon: Settings },
   { route: '/staff/board',         label: 'Queue Board',   icon: Columns3 },
 ] as const;
 
