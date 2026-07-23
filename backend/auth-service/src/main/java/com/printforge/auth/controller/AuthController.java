@@ -5,6 +5,8 @@ import com.printforge.auth.dto.ForgotPasswordRequest;
 import com.printforge.auth.dto.LoginRequest;
 import com.printforge.auth.dto.RegisterRequest;
 import com.printforge.auth.dto.ResetPasswordRequest;
+import com.printforge.auth.dto.ChangePasswordRequest;
+import com.printforge.auth.dto.DeleteAccountRequest;
 import com.printforge.auth.dto.UpdateProfileRequest;
 import com.printforge.auth.dto.UserDto;
 import com.printforge.auth.service.AuthService;
@@ -57,6 +59,24 @@ public class AuthController {
 
         AuthResponse response = authService.updateProfile(userDetails.getUsername(), request);
         return ResponseEntity.ok(response);
+    }
+
+    @PatchMapping("/change-password")
+    public ResponseEntity<Void> changePassword(
+            @Valid @RequestBody ChangePasswordRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        authService.changePassword(userDetails.getUsername(), request.getCurrentPassword(), request.getNewPassword());
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/account")
+    public ResponseEntity<Void> deleteAccount(
+            @Valid @RequestBody DeleteAccountRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        authService.deleteAccount(userDetails.getUsername(), request.getPassword());
+        return ResponseEntity.noContent().build();
     }
 
     /**

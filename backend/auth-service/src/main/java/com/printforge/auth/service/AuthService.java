@@ -327,6 +327,38 @@ public class AuthService {
         passwordResetTokenRepository.save(resetToken);
     }
 
+    public void changePassword(String email, String currentPassword, String newPassword) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new InvalidProfileInputException("Incorrect current password.");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        userRepository.save(user);
+    }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void deleteAccount(String email, String password) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found"));
+
+        if (!passwordEncoder.matches(password, user.getPassword())) {
+            throw new InvalidProfileInputException("Incorrect password.");
+        }
+
+        if (user.getRole().name().equals("ADMIN") || user.getRole().name().equals("LAB_STAFF")) {
+            throw new IllegalArgumentException("Cannot delete administrative users through this endpoint.");
+        }
+
+        // TODO: In a microservice architecture, we cannot use JDBC to delete
+        // from tables (reports, print_jobs, etc.) that belong to other services.
+        // We should instead publish a 'user.deleted' event to a message broker.
+        
+        userRepository.deleteById(user.getUserId());
+    }
+
     private UserDto toUserDto(User user) {
         return UserDto.builder()
                 .user_id(user.getUserId())

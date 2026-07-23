@@ -10,6 +10,7 @@ export type PaymentApiResponse = {
   listingId: number | null;
   requestId: number | null;
   printJobId: number | null;
+  isPremiumUpgrade?: boolean;
   amount: number;
   currency: string;
   status: 'PENDING' | 'COMPLETED' | 'FAILED';
@@ -25,6 +26,7 @@ export type Payment = {
   listingId: string | null;
   requestId: string | null;
   printJobId: string | null;
+  isPremiumUpgrade: boolean;
   amount: number;
   currency: string;
   status: 'PENDING' | 'COMPLETED' | 'FAILED';
@@ -40,6 +42,7 @@ export function toPayment(res: PaymentApiResponse): Payment {
     listingId: res.listingId != null ? String(res.listingId) : null,
     requestId: res.requestId != null ? String(res.requestId) : null,
     printJobId: res.printJobId != null ? String(res.printJobId) : null,
+    isPremiumUpgrade: !!res.isPremiumUpgrade,
     amount: res.amount,
     currency: res.currency,
     status: res.status,
@@ -95,4 +98,34 @@ export async function retryPayment(token: string, paymentId: string): Promise<Pa
     token,
   });
   return toPayment(data);
+}
+
+export type Withdrawal = {
+  id: string;
+  amount: number;
+  bankCode: string;
+  accountNumber: string;
+  status: 'PENDING' | 'COMPLETED' | 'FAILED';
+  createdAt: string;
+};
+
+export type WalletInfo = {
+  walletBalance: number;
+  totalEarnings: number;
+  withdrawals: Withdrawal[];
+};
+
+export async function fetchWallet(token: string): Promise<WalletInfo> {
+  return await apiFetch<WalletInfo>('/api/payments/wallet', { token });
+}
+
+export async function withdrawFunds(
+  token: string,
+  params: { amount: number; bankCode: string; accountNumber: string }
+): Promise<Withdrawal> {
+  return await apiFetch<Withdrawal>('/api/payments/withdraw', {
+    method: 'POST',
+    token,
+    body: params,
+  });
 }

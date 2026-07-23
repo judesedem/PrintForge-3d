@@ -104,3 +104,14 @@ export function upgradeToPremium(token: string): Promise<UserDto> {
     token,
   });
 }
+
+/**
+ * Maps to DELETE /api/auth/account.
+ */
+export function deleteAccount(token: string, password: string): Promise<void> {
+  return apiFetch<void>('/api/auth/account', {
+    method: 'DELETE',
+    token,
+    body: { password },
+  });
+}
