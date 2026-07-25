@@ -14,8 +14,6 @@ public class UserDto {
     private String email;
     private String role;
     private String profile_picture_url;
-    private String phone;
-    private String bio;
 
     // Only populated by AdminService.suspendUser() today (#68) — every
     // other toUserDto() call site in AuthService/UserService leaves this
