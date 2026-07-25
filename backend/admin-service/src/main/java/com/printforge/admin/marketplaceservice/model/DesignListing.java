@@ -218,21 +218,4 @@ public class DesignListing {
 
     public BigDecimal getLayerHeightMm() { return layerHeightMm; }
     public void setLayerHeightMm(BigDecimal layerHeightMm) { this.layerHeightMm = layerHeightMm; }
-
-    // Derived, read-only — no backing field/column, so it's never persisted
-    // and there's no setter. "REMOVED" when an admin has taken the listing
-    // down (adminUnpublished=true), otherwise the real status value
-    // (DRAFT/PUBLISHED) unchanged. Gives the admin dashboard the three-state
-    // view it expects without restructuring status itself or touching any
-    // existing status-checking logic (getStatus() still returns exactly
-    // what it always did). A plain getter with no matching field is
-    // invisible to Hibernate (this entity uses field-access mode, so only
-    // real @Id/@Column-backed fields are ever persisted/queried) but is
-    // still picked up by Jackson's normal bean introspection, so it shows
-    // up in every JSON response that serializes a DesignListing today —
-    // including the unpublish/republish responses this service's
-    // AdminController returns directly.
-    public String getDisplayStatus() {
-        return Boolean.TRUE.equals(adminUnpublished) ? "REMOVED" : status;
-    }
 }
