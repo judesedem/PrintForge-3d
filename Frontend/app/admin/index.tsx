@@ -4,7 +4,7 @@ import { useTheme } from '../../src/ThemeContext';
 import { useSession } from '../../src/SessionContext';
 import { designTokens, Colors } from '../../src/theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { Redirect, useRouter } from 'expo-router';
 import { 
   fetchAdminDashboard, AdminDashboard, fetchUsers, AdminUserDto,
   createUser, deleteUser, AdminCreatableRole, Printer, fetchPrinters, createPrinter, deletePrinter,
@@ -18,7 +18,7 @@ const tabs = ['Users', 'Printers', 'Jobs', 'Analytics', 'Reports'] as const;
 export default function AdminPanel() {
   const [activeTab, setActiveTab] = useState<'Users' | 'Printers' | 'Jobs' | 'Analytics' | 'Reports'>('Users');
   const { colors } = useTheme();
-  const { token, authLoading, signOut } = useSession();
+  const { token, authLoading, signOut, role } = useSession();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const s = makeStyles(colors, insets);
@@ -82,6 +82,15 @@ export default function AdminPanel() {
   useEffect(() => {
     loadTabData();
   }, [loadTabData]);
+
+  // Admins only. Lab staff used to be routed here (staff/dashboard.tsx
+  // rendered this component), but most of this panel — user creation and
+  // deletion, job deletion, listing takedowns — is @PreAuthorize
+  // ("hasRole('ADMIN')") on the backend, so it just 403s for them. They
+  // get their own lab dashboard instead.
+  if (!authLoading && role !== 'admin') {
+    return <Redirect href={role === 'lab_staff' ? '/staff/dashboard' : '/(app)/(tabs)/dashboard'} />;
+  }
 
   if (loading || error || !dashboard) {
     return (

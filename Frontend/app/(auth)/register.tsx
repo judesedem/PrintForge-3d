@@ -1,6 +1,9 @@
 import { useRouter } from 'expo-router';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
+  Animated,
+  Easing,
   ImageBackground,
   KeyboardAvoidingView,
   Platform,
@@ -24,7 +27,7 @@ import {
   TriangleAlert,
   User,
 } from 'lucide-react-native';
-import { ComponentType, useState } from 'react';
+import { ComponentType, useCallback, useEffect, useRef, useState } from 'react';
 import { useSession } from '../../src/SessionContext';
 import { ApiError } from '../../src/api/client';
 import type { SelfRegisterRole } from '../../src/api/types';
@@ -85,22 +88,100 @@ export default function RegisterScreen() {
   const busy = submitting || authLoading;
   const selectedBackendRole = roleOptions.find(r => r.label === selectedRole)!.backendRole;
 
+  // --- Motion -------------------------------------------------------------
+  // Two animations, both driven by state this screen already tracks: the
+  // error banner's entrance (+ a card shake) and the submit button's
+  // label/spinner crossfade. Everything is opacity/transform only, so it all
+  // runs on the native driver and can't stutter against keyboard layout.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const errorAnim = useRef(new Animated.Value(0)).current;
+  const shakeAnim = useRef(new Animated.Value(0)).current;
+  const submitAnim = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled().then(enabled => {
+      if (active) setReduceMotion(enabled);
+    });
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      active = false;
+      sub.remove();
+    };
+  }, []);
+
+  // A crossfade rather than a hard swap, so the button never flickers or
+  // resizes between "Sign Up" and the spinner. Kept even under reduce-motion:
+  // a fade is the accessible substitute for movement, not an instance of it.
+  useEffect(() => {
+    Animated.timing(submitAnim, {
+      toValue: submitting ? 1 : 0,
+      duration: 180,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: true,
+    }).start();
+  }, [submitting, submitAnim]);
+
+  // Set the banner through this rather than setError() directly: re-running
+  // the animation on every failure is the point, and a plain useEffect on
+  // `error` would stay silent when the same message fires twice in a row
+  // (submit → same validation error → identical string → no state change).
+  const showError = useCallback(
+    (message: string) => {
+      setError(message);
+      if (reduceMotion) {
+        errorAnim.setValue(1);
+        return;
+      }
+      errorAnim.setValue(0);
+      shakeAnim.setValue(0);
+      Animated.parallel([
+        Animated.timing(errorAnim, {
+          toValue: 1,
+          duration: 220,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(shakeAnim, {
+          toValue: 1,
+          duration: 360,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+      ]).start();
+    },
+    [errorAnim, reduceMotion, shakeAnim],
+  );
+
+  const cardShake = shakeAnim.interpolate({
+    inputRange: [0, 0.2, 0.4, 0.6, 0.8, 1],
+    outputRange: [0, -5, 5, -3, 2, 0],
+  });
+  const errorTranslateY = errorAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-6, 0],
+  });
+  const labelOpacity = submitAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
   const handleCreateAccount = async () => {
     const name = fullName.trim();
     if (!name) {
-      setError('Enter your full name.');
+      showError('Enter your full name.');
       return;
     }
     if (!email.trim()) {
-      setError('Enter your email.');
+      showError('Enter your email.');
       return;
     }
     if (password.length < 6) {
-      setError('Password must be at least 6 characters.');
+      showError('Password must be at least 6 characters.');
       return;
     }
     if (password !== confirmPassword) {
-      setError('Passwords don’t match.');
+      showError('Passwords don’t match.');
       return;
     }
 
@@ -122,7 +203,7 @@ export default function RegisterScreen() {
       // index.tsx redirects staff/admin to the right screen from there.
       router.replace('/(app)/(tabs)/dashboard');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
+      showError(err instanceof ApiError ? err.message : 'Something went wrong. Try again.');
     } finally {
       setSubmitting(false);
     }
@@ -142,7 +223,7 @@ export default function RegisterScreen() {
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
-              <View style={s.card}>
+              <Animated.View style={[s.card, { transform: [{ translateX: cardShake }] }]}>
                 <View style={s.logoMark}>
                   <Box size={30} color="#FFFFFF" strokeWidth={2.2} />
                 </View>
@@ -163,10 +244,15 @@ export default function RegisterScreen() {
                 </View>
 
                 {error ? (
-                  <View style={s.errorBanner}>
+                  <Animated.View
+                    style={[
+                      s.errorBanner,
+                      { opacity: errorAnim, transform: [{ translateY: errorTranslateY }] },
+                    ]}
+                  >
                     <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
                     <Text style={s.errorText}>{error}</Text>
-                  </View>
+                  </Animated.View>
                 ) : null}
 
                 <View style={s.inputShell}>
@@ -261,18 +347,23 @@ export default function RegisterScreen() {
 
                 <Pressable
                   accessibilityRole="button"
+                  accessibilityState={{ busy: submitting, disabled: busy }}
                   disabled={busy}
                   onPress={handleCreateAccount}
                   style={[s.primaryButton, busy && s.disabled]}
                 >
-                  {submitting ? (
+                  {/* Both layers stay mounted and absolutely positioned so the
+                      button keeps its 52pt box while they crossfade. */}
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[s.buttonLayer, { opacity: labelOpacity }]}
+                  >
+                    <Text style={s.primaryButtonText}>Sign Up</Text>
+                    <ArrowRight size={19} color="#FFFFFF" />
+                  </Animated.View>
+                  <Animated.View pointerEvents="none" style={[s.buttonLayer, { opacity: submitAnim }]}>
                     <ActivityIndicator color="#FFFFFF" />
-                  ) : (
-                    <>
-                      <Text style={s.primaryButtonText}>Sign Up</Text>
-                      <ArrowRight size={19} color="#FFFFFF" />
-                    </>
-                  )}
+                  </Animated.View>
                 </Pressable>
 
                 <View style={s.dividerRow}>
@@ -289,7 +380,7 @@ export default function RegisterScreen() {
                   <Text style={s.footerText}>Already have an account?</Text>
                   <Text style={s.footerAction}> Log in</Text>
                 </Pressable>
-              </View>
+              </Animated.View>
             </ScrollView>
           </KeyboardAvoidingView>
         </SafeAreaView>
@@ -447,6 +538,17 @@ const s = StyleSheet.create({
     minHeight: 52,
     borderRadius: 12,
     backgroundColor: ORANGE,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  buttonLayer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',

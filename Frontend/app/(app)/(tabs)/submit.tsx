@@ -1363,21 +1363,22 @@ function makeStyles(colors: Colors) {
       borderTopColor: colors.border,
       paddingHorizontal: designTokens.spacing.lg,
       paddingVertical: designTokens.spacing.md,
+      // Row, not the default column — the two children are weighted 0.9/1.1
+      // to sit side by side; stacked they overflow the 88pt footer.
+      flexDirection: "row",
+      gap: designTokens.spacing.md,
       alignItems: "center",
       justifyContent: "center",
     },
     estimateButton: {
       width: "80%",
-      minHeight: 52,
-      borderRadius: 19,
-      backgroundColor: "#FF6A00",
-      alignItems: "center",
       alignSelf: "center",
       marginTop: 65,
-      justifyContent: "center",
     },
-    backButton: { flex: 0.9, minHeight: 50 },
-    payButton: { flex: 1.1, minHeight: 50 },
+    // No minHeight here — both inherit the 54pt from controls.primaryButton /
+    // secondaryButton so the CTA keeps its full tap target.
+    backButton: { flex: 0.9 },
+    payButton: { flex: 1.1 },
     buttonDisabled: { opacity: 0.5 },
 
     redirectOverlay: {

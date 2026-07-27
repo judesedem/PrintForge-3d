@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Box,
   Clock,
+  CreditCard,
   File,
   Gauge,
   Layers,
@@ -532,6 +533,9 @@ export default function ListingDetail() {
           ]}
           onPress={handlePay}
         >
+          {paymentPhase === 'idle' && !isQuoting ? (
+            <CreditCard size={19} color={colors.onPrimary} strokeWidth={2.2} />
+          ) : null}
           <Text style={controls.primaryButtonText}>
             {paymentPhase === 'initiating' ? 'Starting payment...' : isQuoting ? 'Calculating...' : 'Pay Now'}
           </Text>
@@ -1101,7 +1105,14 @@ function makeStyles(colors: Colors) {
       fontSize: 25,
     },
     orderButton: {
-      marginTop: 2,
+      // Gap from the quote card above — without it the button's drop shadow
+      // lands on the card edge and the two read as one stacked surface.
+      marginTop: designTokens.spacing.lg,
+      // Deliberately narrower than the cards. Matching their width is what
+      // made it scan as another full-bleed panel; inset on both sides, with
+      // page background visible around it, it reads as a discrete object.
+      alignSelf: 'center',
+      width: '88%',
     },
     orderButtonDisabled: {
       opacity: 0.5,

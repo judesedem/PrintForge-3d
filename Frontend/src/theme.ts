@@ -181,9 +181,24 @@ export const designTokens = {
 
 export function makeControlStyles(colors: Colors) {
   return StyleSheet.create({
+    /**
+     * The primary CTA carries real weight — it's the Pay Now button on the
+     * marketplace and checkout screens. A flat orange bar sitting flush under
+     * a full-width card reads as another panel rather than a control, so the
+     * button is lifted off the page with a drop shadow tinted with its own
+     * hue: a black shadow is effectively invisible against the navy dark-mode
+     * background, an orange one glows on both themes.
+     */
     primaryButton: {
-      minHeight: 52,
-      borderRadius: designTokens.radius.md,
+      minHeight: 54,
+      // Fully rounded ends + a defined rim. A 14pt-radius rectangle the same
+      // width as the cards above it reads as one more panel in the stack;
+      // a pill with its own visible edge can only be a control. The rim is
+      // one step lighter than the fill so the boundary holds against both
+      // the light background and the navy dark one.
+      borderRadius: designTokens.radius.pill,
+      borderWidth: 2,
+      borderColor: colors.primaryLight,
       backgroundColor: colors.primary,
       paddingHorizontal: designTokens.spacing.xl,
       paddingVertical: designTokens.spacing.md,
@@ -191,19 +206,33 @@ export function makeControlStyles(colors: Colors) {
       justifyContent: 'center',
       flexDirection: 'row',
       gap: designTokens.spacing.sm,
+      shadowColor: colors.primary,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.38,
+      shadowRadius: 14,
+      elevation: 8,
     },
+    // Press collapses the shadow and drops the button 2pt, so it physically
+    // depresses instead of only changing color.
     primaryButtonPressed: {
       backgroundColor: colors.primaryPressed,
-      transform: [{ scale: 0.99 }],
+      transform: [{ translateY: 2 }, { scale: 0.985 }],
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.18,
+      shadowRadius: 6,
+      elevation: 2,
     },
     primaryButtonText: {
       color: colors.onPrimary,
       fontFamily: designTokens.type.heading,
-      fontSize: 16,
+      fontSize: 17,
+      letterSpacing: 0.3,
     },
+    // Height tracks primaryButton — the two sit side by side in a row on the
+    // submit flow's summary footer and must stay aligned.
     secondaryButton: {
-      minHeight: 52,
-      borderRadius: designTokens.radius.md,
+      minHeight: 54,
+      borderRadius: designTokens.radius.pill,
       backgroundColor: 'transparent',
       borderWidth: 1.5,
       borderColor: colors.primary,
