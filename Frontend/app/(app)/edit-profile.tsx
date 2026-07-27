@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -86,67 +88,72 @@ export default function EditProfileScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView keyboardShouldPersistTaps="handled"
-        contentContainerStyle={s.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        style={s.flex1}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View style={s.card}>
-          {error ? (
-            <View style={s.errorBanner}>
-              <TriangleAlert size={16} color={colors.statusFailed.text} strokeWidth={2} />
-              <Text style={s.errorText}>{error}</Text>
+        <ScrollView
+          contentContainerStyle={s.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={s.card}>
+            {error ? (
+              <View style={s.errorBanner}>
+                <TriangleAlert size={16} color={colors.statusFailed.text} strokeWidth={2} />
+                <Text style={s.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            <Text style={s.fieldLabel}>FULL NAME</Text>
+            <View style={s.inputShell}>
+              <User size={18} color={colors.mutedFg} strokeWidth={1.9} />
+              <TextInput
+                autoCapitalize="words"
+                placeholder="Your full name"
+                placeholderTextColor={colors.mutedFg}
+                style={s.input}
+                value={fullName}
+                onChangeText={setFullName}
+                editable={!submitting}
+              />
             </View>
-          ) : null}
 
-          <Text style={s.fieldLabel}>FULL NAME</Text>
-          <View style={s.inputShell}>
-            <User size={18} color={colors.mutedFg} strokeWidth={1.9} />
-            <TextInput
-              autoCapitalize="words"
-              placeholder="Your full name"
-              placeholderTextColor={colors.mutedFg}
-              style={s.input}
-              value={fullName}
-              onChangeText={setFullName}
-              editable={!submitting}
-            />
+            <Text style={s.fieldLabel}>EMAIL ADDRESS</Text>
+            <View style={s.inputShell}>
+              <Mail size={18} color={colors.mutedFg} strokeWidth={1.9} />
+              <TextInput
+                autoCapitalize="none"
+                autoComplete="email"
+                keyboardType="email-address"
+                placeholder="Your email address"
+                placeholderTextColor={colors.mutedFg}
+                style={s.input}
+                value={email}
+                onChangeText={setEmail}
+                editable={!submitting}
+                onSubmitEditing={handleSubmit}
+              />
+            </View>
+
+            <Pressable
+              accessibilityRole="button"
+              disabled={submitting || (fullName === appUser?.full_name && email === appUser?.email)}
+              onPress={handleSubmit}
+              style={[
+                s.primaryButton, 
+                (submitting || (fullName === appUser?.full_name && email === appUser?.email)) && s.disabled
+              ]}
+            >
+              {submitting ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={s.primaryButtonText}>Save Changes</Text>
+              )}
+            </Pressable>
           </View>
-
-          <Text style={s.fieldLabel}>EMAIL ADDRESS</Text>
-          <View style={s.inputShell}>
-            <Mail size={18} color={colors.mutedFg} strokeWidth={1.9} />
-            <TextInput
-              autoCapitalize="none"
-              autoComplete="email"
-              keyboardType="email-address"
-              placeholder="Your email address"
-              placeholderTextColor={colors.mutedFg}
-              style={s.input}
-              value={email}
-              onChangeText={setEmail}
-              editable={!submitting}
-              onSubmitEditing={handleSubmit}
-            />
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            disabled={submitting || (fullName === appUser?.full_name && email === appUser?.email)}
-            onPress={handleSubmit}
-            style={[
-              s.primaryButton, 
-              (submitting || (fullName === appUser?.full_name && email === appUser?.email)) && s.disabled
-            ]}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={s.primaryButtonText}>Save Changes</Text>
-            )}
-          </Pressable>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -154,6 +161,7 @@ export default function EditProfileScreen() {
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
+    flex1: { flex: 1 },
     safeTop: { backgroundColor: colors.background },
     pressed: { opacity: 0.72 },
     topBar: {

@@ -318,9 +318,22 @@ export default function ProfileScreen() {
 
   const name = appUser?.full_name ?? "PrintForge user";
 
-  const handleSignOut = async () => {
-    await signOut();
-    router.replace("/(auth)/login");
+  const handleSignOut = () => {
+    Alert.alert(
+      "Sign Out",
+      "Are you sure you want to sign out?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Sign Out",
+          style: "destructive",
+          onPress: async () => {
+            await signOut();
+            router.replace("/(auth)/login");
+          },
+        },
+      ]
+    );
   };
 
   const handleWithdrawal = async () => {
@@ -759,19 +772,27 @@ export default function ProfileScreen() {
                   showToast("Password is required");
                   return;
                 }
-                if (token) {
-                  setDeletingAccount(true);
-                  try {
-                    await deleteAccount(token, deletePassword);
-                    showToast("Account deleted successfully");
-                    signOut();
-                  } catch (e: any) {
-                    showToast(e.message || "Failed to delete account");
-                  } finally {
-                    setDeletingAccount(false);
-                    setShowDeleteModal(false);
-                    setDeletePassword("");
-                  }
+                if (!token) return;
+
+                setDeletingAccount(true);
+                let deleted = false;
+                try {
+                  await deleteAccount(token, deletePassword);
+                  deleted = true;
+                  showToast("Account deleted successfully");
+                } catch (e: any) {
+                  showToast(e.message || "Failed to delete account");
+                } finally {
+                  setDeletingAccount(false);
+                  setShowDeleteModal(false);
+                  setDeletePassword("");
+                }
+
+                // Tear the session down only after the modal state has settled,
+                // otherwise we'd be setting state on a screen that's unmounting.
+                if (deleted) {
+                  await signOut();
+                  router.replace("/(auth)/login");
                 }
               }}
             >

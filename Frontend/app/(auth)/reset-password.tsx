@@ -2,6 +2,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -88,67 +90,72 @@ export default function ResetPasswordScreen() {
             <ArrowLeft size={22} color="#FFFFFF" />
           </Pressable>
 
-          <ScrollView keyboardShouldPersistTaps="handled"
-            contentContainerStyle={s.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            style={s.flex1}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <View style={s.card}>
-              <Text style={s.heading}>Set New Password</Text>
-              <Text style={s.subtitle}>
-                Choose a new password for your account.
-              </Text>
+            <ScrollView
+              contentContainerStyle={s.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={s.card}>
+                <Text style={s.heading}>Set New Password</Text>
+                <Text style={s.subtitle}>
+                  Choose a new password for your account.
+                </Text>
 
-              {error ? (
-                <View style={s.errorBanner}>
-                  <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
-                  <Text style={s.errorText}>{error}</Text>
+                {error ? (
+                  <View style={s.errorBanner}>
+                    <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
+                    <Text style={s.errorText}>{error}</Text>
+                  </View>
+                ) : null}
+
+                <View style={s.inputShell}>
+                  <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    secureTextEntry
+                    placeholder="New password (min 6 chars)"
+                    placeholderTextColor={CARD_MUTED}
+                    style={s.input}
+                    value={password}
+                    onChangeText={setPassword}
+                    editable={!submitting}
+                  />
                 </View>
-              ) : null}
 
-              <View style={s.inputShell}>
-                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  secureTextEntry
-                  placeholder="New password (min 6 chars)"
-                  placeholderTextColor={CARD_MUTED}
-                  style={s.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  editable={!submitting}
-                />
+                <View style={s.inputShell}>
+                  <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    secureTextEntry
+                    placeholder="Confirm new password"
+                    placeholderTextColor={CARD_MUTED}
+                    style={s.input}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    editable={!submitting}
+                    onSubmitEditing={handleSubmit}
+                  />
+                </View>
+
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={submitting || !token}
+                  onPress={handleSubmit}
+                  style={[s.primaryButton, (submitting || !token) && s.disabled]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={s.primaryButtonText}>Reset Password</Text>
+                  )}
+                </Pressable>
               </View>
-
-              <View style={s.inputShell}>
-                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  secureTextEntry
-                  placeholder="Confirm new password"
-                  placeholderTextColor={CARD_MUTED}
-                  style={s.input}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  editable={!submitting}
-                  onSubmitEditing={handleSubmit}
-                />
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                disabled={submitting || !token}
-                onPress={handleSubmit}
-                style={[s.primaryButton, (submitting || !token) && s.disabled]}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={s.primaryButtonText}>Reset Password</Text>
-                )}
-              </Pressable>
-            </View>
-          </ScrollView>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -167,6 +174,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(10, 24, 46, 0.55)",
   },
   safeArea: { flex: 1 },
+  flex1: { flex: 1 },
   pressed: { opacity: 0.72 },
   backButton: {
     width: 40,

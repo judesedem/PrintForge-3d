@@ -2,6 +2,8 @@ import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -78,55 +80,60 @@ export default function ForgotPasswordScreen() {
             <ArrowLeft size={22} color="#FFFFFF" />
           </Pressable>
 
-          <ScrollView keyboardShouldPersistTaps="handled"
-            contentContainerStyle={s.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            style={s.flex1}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <View style={s.card}>
-              <Text style={s.heading}>Forgot Password</Text>
-              <Text style={s.subtitle}>
-                Enter your email and we&apos;ll send you a reset
-                link.
-              </Text>
+            <ScrollView
+              contentContainerStyle={s.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={s.card}>
+                <Text style={s.heading}>Forgot Password</Text>
+                <Text style={s.subtitle}>
+                  Enter your email and we&apos;ll send you a reset
+                  link.
+                </Text>
 
-              {error ? (
-                <View style={s.errorBanner}>
-                  <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
-                  <Text style={s.errorText}>{error}</Text>
+                {error ? (
+                  <View style={s.errorBanner}>
+                    <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
+                    <Text style={s.errorText}>{error}</Text>
+                  </View>
+                ) : null}
+
+                <View style={s.inputShell}>
+                  <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    keyboardType="email-address"
+                    placeholder="Email"
+                    placeholderTextColor={CARD_MUTED}
+                    style={s.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    editable={!submitting}
+                    onSubmitEditing={handleSubmit}
+                  />
                 </View>
-              ) : null}
 
-              <View style={s.inputShell}>
-                <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  placeholder="Email"
-                  placeholderTextColor={CARD_MUTED}
-                  style={s.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  editable={!submitting}
-                  onSubmitEditing={handleSubmit}
-                />
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={submitting}
+                  onPress={handleSubmit}
+                  style={[s.primaryButton, submitting && s.disabled]}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
+                  ) : (
+                    <Text style={s.primaryButtonText}>Send Reset Link</Text>
+                  )}
+                </Pressable>
               </View>
-
-              <Pressable
-                accessibilityRole="button"
-                disabled={submitting}
-                onPress={handleSubmit}
-                style={[s.primaryButton, submitting && s.disabled]}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <Text style={s.primaryButtonText}>Send Reset Link</Text>
-                )}
-              </Pressable>
-            </View>
-          </ScrollView>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -145,6 +152,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(10, 24, 46, 0.55)",
   },
   safeArea: { flex: 1 },
+  flex1: { flex: 1 },
   pressed: { opacity: 0.72 },
   backButton: {
     width: 40,

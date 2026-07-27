@@ -1,18 +1,19 @@
 {
-  "name": "seeder",
+  "name": "printforge-seeder",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "description": "Seeds PrintForge with real open-source 3D models, geometry-rendered thumbnails, accounts and printers",
+  "private": true,
+  "main": "seed.js",
   "type": "commonjs",
-  "dependencies": {
-    "@faker-js/faker": "^10.5.0",
-    "bcryptjs": "^3.0.3",
-    "pg": "^8.22.0"
+  "license": "ISC",
+  "scripts": {
+    "seed": "node seed.js",
+    "seed:dry": "node seed.js --dry-run",
+    "clean": "node clean.js",
+    "clean:dry": "node clean.js --dry-run --legacy",
+    "clean:legacy": "node clean.js --legacy"
+  },
+  "engines": {
+    "node": ">=18"
   }
 }

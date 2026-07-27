@@ -1,6 +1,8 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -97,118 +99,123 @@ export default function ChangePasswordScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView keyboardShouldPersistTaps="handled"
-        contentContainerStyle={s.content}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+      <KeyboardAvoidingView
+        style={s.flex1}
+        behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <View style={s.card}>
-          {error ? (
-            <View style={s.errorBanner}>
-              <TriangleAlert size={16} color={colors.statusFailed.text} strokeWidth={2} />
-              <Text style={s.errorText}>{error}</Text>
+        <ScrollView
+          contentContainerStyle={s.content}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={s.card}>
+            {error ? (
+              <View style={s.errorBanner}>
+                <TriangleAlert size={16} color={colors.statusFailed.text} strokeWidth={2} />
+                <Text style={s.errorText}>{error}</Text>
+              </View>
+            ) : null}
+
+            <Text style={s.fieldLabel}>CURRENT PASSWORD</Text>
+            <View style={s.inputShell}>
+              <Lock size={18} color={colors.mutedFg} strokeWidth={1.9} />
+              <TextInput
+                autoCapitalize="none"
+                autoComplete="password"
+                placeholder="Current password"
+                placeholderTextColor={colors.mutedFg}
+                secureTextEntry={!showCurrent}
+                style={s.input}
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+                editable={!submitting}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={showCurrent ? "Hide password" : "Show password"}
+                onPress={() => setShowCurrent((v) => !v)}
+                hitSlop={8}
+              >
+                {showCurrent ? (
+                  <EyeOff size={18} color={colors.mutedFg} />
+                ) : (
+                  <Eye size={18} color={colors.mutedFg} />
+                )}
+              </Pressable>
             </View>
-          ) : null}
 
-          <Text style={s.fieldLabel}>CURRENT PASSWORD</Text>
-          <View style={s.inputShell}>
-            <Lock size={18} color={colors.mutedFg} strokeWidth={1.9} />
-            <TextInput
-              autoCapitalize="none"
-              autoComplete="password"
-              placeholder="Current password"
-              placeholderTextColor={colors.mutedFg}
-              secureTextEntry={!showCurrent}
-              style={s.input}
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-              editable={!submitting}
-            />
+            <Text style={s.fieldLabel}>NEW PASSWORD</Text>
+            <View style={s.inputShell}>
+              <Lock size={18} color={colors.mutedFg} strokeWidth={1.9} />
+              <TextInput
+                autoCapitalize="none"
+                autoComplete="password-new"
+                placeholder="New password"
+                placeholderTextColor={colors.mutedFg}
+                secureTextEntry={!showNew}
+                style={s.input}
+                value={newPassword}
+                onChangeText={setNewPassword}
+                editable={!submitting}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={showNew ? "Hide password" : "Show password"}
+                onPress={() => setShowNew((v) => !v)}
+                hitSlop={8}
+              >
+                {showNew ? (
+                  <EyeOff size={18} color={colors.mutedFg} />
+                ) : (
+                  <Eye size={18} color={colors.mutedFg} />
+                )}
+              </Pressable>
+            </View>
+
+            <Text style={s.fieldLabel}>CONFIRM NEW PASSWORD</Text>
+            <View style={s.inputShell}>
+              <Lock size={18} color={colors.mutedFg} strokeWidth={1.9} />
+              <TextInput
+                autoCapitalize="none"
+                autoComplete="password-new"
+                placeholder="Confirm new password"
+                placeholderTextColor={colors.mutedFg}
+                secureTextEntry={!showConfirm}
+                style={s.input}
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                editable={!submitting}
+                onSubmitEditing={handleSubmit}
+              />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={showConfirm ? "Hide password" : "Show password"}
+                onPress={() => setShowConfirm((v) => !v)}
+                hitSlop={8}
+              >
+                {showConfirm ? (
+                  <EyeOff size={18} color={colors.mutedFg} />
+                ) : (
+                  <Eye size={18} color={colors.mutedFg} />
+                )}
+              </Pressable>
+            </View>
+
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={showCurrent ? "Hide password" : "Show password"}
-              onPress={() => setShowCurrent((v) => !v)}
-              hitSlop={8}
+              disabled={submitting}
+              onPress={handleSubmit}
+              style={[s.primaryButton, submitting && s.disabled]}
             >
-              {showCurrent ? (
-                <EyeOff size={18} color={colors.mutedFg} />
+              {submitting ? (
+                <ActivityIndicator color="#FFFFFF" />
               ) : (
-                <Eye size={18} color={colors.mutedFg} />
+                <Text style={s.primaryButtonText}>Update Password</Text>
               )}
             </Pressable>
           </View>
-
-          <Text style={s.fieldLabel}>NEW PASSWORD</Text>
-          <View style={s.inputShell}>
-            <Lock size={18} color={colors.mutedFg} strokeWidth={1.9} />
-            <TextInput
-              autoCapitalize="none"
-              autoComplete="password-new"
-              placeholder="New password"
-              placeholderTextColor={colors.mutedFg}
-              secureTextEntry={!showNew}
-              style={s.input}
-              value={newPassword}
-              onChangeText={setNewPassword}
-              editable={!submitting}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={showNew ? "Hide password" : "Show password"}
-              onPress={() => setShowNew((v) => !v)}
-              hitSlop={8}
-            >
-              {showNew ? (
-                <EyeOff size={18} color={colors.mutedFg} />
-              ) : (
-                <Eye size={18} color={colors.mutedFg} />
-              )}
-            </Pressable>
-          </View>
-
-          <Text style={s.fieldLabel}>CONFIRM NEW PASSWORD</Text>
-          <View style={s.inputShell}>
-            <Lock size={18} color={colors.mutedFg} strokeWidth={1.9} />
-            <TextInput
-              autoCapitalize="none"
-              autoComplete="password-new"
-              placeholder="Confirm new password"
-              placeholderTextColor={colors.mutedFg}
-              secureTextEntry={!showConfirm}
-              style={s.input}
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-              editable={!submitting}
-              onSubmitEditing={handleSubmit}
-            />
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={showConfirm ? "Hide password" : "Show password"}
-              onPress={() => setShowConfirm((v) => !v)}
-              hitSlop={8}
-            >
-              {showConfirm ? (
-                <EyeOff size={18} color={colors.mutedFg} />
-              ) : (
-                <Eye size={18} color={colors.mutedFg} />
-              )}
-            </Pressable>
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            disabled={submitting}
-            onPress={handleSubmit}
-            style={[s.primaryButton, submitting && s.disabled]}
-          >
-            {submitting ? (
-              <ActivityIndicator color="#FFFFFF" />
-            ) : (
-              <Text style={s.primaryButtonText}>Update Password</Text>
-            )}
-          </Pressable>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
@@ -216,6 +223,7 @@ export default function ChangePasswordScreen() {
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
+    flex1: { flex: 1 },
     safeTop: { backgroundColor: colors.background },
     pressed: { opacity: 0.72 },
     topBar: {

@@ -72,7 +72,7 @@ export function toListing(res: DesignListingApiResponse): MarketplaceListing {
 /** Maps to GET /api/marketplace — public storefront, PUBLISHED listings only. */
 export async function fetchListings(token: string): Promise<MarketplaceListing[]> {
   const data = await apiFetch<{ content: DesignListingApiResponse[] }>('/api/marketplace', { token });
-  console.log("MARKETPLACE FETCH:", data.content.map(l => l.title)); return data.content.map(toListing);
+  return data.content.map(toListing);
 }
 
 // Mirrors estimateservice/model/Estimate.java's JSON output — same no-DTO

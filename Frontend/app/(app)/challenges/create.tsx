@@ -92,7 +92,7 @@ export default function CreateChallengeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
       >
-        <ScrollView keyboardShouldPersistTaps="handled"
+        <ScrollView
           style={s.scrollView}
           contentContainerStyle={s.scrollContent}
           keyboardShouldPersistTaps="handled"

@@ -1,14 +1,20 @@
 // components/DrawerContent.tsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
-  LayoutDashboard, Users, ClipboardList, Printer, CreditCard,
-  ShoppingBag, Bell, Settings, Columns3, LogOut, Zap,
+  LayoutDashboard, ClipboardList, Columns3, LogOut, Zap,
 } from 'lucide-react-native';
 import { useRouter, usePathname } from 'expo-router';
 import { T } from '@/constants/theme';
 import { useSession } from '@/SessionContext';
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: 'Administrator',
+  lab_staff: 'Lab Technician',
+  designer: 'Designer',
+  student: 'Student',
+};
 
 const MENU_ITEMS = [
   { route: '/staff/dashboard',     label: 'Dashboard',     icon: LayoutDashboard },
@@ -20,11 +26,15 @@ export default function DrawerContent(_props: any) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const pathname = usePathname();
-  const { signOut, appUser } = useSession();
+  const { signOut, appUser, role } = useSession();
 
   const initials = appUser?.full_name
     ? appUser.full_name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)
     : 'ST';
+
+  // This drawer is mounted by staff/_layout.tsx, but admins reach the same
+  // screens — so label the actual role rather than assuming lab staff.
+  const roleLabel = ROLE_LABELS[role] ?? 'Lab Technician';
 
   return (
     <View style={[s.container, { paddingTop: insets.top + 12, paddingBottom: insets.bottom + 12 }]}>
@@ -43,7 +53,7 @@ export default function DrawerContent(_props: any) {
         </View>
         <View style={s.userInfo}>
           <Text style={s.userName} numberOfLines={1}>{appUser?.full_name ?? 'Lab Staff'}</Text>
-          <Text style={s.userRole}>Lab Technician</Text>
+          <Text style={s.userRole}>{roleLabel}</Text>
         </View>
       </View>
 
@@ -71,9 +81,22 @@ export default function DrawerContent(_props: any) {
       <View style={s.divider} />
 
       {/* Logout */}
-      <TouchableOpacity style={s.logoutBtn} onPress={async () => {
-        await signOut();
-        router.replace('/(auth)/login');
+      <TouchableOpacity style={s.logoutBtn} onPress={() => {
+        Alert.alert(
+          'Sign Out',
+          'Are you sure you want to sign out?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Sign Out',
+              style: 'destructive',
+              onPress: async () => {
+                await signOut();
+                router.replace('/(auth)/login');
+              },
+            },
+          ]
+        );
       }} activeOpacity={0.7}>
         <LogOut size={16} color="#f87171" />
         <Text style={s.logoutText}>Sign out</Text>
