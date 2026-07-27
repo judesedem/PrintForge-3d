@@ -38,7 +38,7 @@ export default function DesignerProfileScreen() {
         <View style={s.topSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         {avatar ? (
           <Image source={{ uri: avatar }} style={s.avatar} />
         ) : (

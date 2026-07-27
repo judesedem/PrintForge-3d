@@ -73,4 +73,8 @@ public class User {
     // Premium Designer status
     @Column(name = "is_premium", columnDefinition = "boolean not null default false")
     private boolean isPremium;
+
+    // Expo push token for live notifications
+    @Column(name = "push_token")
+    private String pushToken;
 }

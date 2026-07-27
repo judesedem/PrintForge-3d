@@ -21,6 +21,8 @@ import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
+import com.printforge.admin.config.RabbitMQConfig;
+
 @Service
 public class AdminService {
 
@@ -30,19 +32,22 @@ public class AdminService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final ModerationLogService moderationLogService;
+    private final org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
 
     public AdminService(PrintJobRepository printJobRepository,
                         PrinterRepository printerRepository,
                         DesignListingRepository designListingRepository,
                         UserRepository userRepository,
                         NotificationService notificationService,
-                        ModerationLogService moderationLogService) {
+                        ModerationLogService moderationLogService,
+                        org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate) {
         this.printJobRepository = printJobRepository;
         this.printerRepository = printerRepository;
         this.designListingRepository = designListingRepository;
         this.userRepository = userRepository;
         this.notificationService = notificationService;
         this.moderationLogService = moderationLogService;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
     public Map<String, Object> getDashboardSummary() {
@@ -229,12 +234,8 @@ public class AdminService {
             throw new IllegalArgumentException("Cannot delete administrative users.");
         }
 
-        // TODO: In a microservice architecture, we cannot use JDBC to delete
-        // from tables (reports, print_jobs, etc.) that belong to other services.
-        // We should instead publish a 'user.deleted' event to a message broker.
-        
-        // Finally, delete the user
         userRepository.deleteById(id);
+        rabbitTemplate.convertAndSend(RabbitMQConfig.USER_DELETED_EXCHANGE, "", id);
     }
 
     @org.springframework.transaction.annotation.Transactional
@@ -247,5 +248,33 @@ public class AdminService {
         // There's no specific Job notification FK constraint since notification target is loose,
         // but let's be safe. Delete the job directly.
         printJobRepository.deleteById(id);
+    }
+
+    public UserDto createUser(com.printforge.admin.dto.AdminCreateUserRequest request, org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new IllegalArgumentException("Email is already registered");
+        }
+        if (!request.getPassword().equals(request.getConfirm_password())) {
+            throw new IllegalArgumentException("Passwords do not match");
+        }
+
+        User user = new User();
+        user.setFullName(request.getFull_name());
+        user.setEmail(request.getEmail());
+        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setRole(com.printforge.admin.entity.Role.valueOf(request.getRole()));
+        user.setSuspended(false);
+        user.setCreatedAt(LocalDateTime.now());
+        user.setUpdatedAt(LocalDateTime.now());
+
+        User saved = userRepository.save(user);
+        return UserDto.builder()
+                .user_id(saved.getUserId())
+                .full_name(saved.getFullName())
+                .email(saved.getEmail())
+                .role(saved.getRole().name())
+                .profile_picture_url(saved.getProfilePictureUrl())
+                .suspended(saved.getSuspended())
+                .build();
     }
 }

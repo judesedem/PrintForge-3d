@@ -89,7 +89,7 @@ export default function CreateDesignRequestScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
       >
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
           style={s.scrollView}
           contentContainerStyle={s.scrollContent}
           keyboardShouldPersistTaps="handled"

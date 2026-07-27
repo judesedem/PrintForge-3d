@@ -400,7 +400,7 @@ export default function StaffQueue() {
         <View style={s.topSpacer} />
       </View>
 
-      <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         {actionError ? (
           <View style={s.errorBanner}>
             <Text style={s.errorBannerText}>{actionError}</Text>

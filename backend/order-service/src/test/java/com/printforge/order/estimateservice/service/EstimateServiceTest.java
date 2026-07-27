@@ -11,8 +11,7 @@ import com.printforge.order.fileservice.model.ModelFile;
 import com.printforge.order.fileservice.repository.ModelFileRepository;
 import com.printforge.order.marketplaceservice.model.DesignListing;
 import com.printforge.order.marketplaceservice.repository.DesignListingRepository;
-import com.printforge.order.materialservice.model.Material;
-import com.printforge.order.materialservice.repository.MaterialRepository;
+
 import com.printforge.order.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -43,17 +42,8 @@ class EstimateServiceTest {
     ModelFileRepository modelFileRepository;
     UserRepository userRepository;
     DesignListingRepository listingRepository;
-    MaterialRepository materialRepository;
     EstimateService service;
 
-    private static Material material(String name, double costPerGram, double baseMinutesPerGram, double density) {
-        Material m = new Material();
-        m.setName(name);
-        m.setCostPerGram(costPerGram);
-        m.setBaseMinutesPerGram(baseMinutesPerGram);
-        m.setDensityGCm3(density);
-        return m;
-    }
 
     @BeforeEach
     void setUp() {
@@ -61,27 +51,10 @@ class EstimateServiceTest {
         modelFileRepository = Mockito.mock(ModelFileRepository.class);
         userRepository = Mockito.mock(UserRepository.class);
         listingRepository = Mockito.mock(DesignListingRepository.class);
-        materialRepository = Mockito.mock(MaterialRepository.class);
-        service = new EstimateService(estimateRepository, modelFileRepository, userRepository, listingRepository,
-                materialRepository);
+        service = new EstimateService(estimateRepository, modelFileRepository, userRepository, listingRepository);
 
         Mockito.when(estimateRepository.save(Mockito.any(Estimate.class)))
                 .thenAnswer(inv -> inv.getArgument(0));
-
-        // Unknown material names (e.g. "wood") fall through to empty —
-        // exact-name stubs below take precedence for the five real ones.
-        Mockito.lenient().when(materialRepository.findByName(Mockito.anyString())).thenReturn(Optional.empty());
-        Mockito.lenient().when(materialRepository.findByName("PLA"))
-                .thenReturn(Optional.of(material("PLA", 0.05, 2.5, 1.24)));
-        Mockito.lenient().when(materialRepository.findByName("RESIN"))
-                .thenReturn(Optional.of(material("RESIN", 0.15, 4.0, 1.10)));
-        Mockito.lenient().when(materialRepository.findByName("ABS"))
-                .thenReturn(Optional.of(material("ABS", 0.08, 2.8, 1.04)));
-        Mockito.lenient().when(materialRepository.findByName("PETG"))
-                .thenReturn(Optional.of(material("PETG", 0.12, 2.5, 1.27)));
-        Mockito.lenient().when(materialRepository.findByName("CARBON_FIBER"))
-                .thenReturn(Optional.of(material("CARBON_FIBER", 0.25, 2.5, 1.30)));
-        Mockito.lenient().when(materialRepository.findAll()).thenReturn(List.of());
 
         // Default: requester is a STUDENT who owns file ID 1
         User student = new User();

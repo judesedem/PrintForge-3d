@@ -1,5 +1,20 @@
 package com.printforge.auth.service;
 
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.stereotype.Service;
+
 import com.printforge.auth.dto.AuthResponse;
 import com.printforge.auth.dto.LoginRequest;
 import com.printforge.auth.dto.RegisterRequest;
@@ -17,21 +32,10 @@ import com.printforge.auth.exception.InvalidRoleException;
 import com.printforge.auth.repository.PasswordResetTokenRepository;
 import com.printforge.auth.repository.UserRepository;
 import com.printforge.auth.security.JwtService;
-import lombok.RequiredArgsConstructor;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.authentication.BadCredentialsException;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-import org.springframework.security.core.userdetails.UsernameNotFoundException;
-import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.UUID;
+import com.printforge.auth.config.RabbitMQConfig;
+
+import lombok.RequiredArgsConstructor;
 
 @Service
 @RequiredArgsConstructor
@@ -45,6 +49,7 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final EmailService emailService;
+    private final org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
 
     @Value("${app.frontend.reset-password-url}")
     private String frontendResetPasswordUrl;
@@ -352,11 +357,8 @@ public class AuthService {
             throw new IllegalArgumentException("Cannot delete administrative users through this endpoint.");
         }
 
-        // TODO: In a microservice architecture, we cannot use JDBC to delete
-        // from tables (reports, print_jobs, etc.) that belong to other services.
-        // We should instead publish a 'user.deleted' event to a message broker.
-        
         userRepository.deleteById(user.getUserId());
+        rabbitTemplate.convertAndSend(RabbitMQConfig.USER_DELETED_EXCHANGE, "", user.getUserId());
     }
 
     private UserDto toUserDto(User user) {

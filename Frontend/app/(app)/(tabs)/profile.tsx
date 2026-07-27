@@ -43,22 +43,11 @@ import { fetchMyListings } from "../../../src/api/marketplace";
 import { fetchAcceptedRequests, deliverDesignRequest, DesignRequest } from "../../../src/api/design-requests";
 import { uploadFile } from "../../../src/api/files";
 import { upgradeToPremium, deleteAccount } from "../../../src/api/auth";
-// TODO(backend): no fetchUserStats endpoint exists yet.
-// GET /api/users/{id}/stats is on the "not wired" list.
-// import { fetchUserStats } from "../../../src/api/users";
-
+import { fetchUserStats, UserStats } from "../../../src/api/users";
 
 // Following count has no backend model yet — always 0 until a follow API
 // exists.
 const FOLLOWING_COUNT = 0;
-
-// TODO(backend): fetchUserStats endpoint does not exist yet.
-// Shaped to match what those endpoints will likely return.
-type DesignerStats = {
-  designCount: number;
-  followerCount: number;
-  earnings: number;
-};
 
 type DesignThumb = {
   id: string;
@@ -83,6 +72,9 @@ function formatShortDate(iso: string | null): string {
 }
 
 function orderDisplayName(payment: Payment): string {
+  if (payment.isPremiumUpgrade) {
+    return "Premium payment";
+  }
   // Payment has no dedicated name field (src/api/payments.ts) — the
   // closest identifier is the estimate it was paid against. Decoded in
   // case it's ever a URI-encoded string; falls back to a friendly label.
@@ -255,7 +247,7 @@ export default function ProfileScreen() {
   const [paymentsLoading, setPaymentsLoading] = useState(true);
   const [paymentsError, setPaymentsError] = useState<string | null>(null);
 
-  const [designerStats, setDesignerStats] = useState<DesignerStats>({ designCount: 0, followerCount: 0, earnings: 0 });
+  const [designerStats, setDesignerStats] = useState<UserStats | null>(null);
   const [designs, setDesigns] = useState<DesignThumb[]>([]);
   const [acceptedRequests, setAcceptedRequests] = useState<DesignRequest[]>([]);
   const [uploadingRequestId, setUploadingRequestId] = useState<string | null>(null);
@@ -285,11 +277,12 @@ export default function ProfileScreen() {
     setPaymentsLoading(true);
     setPaymentsError(null);
     try {
-      const [paymentsData, listingsData, requestsData, walletData] = await Promise.all([
+      const [paymentsData, listingsData, requestsData, walletData, statsData] = await Promise.all([
         fetchMyPayments(token),
         isDesigner ? fetchMyListings(token) : Promise.resolve([]),
         isDesigner ? fetchAcceptedRequests(token) : Promise.resolve([]),
         isDesigner ? fetchWallet(token).catch(() => null) : Promise.resolve(null),
+        isDesigner && appUser?.user_id ? fetchUserStats(token, appUser.user_id).catch(() => null) : Promise.resolve(null),
       ]);
       
       setPayments(paymentsData);
@@ -297,11 +290,7 @@ export default function ProfileScreen() {
       setWalletInfo(walletData);
       
       if (isDesigner) {
-        setDesignerStats({
-          designCount: listingsData.length,
-          followerCount: 0,
-          earnings: walletData ? (walletData.totalEarnings ?? 0) : 0,
-        });
+        if (statsData) setDesignerStats(statsData);
         setDesigns(
           listingsData
             .filter((l) => !!l.thumbnailUrl)
@@ -407,7 +396,7 @@ export default function ProfileScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView
+      <ScrollView keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
@@ -421,13 +410,13 @@ export default function ProfileScreen() {
               <View style={styles.statsRow}>
                 <View style={styles.statItem}>
                   <Text style={styles.statValue}>
-                    {designerStats.designCount}
+                    {designerStats?.designCount ?? 0}
                   </Text>
                   <Text style={styles.statLabel}>Designs</Text>
                 </View>
                 <View style={styles.statItem}>
                   <Text style={styles.statValue}>
-                    {formatFollowerCount(designerStats.followerCount)}
+                    {formatFollowerCount(designerStats?.followerCount ?? 0)}
                   </Text>
                   <Text style={styles.statLabel}>Followers</Text>
                 </View>
@@ -440,7 +429,7 @@ export default function ProfileScreen() {
                 </TouchableOpacity>
                 <View style={styles.statItem}>
                   <Text style={[styles.statValue, styles.statValueOrange]}>
-                    GH₵ {designerStats.earnings}
+                    GH₵ {designerStats?.totalEarnings?.toFixed(2) ?? "0.00"}
                   </Text>
                   <Text style={styles.statLabel}>Earnings</Text>
                 </View>

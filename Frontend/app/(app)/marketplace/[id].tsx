@@ -58,6 +58,8 @@ export default function ListingDetail() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [paymentPhase, setPaymentPhase] = useState<'idle' | 'initiating' | 'checkout'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [color, setColor] = useState('');
+  const [notes, setNotes] = useState('');
   const [isQuoting, setIsQuoting] = useState(false);
   const hasFile = useRef<boolean | null>(null);
   const styles = makeStyles(colors);
@@ -129,6 +131,8 @@ export default function ListingDetail() {
       const created = await initiatePayment(token, {
         estimateId: quote.estimateId,
         listingId: listing.id,
+        color: color.trim() ? color.trim() : undefined,
+        notes: notes.trim() ? notes.trim() : undefined,
       });
       setPayment(created);
       setPaymentPhase('checkout');
@@ -148,11 +152,10 @@ export default function ListingDetail() {
     showToast('Your print job has been submitted!');
     // This screen is a stack route outside the (tabs) pager (reached via
     // router.push from the marketplace tab), so it has no access to
-    // SwipeTabsContext/goToTab the way submit.tsx does — router.replace to
-    // the standalone /jobs stack route (app/jobs/index.tsx, the same
-    // JobsList component the "orders" tab re-exports) is the reliable
-    // equivalent from here.
-    router.replace('/jobs');
+    // SwipeTabsContext/goToTab the way submit.tsx does — router.navigate to
+    // the '/orders' route takes the user to the orders tab where the jobs
+    // list component is re-exported.
+    router.navigate('/orders');
   }, [refetchJobs, showToast, router]);
 
   const handlePaymentCancel = useCallback(() => {
@@ -207,7 +210,7 @@ export default function ListingDetail() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Go back to marketplace"
@@ -442,6 +445,29 @@ export default function ListingDetail() {
                 <Plus size={17} color={colors.foreground} />
               </Pressable>
             </View>
+          </View>
+
+          <View style={{ marginTop: 20 }}>
+            <Text style={styles.fieldLabel}>Color Preference (Optional)</Text>
+            <TextInput
+              style={controls.input}
+              placeholder="e.g. Red, Blue, Any"
+              placeholderTextColor={colors.mutedFg}
+              value={color}
+              onChangeText={setColor}
+            />
+          </View>
+
+          <View style={{ marginTop: 20 }}>
+            <Text style={styles.fieldLabel}>Special Notes (Optional)</Text>
+            <TextInput
+              style={[controls.input, { minHeight: 80, textAlignVertical: 'top', paddingTop: 12 }]}
+              placeholder="Any specific printing instructions?"
+              placeholderTextColor={colors.mutedFg}
+              value={notes}
+              onChangeText={setNotes}
+              multiline
+            />
           </View>
         </Card>
 
@@ -950,6 +976,10 @@ function makeStyles(colors: Colors) {
       fontSize: 17,
     },
     quoteCard: {
+      borderColor: `${colors.primary}55`,
+      marginBottom: designTokens.spacing.lg,
+    },
+    pickerContainer: {
       borderColor: `${colors.primary}55`,
       marginBottom: designTokens.spacing.lg,
     },

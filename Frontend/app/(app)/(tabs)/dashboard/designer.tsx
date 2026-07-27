@@ -182,7 +182,7 @@ export default function DesignerDashboard() {
 
   return (
     <View style={s.screen}>
-      <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
         <View style={s.headerRow}>
           <View style={s.headerCopy}>
             <Text style={s.eyebrow}>DESIGNER WORKSPACE</Text>

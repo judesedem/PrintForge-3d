@@ -106,14 +106,16 @@ public class NotificationController {
     }
 
     // ── POST /api/notifications/push-token ───────────────────────────────────
-    // Accepts the Expo push token from the mobile app. Currently just
-    // acknowledges receipt — storing and using push tokens for real FCM/APNs
-    // delivery is a post-CodeFest enhancement.
     @PostMapping("/push-token")
     public ResponseEntity<Map<String, String>> registerPushToken(
             @RequestBody Map<String, String> body,
             Authentication authentication) {
-        // Token received — would store against the user for push delivery here
+        String pushToken = body.get("pushToken");
+        if (pushToken != null && !pushToken.isBlank()) {
+            User caller = currentUser(authentication);
+            caller.setPushToken(pushToken);
+            userRepository.save(caller);
+        }
         return ResponseEntity.ok(Map.of("status", "Push token registered"));
     }
 

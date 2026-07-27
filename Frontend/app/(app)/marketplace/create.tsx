@@ -183,7 +183,7 @@ export default function CreateListingScreen() {
           </View>
         </View>
 
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
           style={s.screen}
           contentContainerStyle={s.content}
           keyboardShouldPersistTaps="handled"

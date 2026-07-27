@@ -131,7 +131,7 @@ export default function RegisterScreen() {
       <ImageBackground source={{ uri: HERO_IMAGE }} style={s.hero} blurRadius={6}>
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
-          <ScrollView
+          <ScrollView keyboardShouldPersistTaps="handled"
             contentContainerStyle={s.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}

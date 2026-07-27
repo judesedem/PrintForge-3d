@@ -22,13 +22,13 @@ spring:
         - id: auth-service-route
           uri: ${AUTH_SERVICE_URL:http://localhost:8083}
           predicates:
-            - Path=/api/auth/**
+            - Path=/api/auth, /api/auth/**
 
         # Printer Service (port 8082)
         - id: printer-service-route
           uri: ${PRINTER_SERVICE_URL:http://localhost:8082}
           predicates:
-            - Path=/api/printers/**
+            - Path=/api/printers, /api/printers/**
           filters:
             - JwtAuthenticationFilter
 
@@ -36,7 +36,7 @@ spring:
         - id: order-service-route
           uri: ${ORDER_SERVICE_URL:http://localhost:8084}
           predicates:
-            - Path=/api/print-jobs/**, /api/estimates/**, /api/materials/**, /api/labs/**, /api/job-service/**
+            - Path=/api/print-jobs, /api/print-jobs/**, /api/estimates, /api/estimates/**, /api/materials, /api/materials/**, /api/labs, /api/labs/**, /api/job-service, /api/job-service/**
           filters:
             - JwtAuthenticationFilter
 
@@ -44,7 +44,7 @@ spring:
         - id: marketplace-service-route
           uri: ${MARKETPLACE_SERVICE_URL:http://localhost:8085}
           predicates:
-            - Path=/api/marketplace/**, /api/files/**, /api/follows/**, /api/users/**, /api/design-requests/**, /api/challenges/**
+            - Path=/api/marketplace, /api/marketplace/**, /api/files, /api/files/**, /api/follows, /api/follows/**, /api/users, /api/users/**, /api/design-requests, /api/design-requests/**, /api/challenges, /api/challenges/**
           filters:
             - JwtAuthenticationFilter
 
@@ -52,7 +52,7 @@ spring:
         - id: payment-service-route
           uri: ${PAYMENT_SERVICE_URL:http://localhost:8086}
           predicates:
-            - Path=/api/payments/**
+            - Path=/api/payments, /api/payments/**
           filters:
             - JwtAuthenticationFilter
 
@@ -60,7 +60,7 @@ spring:
         - id: notification-service-route
           uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8087}
           predicates:
-            - Path=/api/notifications/**, /api/reports/**, /api/moderation/**
+            - Path=/api/notifications, /api/notifications/**, /api/reports, /api/reports/**, /api/moderation, /api/moderation/**
           filters:
             - JwtAuthenticationFilter
 
@@ -68,7 +68,7 @@ spring:
         - id: admin-service-route
           uri: ${ADMIN_SERVICE_URL:http://localhost:8088}
           predicates:
-            - Path=/api/admin/**
+            - Path=/api/admin, /api/admin/**
           filters:
             - JwtAuthenticationFilter
 

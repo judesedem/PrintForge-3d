@@ -282,7 +282,7 @@ export default function AdminPanel() {
       </View>
 
       <View style={s.tabRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 16 }}>
+        <ScrollView keyboardShouldPersistTaps="handled" horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingRight: 16 }}>
           {tabs.map(tab => (
             <Pressable
               key={tab}
@@ -295,7 +295,7 @@ export default function AdminPanel() {
         </ScrollView>
       </View>
 
-      <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+      <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
         {activeTab === 'Users' ? (
           <View>
             <View style={s.formContainer}>

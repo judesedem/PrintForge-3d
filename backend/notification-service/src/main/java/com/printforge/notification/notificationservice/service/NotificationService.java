@@ -13,9 +13,15 @@ import java.util.List;
 public class NotificationService {
 
     private final NotificationRepository notificationRepository;
+    private final com.printforge.notification.repository.UserRepository userRepository;
+    private final ExpoPushService expoPushService;
 
-    public NotificationService(NotificationRepository notificationRepository) {
+    public NotificationService(NotificationRepository notificationRepository,
+                               com.printforge.notification.repository.UserRepository userRepository,
+                               ExpoPushService expoPushService) {
         this.notificationRepository = notificationRepository;
+        this.userRepository = userRepository;
+        this.expoPushService = expoPushService;
     }
 
     private static final int MAX_MESSAGE_LENGTH = 500;
@@ -57,7 +63,20 @@ public class NotificationService {
                 : message);
         notification.setType(type);
         notification.setDeepLink(deepLink);
-        return notificationRepository.save(notification);
+        Notification saved = notificationRepository.save(notification);
+
+        userRepository.findById(userId).ifPresent(user -> {
+            if (user.getPushToken() != null && !user.getPushToken().isBlank()) {
+                expoPushService.sendPushNotification(
+                        user.getPushToken(),
+                        saved.getTitle(),
+                        saved.getMessage(),
+                        saved.getDeepLink()
+                );
+            }
+        });
+
+        return saved;
     }
 
     // 2. Fetch unread notifications

@@ -94,17 +94,3 @@ export function markAllAsRead(token: string): Promise<{ status: string }> {
   });
 }
 
-/**
- * Maps to POST /api/notifications/push-token. Note: as of this writing the
- * backend handler (NotificationController.registerPushToken) accepts the
- * request body but never reads it — "would store against the user for push
- * delivery here" is still a server-side TODO. Sending the token now means
- * nothing needs to change on the frontend once that's implemented.
- */
-export function registerPushToken(token: string, pushToken: string): Promise<{ status: string }> {
-  return apiFetch<{ status: string }>('/api/notifications/push-token', {
-    method: 'POST',
-    token,
-    body: { pushToken },
-  });
-}

@@ -75,11 +75,11 @@ export default function StudentDashboard() {
         // We use placeholder designer info since no user endpoint exists yet.
         const mappedFeed: FeedItem[] = listings.map((l, idx) => ({
           id: l.id,
-          designerName: 'Aero Designs', // Hardcoded to match our seeder for now
-          verified: true,
+          designerName: l.designerName || 'Unknown Designer',
+          verified: l.isPremiumDesigner || false,
           followed: false,
           image: l.thumbnailUrl || 'https://via.placeholder.com/600',
-          avatar: 'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
+          avatar: l.designerAvatar || 'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
           designName: l.title,
           likes: l.totalOrders * 3 + 12, // Fake likes based on orders
           downloads: l.totalOrders,

@@ -45,7 +45,7 @@ export default function SwipePager({ pages, activeIndex, onIndexChange, scrollEn
   };
 
   return (
-    <ScrollView
+    <ScrollView keyboardShouldPersistTaps="handled"
       ref={scrollRef}
       horizontal
       pagingEnabled

@@ -126,7 +126,7 @@ export default function RequestsTab() {
           </Pressable>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
           {requests.length === 0 ? (
             <View style={s.emptyState}>
               <Text style={s.emptyTitle}>No active requests</Text>

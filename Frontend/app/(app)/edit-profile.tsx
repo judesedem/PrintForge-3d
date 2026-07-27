@@ -86,7 +86,7 @@ export default function EditProfileScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView
+      <ScrollView keyboardShouldPersistTaps="handled"
         contentContainerStyle={s.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

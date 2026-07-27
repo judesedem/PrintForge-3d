@@ -15,6 +15,17 @@ services:
       timeout: 5s
       retries: 5
 
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   api-gateway:
     build:
       context: ./backend
@@ -52,8 +63,11 @@ services:
       - DB_USERNAME=postgres
       - DB_PASSWORD=admin
       - JWT_SECRET=${JWT_SECRET:-bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLWxvY2FsLWRldi0xMjM0}
+      - RABBITMQ_HOST=rabbitmq
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   printer-service:
@@ -83,8 +97,11 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - RABBITMQ_HOST=rabbitmq
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   marketplace-service:
@@ -100,8 +117,11 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
+      - RABBITMQ_HOST=rabbitmq
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
   payment-service:
@@ -132,8 +152,11 @@ services:
       - ADMIN_PASSWORD=${ADMIN_PASSWORD}
       - MAIL_USERNAME=${MAIL_USERNAME}
       - MAIL_PASSWORD=${MAIL_PASSWORD}
+      - RABBITMQ_HOST=rabbitmq
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
 
@@ -148,8 +171,11 @@ services:
       - DB_USERNAME=postgres
       - DB_PASSWORD=admin
       - JWT_SECRET=${JWT_SECRET:-bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLWxvY2FsLWRldi0xMjM0}
+      - RABBITMQ_HOST=rabbitmq
     depends_on:
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
 
 volumes:

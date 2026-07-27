@@ -100,7 +100,7 @@ export default function ChallengesTab() {
           </Pressable>
         </View>
       ) : (
-        <ScrollView contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
+        <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.listContent} showsVerticalScrollIndicator={false}>
           {challenges.length === 0 ? (
             <View style={s.emptyState}>
               <Text style={s.emptyTitle}>No active challenges</Text>

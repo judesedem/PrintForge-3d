@@ -78,7 +78,7 @@ export default function NotificationsPanel({ visible, onClose }: Props) {
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={s.list} showsVerticalScrollIndicator={false}>
+          <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.list} showsVerticalScrollIndicator={false}>
             {NOTIFICATIONS.map(({ id, icon: Icon, accent, text, time }) => {
               const accentColor = accent === 'primary' ? colors.primary : colors.navy;
               return (

@@ -28,6 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -413,7 +414,12 @@ public class PaymentService {
     /**
      * Handles a withdrawal request by the designer.
      */
+    @Transactional
     public Withdrawal requestWithdrawal(Long userId, BigDecimal amount, String bankCode, String accountNumber) {
+        if (amount == null || amount.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new PaymentFailedException("Withdrawal amount must be greater than zero.");
+        }
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found: " + userId));
 
@@ -444,14 +450,12 @@ public class PaymentService {
             savedWithdrawal.setCompletedAt(LocalDateTime.now());
             withdrawalRepository.save(savedWithdrawal);
         } catch (Exception e) {
-            // Revert deduction on failure
-            user.setWalletBalance(user.getWalletBalance().add(amount));
-            userRepository.save(user);
-
             savedWithdrawal.setStatus("FAILED");
             savedWithdrawal.setCompletedAt(LocalDateTime.now());
             withdrawalRepository.save(savedWithdrawal);
 
+            // Because the method is @Transactional, throwing a RuntimeException here
+            // will automatically roll back the wallet deduction that happened above.
             throw new PaymentFailedException("Withdrawal failed: " + e.getMessage());
         }
 

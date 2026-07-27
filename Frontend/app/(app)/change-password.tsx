@@ -97,7 +97,7 @@ export default function ChangePasswordScreen() {
         </View>
       </SafeAreaView>
 
-      <ScrollView
+      <ScrollView keyboardShouldPersistTaps="handled"
         contentContainerStyle={s.content}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"

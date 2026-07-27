@@ -117,7 +117,7 @@ export default function LoginScreen() {
       >
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
-          <ScrollView
+          <ScrollView keyboardShouldPersistTaps="handled"
             contentContainerStyle={s.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}

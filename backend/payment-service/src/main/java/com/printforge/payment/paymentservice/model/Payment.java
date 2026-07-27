@@ -3,6 +3,7 @@ package com.printforge.payment.paymentservice.model;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
 @Entity
 @Table(name = "payments")
@@ -27,6 +28,7 @@ public class Payment {
     private Long printJobId;
 
     // True if this payment is to upgrade the user to a Premium Designer
+    @JsonProperty("isPremiumUpgrade")
     @Column(name = "is_premium_upgrade", columnDefinition = "boolean default false")
     private Boolean isPremiumUpgrade = false;
 
@@ -87,7 +89,9 @@ public class Payment {
     public Long getPrintJobId() { return printJobId; }
     public void setPrintJobId(Long printJobId) { this.printJobId = printJobId; }
 
+    @JsonProperty("isPremiumUpgrade")
     public Boolean getIsPremiumUpgrade() { return isPremiumUpgrade; }
+    @JsonProperty("isPremiumUpgrade")
     public void setIsPremiumUpgrade(Boolean isPremiumUpgrade) { this.isPremiumUpgrade = isPremiumUpgrade; }
 
     public String getColor() { return color; }

@@ -41,7 +41,7 @@ export function ApproveModal({ visible, job, printers, onConfirm, onClose }: App
 
           {/* Printer picker */}
           <Text style={s.sectionLabel}>Assign printer (optional)</Text>
-          <ScrollView style={s.printerList} showsVerticalScrollIndicator={false}>
+          <ScrollView keyboardShouldPersistTaps="handled" style={s.printerList} showsVerticalScrollIndicator={false}>
             {available.map(p => (
               <TouchableOpacity
                 key={p.id}

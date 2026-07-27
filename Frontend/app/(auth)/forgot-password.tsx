@@ -78,7 +78,7 @@ export default function ForgotPasswordScreen() {
             <ArrowLeft size={22} color="#FFFFFF" />
           </Pressable>
 
-          <ScrollView
+          <ScrollView keyboardShouldPersistTaps="handled"
             contentContainerStyle={s.scrollContent}
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}

@@ -202,7 +202,7 @@ export default function BoardScreen() {
         <View style={s.vDivider} />
 
         {/* Printer pills */}
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
           horizontal
           showsHorizontalScrollIndicator={false}
           style={s.pillsScroll}
@@ -234,7 +234,7 @@ export default function BoardScreen() {
       </View>
 
       {/* ── Board ── */}
-      <ScrollView
+      <ScrollView keyboardShouldPersistTaps="handled"
         horizontal
         showsHorizontalScrollIndicator={Platform.OS === 'web'}
         style={s.boardScroll}

@@ -1,5 +1,7 @@
 package com.printforge.payment.paymentservice.dto;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 public class InitiatePaymentRequest {
 
     // Optional — provided for standard prints
@@ -12,6 +14,7 @@ public class InitiatePaymentRequest {
     private Long requestId;
 
     // Optional — provided when upgrading to Premium Designer status
+    @JsonProperty("isPremiumUpgrade")
     private Boolean isPremiumUpgrade;
 
     // Optional — the color/notes the customer chose at order-submission
@@ -31,7 +34,9 @@ public class InitiatePaymentRequest {
     public Long getRequestId() { return requestId; }
     public void setRequestId(Long requestId) { this.requestId = requestId; }
 
+    @JsonProperty("isPremiumUpgrade")
     public Boolean getIsPremiumUpgrade() { return isPremiumUpgrade; }
+    @JsonProperty("isPremiumUpgrade")
     public void setIsPremiumUpgrade(Boolean isPremiumUpgrade) { this.isPremiumUpgrade = isPremiumUpgrade; }
 
     public String getColor() { return color; }

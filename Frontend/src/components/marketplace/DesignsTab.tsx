@@ -164,7 +164,7 @@ export default function DesignsTab() {
           />
         </View>
 
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.pillsRow}
@@ -203,7 +203,7 @@ export default function DesignsTab() {
           </Pressable>
         </View>
       ) : (
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={s.gridContent}
           showsVerticalScrollIndicator={false}
         >

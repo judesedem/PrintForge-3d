@@ -384,7 +384,7 @@ export default function SubmitScreen() {
   if (step === "estimate" && estimate) {
     return (
       <View style={styles.screen}>
-        <ScrollView
+        <ScrollView keyboardShouldPersistTaps="handled"
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
         >
@@ -564,7 +564,7 @@ export default function SubmitScreen() {
   // Configure step
   return (
     <View style={styles.screen}>
-      <ScrollView
+      <ScrollView keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
@@ -646,7 +646,7 @@ export default function SubmitScreen() {
             </Pressable>
           </View>
         ) : (
-          <ScrollView
+          <ScrollView keyboardShouldPersistTaps="handled"
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.materialPillsRow}

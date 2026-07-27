@@ -50,7 +50,7 @@ export default function DrawerContent(_props: any) {
       <View style={s.divider} />
 
       {/* Menu items */}
-      <ScrollView style={s.menuScroll} showsVerticalScrollIndicator={false}>
+      <ScrollView keyboardShouldPersistTaps="handled" style={s.menuScroll} showsVerticalScrollIndicator={false}>
         {MENU_ITEMS.map(item => {
           const active = pathname === item.route;
           const Icon = item.icon;

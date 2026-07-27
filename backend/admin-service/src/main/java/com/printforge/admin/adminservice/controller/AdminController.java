@@ -32,13 +32,19 @@ public class AdminController {
 
     private final AdminService adminService;
     private final UserRepository userRepository;
+    private final org.springframework.security.crypto.password.PasswordEncoder passwordEncoder;
 
-    public AdminController(AdminService adminService, UserRepository userRepository) {
+    public AdminController(AdminService adminService, UserRepository userRepository, org.springframework.security.crypto.password.PasswordEncoder passwordEncoder) {
         this.adminService = adminService;
         this.userRepository = userRepository;
+        this.passwordEncoder = passwordEncoder;
     }
 
-
+    @PostMapping("/users")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<UserDto> createUser(@RequestBody com.printforge.admin.dto.AdminCreateUserRequest request) {
+        return ResponseEntity.ok(adminService.createUser(request, passwordEncoder));
+    }
 
     @GetMapping("/dashboard")
     public ResponseEntity<Map<String, Object>> getDashboard() {
