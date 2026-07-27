@@ -35,8 +35,11 @@ function RootStack() {
         app/(app)/_layout.tsx), or a literal file/index route. "(auth)" has
         no _layout.tsx or index route of its own (only login.tsx and
         register.tsx), so it must be registered as its two real leaf
-        routes. Same for "staff" (only staff/queue.tsx exists, no
-        staff/index.tsx). "profile" never existed at this level at all —
+        routes. "staff" is the other case: it now has its own
+        staff/_layout.tsx (a Drawer over dashboard/board/queue), so it
+        registers as the group "staff" — naming a leaf like "staff/queue"
+        here would be the same mismatch this comment is about.
+        "profile" never existed at this level at all —
         the only profile.tsx in the app lives at app/(app)/(tabs)/profile.tsx,
         rendered directly by that layout's SwipePager, not routed here —
         this was a stale leftover from before profile.tsx was moved into
@@ -57,7 +60,7 @@ function RootStack() {
       <Stack.Screen name="(app)" options={{ headerShown: false, gestureEnabled: false }} />
       <Stack.Screen name="jobs" options={{ headerShown: false }} />
       <Stack.Screen name="admin" options={{ headerShown: false }} />
-      <Stack.Screen name="staff/queue" options={{ headerShown: false }} />
+      <Stack.Screen name="staff" options={{ headerShown: false }} />
       <Stack.Screen name="index" options={{ headerShown: false }} />
     </Stack>
   );
