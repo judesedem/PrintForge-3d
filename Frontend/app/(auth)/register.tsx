@@ -2,6 +2,8 @@ import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -131,160 +133,165 @@ export default function RegisterScreen() {
       <ImageBackground source={{ uri: HERO_IMAGE }} style={s.hero} blurRadius={6}>
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
-          <ScrollView keyboardShouldPersistTaps="handled"
-            contentContainerStyle={s.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            style={s.flex1}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           >
-            <View style={s.card}>
-              <View style={s.logoMark}>
-                <Box size={30} color="#FFFFFF" strokeWidth={2.2} />
-              </View>
-              <Text style={s.brandTitle}>PrintForge 3D</Text>
-              <Text style={s.brandSubtitle}>Print. Share. Build the future.</Text>
-
-              <View style={s.segment}>
-                <Pressable
-                  accessibilityRole="tab"
-                  onPress={() => router.push('/(auth)/login')}
-                  style={s.segmentTab}
-                >
-                  <Text style={s.segmentText}>Log In</Text>
-                </Pressable>
-                <View style={[s.segmentTab, s.segmentTabActive]}>
-                  <Text style={s.segmentTextActive}>Sign Up</Text>
+            <ScrollView
+              contentContainerStyle={s.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={s.card}>
+                <View style={s.logoMark}>
+                  <Box size={30} color="#FFFFFF" strokeWidth={2.2} />
                 </View>
-              </View>
+                <Text style={s.brandTitle}>PrintForge 3D</Text>
+                <Text style={s.brandSubtitle}>Print. Share. Build the future.</Text>
 
-              {error ? (
-                <View style={s.errorBanner}>
-                  <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
-                  <Text style={s.errorText}>{error}</Text>
+                <View style={s.segment}>
+                  <Pressable
+                    accessibilityRole="tab"
+                    onPress={() => router.push('/(auth)/login')}
+                    style={s.segmentTab}
+                  >
+                    <Text style={s.segmentText}>Log In</Text>
+                  </Pressable>
+                  <View style={[s.segmentTab, s.segmentTabActive]}>
+                    <Text style={s.segmentTextActive}>Sign Up</Text>
+                  </View>
                 </View>
-              ) : null}
 
-              <View style={s.inputShell}>
-                <User size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoComplete="name"
-                  placeholder="Full name"
-                  placeholderTextColor={CARD_MUTED}
-                  style={s.input}
-                  value={fullName}
-                  onChangeText={setFullName}
-                  editable={!busy}
-                />
-              </View>
+                {error ? (
+                  <View style={s.errorBanner}>
+                    <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
+                    <Text style={s.errorText}>{error}</Text>
+                  </View>
+                ) : null}
 
-              <View style={s.inputShell}>
-                <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  placeholder="Email"
-                  placeholderTextColor={CARD_MUTED}
-                  style={s.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  editable={!busy}
-                />
-              </View>
+                <View style={s.inputShell}>
+                  <User size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoComplete="name"
+                    placeholder="Full name"
+                    placeholderTextColor={CARD_MUTED}
+                    style={s.input}
+                    value={fullName}
+                    onChangeText={setFullName}
+                    editable={!busy}
+                  />
+                </View>
 
-              <View style={s.inputShell}>
-                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="new-password"
-                  placeholder="Password"
-                  placeholderTextColor={CARD_MUTED}
-                  secureTextEntry={!showPassword}
-                  style={s.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  editable={!busy}
-                />
+                <View style={s.inputShell}>
+                  <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    keyboardType="email-address"
+                    placeholder="Email"
+                    placeholderTextColor={CARD_MUTED}
+                    style={s.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    editable={!busy}
+                  />
+                </View>
+
+                <View style={s.inputShell}>
+                  <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                    placeholder="Password"
+                    placeholderTextColor={CARD_MUTED}
+                    secureTextEntry={!showPassword}
+                    style={s.input}
+                    value={password}
+                    onChangeText={setPassword}
+                    editable={!busy}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+                    onPress={() => setShowPassword(v => !v)}
+                    hitSlop={8}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={18} color={CARD_MUTED} />
+                    ) : (
+                      <Eye size={18} color={CARD_MUTED} />
+                    )}
+                  </Pressable>
+                </View>
+
+                <View style={s.inputShell}>
+                  <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="new-password"
+                    placeholder="Confirm password"
+                    placeholderTextColor={CARD_MUTED}
+                    secureTextEntry={!showPassword}
+                    style={s.input}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    editable={!busy}
+                    onSubmitEditing={handleCreateAccount}
+                  />
+                </View>
+
+                <Text style={s.roleLabel}>I want to join as</Text>
+                <View style={s.roleRow}>
+                  {roleOptions.map(({ label, icon: Icon }) => {
+                    const active = selectedRole === label;
+                    return (
+                      <Pressable
+                        key={label}
+                        accessibilityRole="radio"
+                        accessibilityState={{ checked: active }}
+                        onPress={() => setSelectedRole(label)}
+                        style={[s.roleCard, active && s.roleCardActive]}
+                      >
+                        <Icon size={22} color={active ? ORANGE : CARD_MUTED} strokeWidth={2} />
+                        <Text style={[s.roleText, active && s.roleTextActive]}>{label}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
+
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
-                  onPress={() => setShowPassword(v => !v)}
-                  hitSlop={8}
+                  disabled={busy}
+                  onPress={handleCreateAccount}
+                  style={[s.primaryButton, busy && s.disabled]}
                 >
-                  {showPassword ? (
-                    <EyeOff size={18} color={CARD_MUTED} />
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Eye size={18} color={CARD_MUTED} />
+                    <>
+                      <Text style={s.primaryButtonText}>Sign Up</Text>
+                      <ArrowRight size={19} color="#FFFFFF" />
+                    </>
                   )}
                 </Pressable>
+
+                <View style={s.dividerRow}>
+                  <View style={s.divider} />
+                  <Text style={s.dividerText}>or</Text>
+                  <View style={s.divider} />
+                </View>
+
+                <Pressable
+                  onPress={() => router.push('/(auth)/login')}
+                  style={s.footerLink}
+                  disabled={busy}
+                >
+                  <Text style={s.footerText}>Already have an account?</Text>
+                  <Text style={s.footerAction}> Log in</Text>
+                </Pressable>
               </View>
-
-              <View style={s.inputShell}>
-                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="new-password"
-                  placeholder="Confirm password"
-                  placeholderTextColor={CARD_MUTED}
-                  secureTextEntry={!showPassword}
-                  style={s.input}
-                  value={confirmPassword}
-                  onChangeText={setConfirmPassword}
-                  editable={!busy}
-                  onSubmitEditing={handleCreateAccount}
-                />
-              </View>
-
-              <Text style={s.roleLabel}>I want to join as</Text>
-              <View style={s.roleRow}>
-                {roleOptions.map(({ label, icon: Icon }) => {
-                  const active = selectedRole === label;
-                  return (
-                    <Pressable
-                      key={label}
-                      accessibilityRole="radio"
-                      accessibilityState={{ checked: active }}
-                      onPress={() => setSelectedRole(label)}
-                      style={[s.roleCard, active && s.roleCardActive]}
-                    >
-                      <Icon size={22} color={active ? ORANGE : CARD_MUTED} strokeWidth={2} />
-                      <Text style={[s.roleText, active && s.roleTextActive]}>{label}</Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-
-              <Pressable
-                accessibilityRole="button"
-                disabled={busy}
-                onPress={handleCreateAccount}
-                style={[s.primaryButton, busy && s.disabled]}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Text style={s.primaryButtonText}>Sign Up</Text>
-                    <ArrowRight size={19} color="#FFFFFF" />
-                  </>
-                )}
-              </Pressable>
-
-              <View style={s.dividerRow}>
-                <View style={s.divider} />
-                <Text style={s.dividerText}>or</Text>
-                <View style={s.divider} />
-              </View>
-
-              <Pressable
-                onPress={() => router.push('/(auth)/login')}
-                style={s.footerLink}
-                disabled={busy}
-              >
-                <Text style={s.footerText}>Already have an account?</Text>
-                <Text style={s.footerAction}> Log in</Text>
-              </Pressable>
-            </View>
-          </ScrollView>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -303,6 +310,7 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(10, 24, 46, 0.85)',
   },
   safeArea: { flex: 1 },
+  flex1: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',

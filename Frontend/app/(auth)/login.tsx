@@ -3,6 +3,8 @@ import {
   ActivityIndicator,
   Image,
   ImageBackground,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -117,125 +119,130 @@ export default function LoginScreen() {
       >
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
-          <ScrollView keyboardShouldPersistTaps="handled"
-            contentContainerStyle={s.scrollContent}
-            keyboardShouldPersistTaps="handled"
-            showsVerticalScrollIndicator={false}
+          <KeyboardAvoidingView
+            style={s.flex1}
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
           >
-            <View style={s.brandSection}>
-              <View style={s.logoMark}>
-                <Box size={26} color="#FFFFFF" strokeWidth={2.2} />
-              </View>
-              <Text style={s.brandTitle}>PrintForge 3D</Text>
-              <Text style={s.brandSubtitle}>
-                Print. Share. Build the future.
-              </Text>
-            </View>
-
-            <View style={s.card}>
-              {/* Log In | Sign Up switcher — separate routes, so the
-                  inactive segment navigates rather than swapping state. */}
-              <View style={s.segment}>
-                <View style={[s.segmentTab, s.segmentTabActive]}>
-                  <Text style={s.segmentTextActive}>Log In</Text>
+            <ScrollView
+              contentContainerStyle={s.scrollContent}
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <View style={s.brandSection}>
+                <View style={s.logoMark}>
+                  <Box size={26} color="#FFFFFF" strokeWidth={2.2} />
                 </View>
-                <Pressable
-                  accessibilityRole="tab"
-                  onPress={() => router.push("/(auth)/register")}
-                  style={s.segmentTab}
-                >
-                  <Text style={s.segmentText}>Sign Up</Text>
-                </Pressable>
+                <Text style={s.brandTitle}>PrintForge 3D</Text>
+                <Text style={s.brandSubtitle}>
+                  Print. Share. Build the future.
+                </Text>
               </View>
 
-              {error ? (
-                <View style={s.errorBanner}>
-                  <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
-                  <Text style={s.errorText}>{error}</Text>
+              <View style={s.card}>
+                {/* Log In | Sign Up switcher — separate routes, so the
+                    inactive segment navigates rather than swapping state. */}
+                <View style={s.segment}>
+                  <View style={[s.segmentTab, s.segmentTabActive]}>
+                    <Text style={s.segmentTextActive}>Log In</Text>
+                  </View>
+                  <Pressable
+                    accessibilityRole="tab"
+                    onPress={() => router.push("/(auth)/register")}
+                    style={s.segmentTab}
+                  >
+                    <Text style={s.segmentText}>Sign Up</Text>
+                  </Pressable>
                 </View>
-              ) : null}
 
-              <View style={s.inputShell}>
-                <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="email"
-                  keyboardType="email-address"
-                  placeholder="Email"
-                  placeholderTextColor={CARD_MUTED}
-                  style={s.input}
-                  value={email}
-                  onChangeText={setEmail}
-                  editable={!busy}
-                />
-              </View>
+                {error ? (
+                  <View style={s.errorBanner}>
+                    <TriangleAlert size={16} color="#D92D20" strokeWidth={2} />
+                    <Text style={s.errorText}>{error}</Text>
+                  </View>
+                ) : null}
 
-              <View style={s.inputShell}>
-                <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
-                <TextInput
-                  autoCapitalize="none"
-                  autoComplete="password"
-                  placeholder="Password"
-                  placeholderTextColor={CARD_MUTED}
-                  secureTextEntry={!showPassword}
-                  style={s.input}
-                  value={password}
-                  onChangeText={setPassword}
-                  editable={!busy}
-                  onSubmitEditing={handleSignIn}
-                />
+                <View style={s.inputShell}>
+                  <Mail size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    keyboardType="email-address"
+                    placeholder="Email"
+                    placeholderTextColor={CARD_MUTED}
+                    style={s.input}
+                    value={email}
+                    onChangeText={setEmail}
+                    editable={!busy}
+                  />
+                </View>
+
+                <View style={s.inputShell}>
+                  <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="none"
+                    autoComplete="password"
+                    placeholder="Password"
+                    placeholderTextColor={CARD_MUTED}
+                    secureTextEntry={!showPassword}
+                    style={s.input}
+                    value={password}
+                    onChangeText={setPassword}
+                    editable={!busy}
+                    onSubmitEditing={handleSignIn}
+                  />
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      showPassword ? "Hide password" : "Show password"
+                    }
+                    onPress={() => setShowPassword((v) => !v)}
+                    hitSlop={8}
+                  >
+                    {showPassword ? (
+                      <EyeOff size={18} color={CARD_MUTED} />
+                    ) : (
+                      <Eye size={18} color={CARD_MUTED} />
+                    )}
+                  </Pressable>
+                </View>
+
                 <Pressable
                   accessibilityRole="button"
-                  accessibilityLabel={
-                    showPassword ? "Hide password" : "Show password"
-                  }
-                  onPress={() => setShowPassword((v) => !v)}
-                  hitSlop={8}
+                  onPress={() => router.push("/(auth)/forgot-password")}
+                  style={s.forgotLink}
                 >
-                  {showPassword ? (
-                    <EyeOff size={18} color={CARD_MUTED} />
+                  <Text style={s.forgotText}>Forgot password?</Text>
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  disabled={busy}
+                  onPress={handleSignIn}
+                  style={s.primaryButton}
+                >
+                  {submitting ? (
+                    <ActivityIndicator color="#FFFFFF" />
                   ) : (
-                    <Eye size={18} color={CARD_MUTED} />
+                    <>
+                      <Text style={s.primaryButtonText}>Log In</Text>
+                      <ArrowRight size={19} color="#FFFFFF" />
+                    </>
                   )}
                 </Pressable>
+
+
+
+                <Pressable
+                  onPress={() => router.push("/(auth)/register")}
+                  style={s.footerLink}
+                  disabled={busy}
+                >
+                  <Text style={s.footerText}>Don&apos;t have an account?</Text>
+                  <Text style={s.footerAction}> Sign up</Text>
+                </Pressable>
               </View>
-
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => router.push("/(auth)/forgot-password")}
-                style={s.forgotLink}
-              >
-                <Text style={s.forgotText}>Forgot password?</Text>
-              </Pressable>
-
-              <Pressable
-                accessibilityRole="button"
-                disabled={busy}
-                onPress={handleSignIn}
-                style={s.primaryButton}
-              >
-                {submitting ? (
-                  <ActivityIndicator color="#FFFFFF" />
-                ) : (
-                  <>
-                    <Text style={s.primaryButtonText}>Log In</Text>
-                    <ArrowRight size={19} color="#FFFFFF" />
-                  </>
-                )}
-              </Pressable>
-
-
-
-              <Pressable
-                onPress={() => router.push("/(auth)/register")}
-                style={s.footerLink}
-                disabled={busy}
-              >
-                <Text style={s.footerText}>Don&apos;t have an account?</Text>
-                <Text style={s.footerAction}> Sign up</Text>
-              </Pressable>
-            </View>
-          </ScrollView>
+            </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -254,6 +261,7 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(10, 24, 46, 0.21)",
   },
   safeArea: { flex: 1 },
+  flex1: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",

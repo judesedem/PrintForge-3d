@@ -247,6 +247,17 @@ export function makeControlStyles(colors: Colors) {
     chipTextSelected: {
       color: colors.primary,
     },
+    input: {
+      minHeight: 48,
+      borderRadius: designTokens.radius.md,
+      backgroundColor: colors.cardElevated,
+      borderWidth: 1,
+      borderColor: colors.border,
+      color: colors.foreground,
+      fontFamily: designTokens.type.body,
+      fontSize: 15,
+      paddingHorizontal: 16,
+    },
   });
 }
 

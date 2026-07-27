@@ -1,6 +1,6 @@
 // components/DrawerContent.tsx
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   LayoutDashboard, Users, ClipboardList, Printer, CreditCard,
@@ -71,9 +71,22 @@ export default function DrawerContent(_props: any) {
       <View style={s.divider} />
 
       {/* Logout */}
-      <TouchableOpacity style={s.logoutBtn} onPress={async () => {
-        await signOut();
-        router.replace('/(auth)/login');
+      <TouchableOpacity style={s.logoutBtn} onPress={() => {
+        Alert.alert(
+          'Sign Out',
+          'Are you sure you want to sign out?',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Sign Out',
+              style: 'destructive',
+              onPress: async () => {
+                await signOut();
+                router.replace('/(auth)/login');
+              },
+            },
+          ]
+        );
       }} activeOpacity={0.7}>
         <LogOut size={16} color="#f87171" />
         <Text style={s.logoutText}>Sign out</Text>

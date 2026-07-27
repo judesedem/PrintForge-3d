@@ -229,10 +229,23 @@ export default function AdminPanel() {
         <View style={s.titleRow}>
           <Text style={s.title}>Admin Panel</Text>
           <Pressable 
-            onPress={async () => {
-              await signOut();
-              router.replace('/(auth)/login');
-            }} 
+            onPress={() => {
+              Alert.alert(
+                'Sign Out',
+                'Are you sure you want to sign out?',
+                [
+                  { text: 'Cancel', style: 'cancel' },
+                  {
+                    text: 'Sign Out',
+                    style: 'destructive',
+                    onPress: async () => {
+                      await signOut();
+                      router.replace('/(auth)/login');
+                    },
+                  },
+                ]
+              );
+            }}
             style={({ pressed }) => [s.logoutButton, pressed && s.pressed]}
           >
             <LogOut size={16} color={colors.destructive ?? '#ff4444'} style={{ marginRight: 6 }} />
