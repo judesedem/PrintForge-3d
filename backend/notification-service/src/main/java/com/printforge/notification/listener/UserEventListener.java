@@ -1,8 +1,8 @@
 package com.printforge.notification.listener;
 
 import com.printforge.notification.config.RabbitMQConfig;
-import com.printforge.notification.model.Notification;
-import com.printforge.notification.repository.NotificationRepository;
+import com.printforge.notification.notificationservice.model.Notification;
+import com.printforge.notification.notificationservice.repository.NotificationRepository;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.stereotype.Component;
 

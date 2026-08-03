@@ -5,16 +5,14 @@ import {
   Animated,
   Easing,
   ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import KeyboardAwareScreen from '../../src/components/KeyboardAwareScreen';
 import {
   ArrowRight,
   Box,
@@ -214,15 +212,7 @@ export default function RegisterScreen() {
       <ImageBackground source={{ uri: HERO_IMAGE }} style={s.hero} blurRadius={6}>
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
-          <KeyboardAvoidingView
-            style={s.flex1}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <ScrollView
-              contentContainerStyle={s.scrollContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
+          <KeyboardAwareScreen contentContainerStyle={s.scrollContent}>
               <Animated.View style={[s.card, { transform: [{ translateX: cardShake }] }]}>
                 <View style={s.logoMark}>
                   <Box size={30} color="#FFFFFF" strokeWidth={2.2} />
@@ -381,8 +371,7 @@ export default function RegisterScreen() {
                   <Text style={s.footerAction}> Log in</Text>
                 </Pressable>
               </Animated.View>
-            </ScrollView>
-          </KeyboardAvoidingView>
+          </KeyboardAwareScreen>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -401,7 +390,6 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(10, 24, 46, 0.85)',
   },
   safeArea: { flex: 1 },
-  flex1: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',

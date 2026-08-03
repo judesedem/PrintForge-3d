@@ -2,11 +2,12 @@
 import React, { useState } from 'react';
 import {
   Modal, View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Pressable,
+  StyleSheet, Pressable, KeyboardAvoidingView,
 } from 'react-native';
 import { AlertTriangle, X } from 'lucide-react-native';
 import { T } from '@/constants/theme';
 import type { BoardJob } from '@/constants/boardData';
+import { KEYBOARD_AVOIDING_BEHAVIOR } from '@/components/KeyboardAwareScreen';
 
 interface RejectModalProps {
   visible:   boolean;
@@ -25,7 +26,7 @@ export function RejectModal({ visible, job, onConfirm, onClose }: RejectModalPro
 
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
-      <View style={s.overlay}>
+      <KeyboardAvoidingView style={s.overlay} behavior={KEYBOARD_AVOIDING_BEHAVIOR}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={s.card}>
           {/* Header */}
@@ -70,7 +71,7 @@ export function RejectModal({ visible, job, onConfirm, onClose }: RejectModalPro
             </TouchableOpacity>
           </View>
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }

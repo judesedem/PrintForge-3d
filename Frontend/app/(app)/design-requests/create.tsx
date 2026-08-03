@@ -22,6 +22,7 @@ import { useTheme } from '@/ThemeContext';
 import { useSession } from '@/SessionContext';
 import { createDesignRequest } from '@/api/design-requests';
 import { Colors, designTokens, makeControlStyles } from '@/theme';
+import { KEYBOARD_AVOIDING_BEHAVIOR } from '@/components/KeyboardAwareScreen';
 
 export default function CreateDesignRequestScreen() {
   const router = useRouter();
@@ -86,7 +87,7 @@ export default function CreateDesignRequestScreen() {
 
       <KeyboardAvoidingView
         style={s.flex1}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={KEYBOARD_AVOIDING_BEHAVIOR}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
       >
         <ScrollView

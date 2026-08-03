@@ -1,4 +1,5 @@
-import { FlatList, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { FlatList, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import KeyboardAwareScreen from '@/components/KeyboardAwareScreen';
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -211,7 +212,7 @@ export default function ListingDetail() {
 
   return (
     <View style={styles.screen}>
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScreen contentContainerStyle={styles.content}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Go back to marketplace"
@@ -551,7 +552,7 @@ export default function ListingDetail() {
             is confirmed — no separate approval step for marketplace orders.
           </Text>
         </View>
-      </ScrollView>
+      </KeyboardAwareScreen>
 
       {payment && paymentPhase === 'checkout' && token ? (
         <PaystackWebView

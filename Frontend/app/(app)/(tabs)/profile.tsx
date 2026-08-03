@@ -9,12 +9,14 @@ import {
   StyleSheet,
   Animated,
   Easing,
+  KeyboardAvoidingView,
   Modal,
   Linking,
   TextInput,
   Alert,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
+import { KEYBOARD_AVOIDING_BEHAVIOR } from "../../../src/components/KeyboardAwareScreen";
 import { SafeAreaView } from "react-native-safe-area-context";
 import {
   ShoppingBag,
@@ -743,6 +745,7 @@ export default function ProfileScreen() {
 
       {/* Delete Account Modal */}
       <Modal visible={showDeleteModal} transparent animationType="slide" onRequestClose={() => setShowDeleteModal(false)}>
+        <KeyboardAvoidingView style={styles.modalKeyboardView} behavior={KEYBOARD_AVOIDING_BEHAVIOR}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowDeleteModal(false)}>
           <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
             <View style={styles.dragHandle} />
@@ -808,10 +811,12 @@ export default function ProfileScreen() {
             </TouchableOpacity>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Withdrawal Modal */}
       <Modal visible={showWithdrawModal} transparent animationType="slide" onRequestClose={() => setShowWithdrawModal(false)}>
+        <KeyboardAvoidingView style={styles.modalKeyboardView} behavior={KEYBOARD_AVOIDING_BEHAVIOR}>
         <Pressable style={styles.modalOverlay} onPress={() => setShowWithdrawModal(false)}>
           <Pressable onPress={(e) => e.stopPropagation()} style={styles.modalSheet}>
             <View style={styles.dragHandle} />
@@ -883,6 +888,7 @@ export default function ProfileScreen() {
             </Pressable>
           </Pressable>
         </Pressable>
+        </KeyboardAvoidingView>
       </Modal>
 
       <BecomeDesignerModal
@@ -1155,6 +1161,9 @@ const getStyles = (colors: Colors) => StyleSheet.create({
   },
   pressedScale: {
     transform: [{ scale: 0.98 }],
+  },
+  modalKeyboardView: {
+    flex: 1,
   },
   modalOverlay: {
     flex: 1,

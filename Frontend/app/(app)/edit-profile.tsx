@@ -1,10 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,6 +16,7 @@ import { useSession } from "../../src/SessionContext";
 import { ApiError } from "../../src/api/client";
 import { updateProfile } from "../../src/api/auth";
 import { Colors, designTokens } from "../../src/theme";
+import KeyboardAwareScreen from "../../src/components/KeyboardAwareScreen";
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -88,15 +86,7 @@ export default function EditProfileScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView
-        style={s.flex1}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={s.content}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+      <KeyboardAwareScreen contentContainerStyle={s.content}>
           <View style={s.card}>
             {error ? (
               <View style={s.errorBanner}>
@@ -152,8 +142,7 @@ export default function EditProfileScreen() {
               )}
             </Pressable>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScreen>
     </View>
   );
 }
@@ -161,7 +150,6 @@ export default function EditProfileScreen() {
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
-    flex1: { flex: 1 },
     safeTop: { backgroundColor: colors.background },
     pressed: { opacity: 0.72 },
     topBar: {

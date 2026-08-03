@@ -1,4 +1,5 @@
 import { View, Text, StyleSheet, FlatList, Pressable, TextInput, ScrollView, ActivityIndicator, Alert } from 'react-native';
+import KeyboardAwareScreen from '../../src/components/KeyboardAwareScreen';
 import { useCallback, useEffect, useState } from 'react';
 import { useTheme } from '../../src/ThemeContext';
 import { useSession } from '../../src/SessionContext';
@@ -317,7 +318,7 @@ export default function AdminPanel() {
         </ScrollView>
       </View>
 
-      <ScrollView keyboardShouldPersistTaps="handled" style={{ flex: 1 }} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 40 }}>
+      <KeyboardAwareScreen style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }}>
         {activeTab === 'Users' ? (
           <View>
             <View style={s.formContainer}>
@@ -527,7 +528,7 @@ export default function AdminPanel() {
             )}
           </View>
         )}
-      </ScrollView>
+      </KeyboardAwareScreen>
     </View>
   );
 }

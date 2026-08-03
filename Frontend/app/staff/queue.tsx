@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -24,6 +23,7 @@ import {
 } from '@/api/jobs';
 import { Job, JobStatus, PRINTERS } from '@/data/mockData';
 import { Colors, designTokens } from '@/theme';
+import KeyboardAwareScreen from '@/components/KeyboardAwareScreen';
 
 /**
  * Lab queue — grouped-by-status redesign.
@@ -400,7 +400,7 @@ export default function StaffQueue() {
         <View style={s.topSpacer} />
       </View>
 
-      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+      <KeyboardAwareScreen contentContainerStyle={s.content}>
         {actionError ? (
           <View style={s.errorBanner}>
             <Text style={s.errorBannerText}>{actionError}</Text>
@@ -434,7 +434,7 @@ export default function StaffQueue() {
             );
           })
         )}
-      </ScrollView>
+      </KeyboardAwareScreen>
     </SafeAreaView>
   );
 }

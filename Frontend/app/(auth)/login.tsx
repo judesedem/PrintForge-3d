@@ -3,16 +3,14 @@ import {
   ActivityIndicator,
   Image,
   ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from "react-native";
+import KeyboardAwareScreen from "../../src/components/KeyboardAwareScreen";
 import {
   ArrowRight,
   Box,
@@ -119,15 +117,7 @@ export default function LoginScreen() {
       >
         <View style={s.heroOverlay} />
         <SafeAreaView style={s.safeArea}>
-          <KeyboardAvoidingView
-            style={s.flex1}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-          >
-            <ScrollView
-              contentContainerStyle={s.scrollContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
+          <KeyboardAwareScreen contentContainerStyle={s.scrollContent}>
               <View style={s.brandSection}>
                 <View style={s.logoMark}>
                   <Box size={26} color="#FFFFFF" strokeWidth={2.2} />
@@ -241,8 +231,7 @@ export default function LoginScreen() {
                   <Text style={s.footerAction}> Sign up</Text>
                 </Pressable>
               </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
+          </KeyboardAwareScreen>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -261,7 +250,6 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(10, 24, 46, 0.21)",
   },
   safeArea: { flex: 1 },
-  flex1: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
     justifyContent: "center",

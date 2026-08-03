@@ -3,7 +3,6 @@ import {
   Alert,
   Image,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -36,6 +35,7 @@ import { createListing } from '@/api/marketplace';
 import { Colors, designTokens, makeControlStyles } from '@/theme';
 import Card from '@/components/Card';
 import MonoText from '@/components/MonoText';
+import { KEYBOARD_AVOIDING_BEHAVIOR } from '@/components/KeyboardAwareScreen';
 
 type PickedAsset = DocumentPicker.DocumentPickerAsset;
 type SubmitPhase = 'idle' | 'uploading' | 'creating';
@@ -160,7 +160,7 @@ export default function CreateListingScreen() {
     <SafeAreaView style={s.safeArea} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         style={s.keyboardView}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={KEYBOARD_AVOIDING_BEHAVIOR}
       >
         <View style={s.topBar}>
           <Pressable

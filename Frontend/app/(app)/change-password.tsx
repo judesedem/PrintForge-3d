@@ -1,10 +1,7 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -19,6 +16,7 @@ import { useSession } from "../../src/SessionContext";
 import { ApiError } from "../../src/api/client";
 import { changePassword } from "../../src/api/auth";
 import { Colors, designTokens } from "../../src/theme";
+import KeyboardAwareScreen from "../../src/components/KeyboardAwareScreen";
 
 /**
  * Change Password — Stack screen (no bottom nav), reached from Settings
@@ -99,15 +97,7 @@ export default function ChangePasswordScreen() {
         </View>
       </SafeAreaView>
 
-      <KeyboardAvoidingView
-        style={s.flex1}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
-        <ScrollView
-          contentContainerStyle={s.content}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        >
+      <KeyboardAwareScreen contentContainerStyle={s.content}>
           <View style={s.card}>
             {error ? (
               <View style={s.errorBanner}>
@@ -214,8 +204,7 @@ export default function ChangePasswordScreen() {
               )}
             </Pressable>
           </View>
-        </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardAwareScreen>
     </View>
   );
 }
@@ -223,7 +212,6 @@ export default function ChangePasswordScreen() {
 function makeStyles(colors: Colors) {
   return StyleSheet.create({
     screen: { flex: 1, backgroundColor: colors.background },
-    flex1: { flex: 1 },
     safeTop: { backgroundColor: colors.background },
     pressed: { opacity: 0.72 },
     topBar: {

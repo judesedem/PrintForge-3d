@@ -12,6 +12,10 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
     // Fetch all notifications for a specific user, newest first
     List<Notification> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+    // Fetch all notifications for a specific user, unordered — used when
+    // bulk-deleting a user's notifications (order doesn't matter there).
+    List<Notification> findByUserId(Long userId);
+
     // Fetch only unread notifications for a specific user
     List<Notification> findByUserIdAndIsReadFalseOrderByCreatedAtDesc(Long userId);
 

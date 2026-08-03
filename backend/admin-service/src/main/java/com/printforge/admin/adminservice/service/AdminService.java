@@ -261,11 +261,9 @@ public class AdminService {
         User user = new User();
         user.setFullName(request.getFull_name());
         user.setEmail(request.getEmail());
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setRole(com.printforge.admin.entity.Role.valueOf(request.getRole()));
         user.setSuspended(false);
-        user.setCreatedAt(LocalDateTime.now());
-        user.setUpdatedAt(LocalDateTime.now());
 
         User saved = userRepository.save(user);
         return UserDto.builder()

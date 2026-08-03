@@ -2,11 +2,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import {
   ActivityIndicator,
   ImageBackground,
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -17,6 +14,7 @@ import { useState } from "react";
 import { useToast } from "../../src/ToastContext";
 import { ApiError, apiFetch } from "../../src/api/client";
 import { designTokens } from "../../src/theme";
+import KeyboardAwareScreen from "../../src/components/KeyboardAwareScreen";
 
 const HERO_IMAGE =
   "https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=800";
@@ -90,15 +88,7 @@ export default function ResetPasswordScreen() {
             <ArrowLeft size={22} color="#FFFFFF" />
           </Pressable>
 
-          <KeyboardAvoidingView
-            style={s.flex1}
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-          >
-            <ScrollView
-              contentContainerStyle={s.scrollContent}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
-            >
+          <KeyboardAwareScreen contentContainerStyle={s.scrollContent}>
               <View style={s.card}>
                 <Text style={s.heading}>Set New Password</Text>
                 <Text style={s.subtitle}>
@@ -154,8 +144,7 @@ export default function ResetPasswordScreen() {
                   )}
                 </Pressable>
               </View>
-            </ScrollView>
-          </KeyboardAvoidingView>
+          </KeyboardAwareScreen>
         </SafeAreaView>
       </ImageBackground>
     </View>
@@ -174,7 +163,6 @@ const s = StyleSheet.create({
     backgroundColor: "rgba(10, 24, 46, 0.55)",
   },
   safeArea: { flex: 1 },
-  flex1: { flex: 1 },
   pressed: { opacity: 0.72 },
   backButton: {
     width: 40,
