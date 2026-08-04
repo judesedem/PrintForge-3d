@@ -1,16 +1,16 @@
 import {
   useFonts,
-  BarlowCondensed_400Regular,
-  BarlowCondensed_500Medium,
-  BarlowCondensed_700Bold,
+  Roboto_400Regular,
+  Roboto_500Medium,
+  Roboto_700Bold,
   // Not in the brand brief's closed list of 3 font strings, but loaded
   // anyway for the splash screen's italicized "IDEAS" — fontStyle:
   // 'italic' applied to a custom loaded font frequently fails to render
   // as italic on Android (the renderer needs the actual italic font
   // file), so this is the only reliable cross-platform way to satisfy
   // the brief's own "italic style" requirement for that one word.
-  BarlowCondensed_700Bold_Italic,
-} from '@expo-google-fonts/barlow-condensed';
+  Roboto_700Bold_Italic,
+} from '@expo-google-fonts/roboto';
 import { Stack } from 'expo-router';
 import { ThemeProvider, useTheme } from '../src/ThemeContext';
 import { SessionProvider } from '../src/SessionContext';
@@ -68,10 +68,10 @@ function RootStack() {
 
 export default function AppLayout() {
   const [fontsLoaded] = useFonts({
-    BarlowCondensed_400Regular,
-    BarlowCondensed_500Medium,
-    BarlowCondensed_700Bold,
-    BarlowCondensed_700Bold_Italic,
+    Roboto_400Regular,
+    Roboto_500Medium,
+    Roboto_700Bold,
+    Roboto_700Bold_Italic,
   });
 
   if (!fontsLoaded) {

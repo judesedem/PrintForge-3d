@@ -96,10 +96,33 @@ export function updateProfile(
 }
 
 /**
- * Maps to POST /api/users/upgrade-premium in marketplace-service.
+ * Maps to POST /api/users/upgrade-premium in marketplace-service. This is
+ * a genuinely separate feature from upgradeToDesigner() below — it only
+ * flips the `is_premium` flag (paid "Verified" designer tier, purchased
+ * via the Paystack flow in profile.tsx), and has nothing to do with the
+ * DESIGNER role. Do not use this for role upgrades.
  */
 export function upgradeToPremium(token: string): Promise<UserDto> {
   return apiFetch<UserDto>('/api/users/upgrade-premium', {
+    method: 'POST',
+    token,
+  });
+}
+
+/**
+ * Maps to POST /api/auth/upgrade-to-designer — the real STUDENT→DESIGNER
+ * role change (auth-service's AuthService.upgradeToDesigner()). Returns
+ * UserDto directly, not AuthResponse — this endpoint doesn't reissue a
+ * token, since JwtAuthFilter re-resolves the caller's role from the DB on
+ * every request rather than trusting a role claim baked into the JWT, so
+ * no re-login is needed for the new role to take effect. Idempotent on
+ * the backend: calling this again once already DESIGNER returns 200 with
+ * the same UserDto rather than an error. Throws (400, via ApiError) if
+ * the account isn't STUDENT or DESIGNER (e.g. LAB_STAFF/ADMIN), with a
+ * message naming the current role.
+ */
+export function upgradeToDesigner(token: string): Promise<UserDto> {
+  return apiFetch<UserDto>('/api/auth/upgrade-to-designer', {
     method: 'POST',
     token,
   });

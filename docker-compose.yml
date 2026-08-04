@@ -45,14 +45,29 @@ services:
       - NOTIFICATION_SERVICE_URL=http://notification-service:8087
       - ADMIN_SERVICE_URL=http://admin-service:8088
       - JWT_SECRET=${JWT_SECRET:-bXktc3VwZXItc2VjcmV0LWp3dC1rZXktZm9yLWxvY2FsLWRldi0xMjM0}
+      # Live role lookup (JwtAuthenticationFilter) — same pattern as
+      # auth-service below: DATASOURCE_* from the root .env when set
+      # (Neon), falling back to the local postgres container.
+      - DB_URL=${DATASOURCE_URL:-jdbc:postgresql://postgres:5432/printforge_db}
+      - DB_USERNAME=${DATASOURCE_USERNAME:-postgres}
+      - DB_PASSWORD=${DATASOURCE_PASSWORD:-admin}
     depends_on:
-      - auth-service
-      - printer-service
-      - order-service
-      - marketplace-service
-      - payment-service
-      - notification-service
-      - admin-service
+      postgres:
+        condition: service_healthy
+      auth-service:
+        condition: service_started
+      printer-service:
+        condition: service_started
+      order-service:
+        condition: service_started
+      marketplace-service:
+        condition: service_started
+      payment-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+      admin-service:
+        condition: service_started
 
   auth-service:
     build:

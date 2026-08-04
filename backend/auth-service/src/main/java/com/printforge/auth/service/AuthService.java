@@ -32,6 +32,7 @@ import com.printforge.auth.exception.InvalidRoleException;
 import com.printforge.auth.repository.PasswordResetTokenRepository;
 import com.printforge.auth.repository.UserRepository;
 import com.printforge.auth.security.JwtService;
+import com.printforge.auth.util.AvatarUrls;
 
 import com.printforge.auth.config.RabbitMQConfig;
 
@@ -62,11 +63,18 @@ public class AuthService {
 
         Role role = resolveRole(request.getRole());
 
+        // No client-suppliable profilePictureUrl on RegisterRequest by
+        // design (registration shouldn't accept an arbitrary URL from the
+        // client) — every new account gets a deterministic dicebear avatar
+        // instead, keyed by email since it's unique and immutable at
+        // signup, unlike fullName. Real changes only happen through
+        // PATCH /api/auth/profile.
         User user = User.builder()
                 .fullName(request.getFullName())
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(role)
+                .profilePictureUrl(AvatarUrls.dicebearInitials(request.getEmail()))
                 .build();
 
         User savedUser = userRepository.save(user);
@@ -125,6 +133,7 @@ public class AuthService {
                 .email(request.getEmail())
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(role)
+                .profilePictureUrl(AvatarUrls.dicebearInitials(request.getEmail()))
                 .build();
         User savedUser = userRepository.save(user);
         String token = jwtService.generateToken(savedUser.getEmail(), savedUser.getRole().name());

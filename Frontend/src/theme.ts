@@ -113,6 +113,12 @@ const dark = {
     { bg: 'rgba(255,106,0,0.15)', text: '#FF6A00' },
     { bg: 'rgba(239,68,68,0.15)', text: '#EF4444' },
   ),
+
+  // Same green as statusApproved/statusCompleted above — not a new color
+  // choice, just a semantic alias so profile.tsx's "Verified" badge and
+  // "LIVE" earnings tag don't need to reference a payment-status-named
+  // token to get the same green.
+  verified: { bg: 'rgba(34,197,94,0.15)', text: '#22C55E' },
 };
 
 const light = {
@@ -138,6 +144,8 @@ const light = {
     { bg: 'rgba(255,106,0,0.12)', text: '#E85D00' },
     { bg: 'rgba(239,68,68,0.12)', text: '#DC2626' },
   ),
+
+  verified: { bg: 'rgba(34,197,94,0.12)', text: '#16A34A' },
 };
 
 export const themes = { dark, light };
@@ -161,20 +169,23 @@ export const designTokens = {
     pill: 999,
   },
   type: {
-    // Barlow Condensed replaces Outfit entirely. The brand brief specifies
-    // exactly one bold weight "for all headings/labels" — display and
-    // heading previously used two different Outfit weights (700/600), but
-    // Barlow Condensed 700Bold now covers both roles.
-    display: 'BarlowCondensed_700Bold',
-    heading: 'BarlowCondensed_700Bold',
-    body: 'BarlowCondensed_400Regular',
-    medium: 'BarlowCondensed_500Medium',
-    // Barlow Condensed has no monospace variant, and the brief calls for
-    // removing @expo-google-fonts/jetbrains-mono entirely. MonoText.tsx
-    // (job IDs, tracking numbers) now renders in the medium weight instead
-    // of a true mono font — a visible but accepted regression, flagged in
-    // Handoff.md's Progress Log.
-    mono: 'BarlowCondensed_500Medium',
+    // Roboto replaces Barlow Condensed entirely (2026-08-04). Same 4-role
+    // shape as before — display/heading share one bold weight, body is
+    // the regular weight, medium sits between them — just a different
+    // family. Every screen already goes through these tokens rather than
+    // a hardcoded font string, so this one change cascades app-wide; the
+    // sole exception is app/index.tsx's splash-screen "IDEAS" word, which
+    // hardcodes 'Roboto_700Bold_Italic' directly (needs the real italic
+    // font file loaded, not fontStyle: 'italic' on a regular weight —
+    // same reason Barlow Condensed had its own italic import before).
+    display: 'Roboto_700Bold',
+    heading: 'Roboto_700Bold',
+    body: 'Roboto_400Regular',
+    medium: 'Roboto_500Medium',
+    // Roboto has no monospace variant either — same substitution as
+    // before (medium weight stands in for MonoText.tsx's job IDs/
+    // tracking numbers), not a new regression introduced by this switch.
+    mono: 'Roboto_500Medium',
   },
 } as const;
 

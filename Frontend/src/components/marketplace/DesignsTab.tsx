@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Dimensions,
+  FlatList,
   Image,
   Pressable,
   ScrollView,
@@ -40,11 +42,19 @@ export default function DesignsTab() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState<Category>('All');
   const [listings, setListings] = useState<MarketplaceListing[]>([]);
+  const [pageNumber, setPageNumber] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const s = makeStyles(colors);
 
-  const load = useCallback(async () => {
+  // Category is a real server-side filter (MarketplaceController's own
+  // ?category= param) — a different category is a different result set,
+  // not something to slice client-side out of one big fetch.
+  const backendCategory = category === 'All' ? undefined : category.toUpperCase();
+
+  const loadFirstPage = useCallback(async () => {
     if (!token) {
       setListings([]);
       setLoading(false);
@@ -53,26 +63,53 @@ export default function DesignsTab() {
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchListings(token);
-      setListings(data);
+      const page = await fetchListings(token, { page: 0, category: backendCategory });
+      setListings(page.listings);
+      setPageNumber(page.pageNumber);
+      setTotalPages(page.totalPages);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load the marketplace');
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, backendCategory]);
 
+  // Reacts to category (or token) changes while this screen stays
+  // focused — useFocusEffect below only fires on focus transitions, not
+  // on every dependency change while already focused, so a category pill
+  // tap needs its own effect to actually trigger the refetch.
+  useEffect(() => {
+    if (authLoading) return;
+    loadFirstPage();
+  }, [authLoading, loadFirstPage]);
+
+  // Refreshes the feed when returning to this tab (e.g. after publishing
+  // a new listing elsewhere) — same intent as the original single-effect
+  // version, just split out from the category-reactive effect above.
   useFocusEffect(
     useCallback(() => {
       if (authLoading) return;
-      if (!token) {
-        setListings([]);
-        setLoading(false);
-        return;
-      }
-      load();
-    }, [authLoading, token, load])
+      loadFirstPage();
+    }, [authLoading, loadFirstPage])
   );
+
+  const loadMore = useCallback(async () => {
+    if (!token || loading || loadingMore) return;
+    if (pageNumber + 1 >= totalPages) return;
+    setLoadingMore(true);
+    try {
+      const page = await fetchListings(token, { page: pageNumber + 1, category: backendCategory });
+      setListings(prev => [...prev, ...page.listings]);
+      setPageNumber(page.pageNumber);
+      setTotalPages(page.totalPages);
+    } catch {
+      // A failed "load more" shouldn't blow away what's already on
+      // screen — the user can scroll and trigger it again. The initial
+      // load has its own retry button for a hard failure; this doesn't.
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [token, loading, loadingMore, pageNumber, totalPages, backendCategory]);
 
   const gridData: GridItem[] = useMemo(() => {
     return listings.map(listing => ({
@@ -88,23 +125,16 @@ export default function DesignsTab() {
     }));
   }, [listings]);
 
-  const filtered = gridData.filter(item => {
-    const matchesSearch = item.name.toLowerCase().includes(search.trim().toLowerCase());
-    const matchesCategory = category === 'All' || (item.category && item.category.toUpperCase() === category.toUpperCase());
-    return matchesSearch && matchesCategory;
-  });
+  // Client-side only — the backend endpoint has no text-search param, so
+  // this filters whatever pages have been loaded so far, not the whole
+  // storefront. Unlike category, search intentionally does NOT trigger a
+  // refetch/reset.
+  const filtered = gridData.filter(item =>
+    item.name.toLowerCase().includes(search.trim().toLowerCase())
+  );
 
-  const rows = useMemo(() => {
-    const result: GridItem[][] = [];
-    for (let i = 0; i < filtered.length; i += 2) {
-      result.push(filtered.slice(i, i + 2));
-    }
-    return result;
-  }, [filtered]);
-
-  const renderCard = (item: GridItem) => (
+  const renderCard = ({ item }: { item: GridItem }) => (
     <Pressable
-      key={item.id}
       accessibilityRole={item.listingId ? 'button' : undefined}
       accessibilityLabel={item.listingId ? `Open ${item.name}` : `${item.name} (sample)`}
       disabled={!item.listingId}
@@ -196,18 +226,32 @@ export default function DesignsTab() {
           <Text style={s.stateText}>{error}</Text>
           <Pressable
             accessibilityRole="button"
-            onPress={load}
+            onPress={loadFirstPage}
             style={({ pressed }) => [s.retryButton, pressed && s.pressed]}
           >
             <Text style={s.retryText}>Try again</Text>
           </Pressable>
         </View>
       ) : (
-        <ScrollView keyboardShouldPersistTaps="handled"
+        <FlatList
+          data={filtered}
+          keyExtractor={item => item.id}
+          renderItem={renderCard}
+          numColumns={2}
+          columnWrapperStyle={s.gridRow}
           contentContainerStyle={s.gridContent}
           showsVerticalScrollIndicator={false}
-        >
-          {rows.length === 0 ? (
+          keyboardShouldPersistTaps="handled"
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={s.footerLoading}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
             <View style={s.emptyState}>
               <Text style={s.emptyTitle}>No matching designs</Text>
               <Text style={s.emptyBody}>Try another search.</Text>
@@ -219,16 +263,8 @@ export default function DesignsTab() {
                 <Text style={s.retryText}>Clear search</Text>
               </Pressable>
             </View>
-          ) : (
-            rows.map((row, rowIndex) => (
-              <View key={rowIndex} style={s.gridRow}>
-                {row.map(item => renderCard(item))}
-                {/* Fill empty slot if odd number of items */}
-                {row.length === 1 && <View style={s.gridCard} />}
-              </View>
-            ))
-          )}
-        </ScrollView>
+          }
+        />
       )}
     </View>
   );
@@ -289,11 +325,10 @@ function makeStyles(colors: Colors) {
       color: '#FFFFFF',
     },
     gridContent: {
+      paddingHorizontal: HORIZONTAL_PADDING,
       paddingBottom: 80,
     },
     gridRow: {
-      flexDirection: 'row',
-      paddingHorizontal: HORIZONTAL_PADDING,
       gap: GAP,
       marginBottom: GAP,
     },
@@ -387,6 +422,9 @@ function makeStyles(colors: Colors) {
     },
     pressed: {
       opacity: 0.7,
+    },
+    footerLoading: {
+      paddingVertical: 20,
     },
     emptyState: {
       alignItems: 'center',

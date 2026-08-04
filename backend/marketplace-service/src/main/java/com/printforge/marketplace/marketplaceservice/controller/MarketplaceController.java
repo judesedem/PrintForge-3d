@@ -383,6 +383,11 @@ public class MarketplaceController {
         if (thumbnail != null && !thumbnail.isEmpty()) {
             String thumbnailUrl = fileStorageService.store(thumbnail).url();
             listing.setThumbnailUrl(thumbnailUrl);
+        } else {
+            // No thumbnail uploaded — fall back to a category-based
+            // placeholder rather than leaving thumbnailUrl null (see
+            // DesignListing.placeholderThumbnailFor()'s comment for why).
+            listing.setThumbnailUrl(DesignListing.placeholderThumbnailFor(listing.getCategory()));
         }
 
         DesignListing saved = listingRepository.save(listing);

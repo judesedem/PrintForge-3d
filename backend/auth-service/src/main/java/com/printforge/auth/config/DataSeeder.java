@@ -3,6 +3,7 @@ package com.printforge.auth.config;
 import com.printforge.auth.entity.Role;
 import com.printforge.auth.entity.User;
 import com.printforge.auth.repository.UserRepository;
+import com.printforge.auth.util.AvatarUrls;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -35,6 +36,7 @@ public class DataSeeder implements CommandLineRunner {
             admin.setRole(Role.ADMIN);
             admin.setEmailVerified(true);
             admin.setEmailOptIn(false);
+            admin.setProfilePictureUrl(AvatarUrls.dicebearInitials("System Admin", "6366f1"));
             userRepository.save(admin);
             System.out.println("Seeded admin user: " + adminEmail);
         }
@@ -49,6 +51,7 @@ public class DataSeeder implements CommandLineRunner {
             staff.setRole(Role.LAB_STAFF);
             staff.setEmailVerified(true);
             staff.setEmailOptIn(false);
+            staff.setProfilePictureUrl(AvatarUrls.dicebearInitials("Lab Technician", "10b981"));
             userRepository.save(staff);
             System.out.println("Seeded staff user: " + staffEmail);
         }
@@ -63,6 +66,7 @@ public class DataSeeder implements CommandLineRunner {
             designer.setRole(Role.DESIGNER);
             designer.setEmailVerified(true);
             designer.setEmailOptIn(false);
+            designer.setProfilePictureUrl(AvatarUrls.dicebearInitials("Aero Designs", "f59e0b"));
             userRepository.save(designer);
             System.out.println("Seeded designer user: " + designerEmail);
         }

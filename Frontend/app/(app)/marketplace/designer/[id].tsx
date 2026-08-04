@@ -1,14 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, BadgeCheck, Grid3x3 } from 'lucide-react-native';
+import { ArrowLeft, BadgeCheck, Flag, Grid3x3 } from 'lucide-react-native';
 import { useTheme } from '@/ThemeContext';
+import { useSession } from '@/SessionContext';
+import { useToast } from '@/ToastContext';
+import { followUser, unfollowUser, getFollowStatus } from '@/api/users';
+import { ApiError } from '@/api/client';
+import ReportModal from '@/components/ReportModal';
 import { Colors, designTokens } from '@/theme';
 
+// Only the follow button below is wired to real data — everything else on
+// this screen (stats, bio, designs grid) is still static/mock, per this
+// screen's own known, separately-tracked "zero API calls" gap. Not
+// rebuilt here; the follow button is in scope because it's specifically
+// what this task covers.
 export default function DesignerProfileScreen() {
   const router = useRouter();
   const { colors } = useTheme();
+  const { token } = useSession();
+  const { showToast } = useToast();
   const params = useLocalSearchParams<{
     id?: string;
     name?: string;
@@ -20,8 +32,38 @@ export default function DesignerProfileScreen() {
   const name = typeof params.name === 'string' && params.name ? params.name : 'Designer';
   const avatar = typeof params.avatar === 'string' ? params.avatar : '';
   const verified = params.verified === 'true';
+  const designerId = Number(params.id);
+  const hasValidDesignerId = typeof params.id === 'string' && Number.isFinite(designerId);
 
   const [following, setFollowing] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+
+  useEffect(() => {
+    if (!token || !hasValidDesignerId) return;
+    getFollowStatus(token, designerId)
+      .then(status => setFollowing(status.isFollowing))
+      .catch(() => {
+        // Leave the button showing its default (unfollowed) state — same
+        // "don't block/blow up the screen over a status-check failure"
+        // reasoning as elsewhere in this app.
+      });
+  }, [token, hasValidDesignerId, designerId]);
+
+  const toggleFollow = async () => {
+    if (!token || !hasValidDesignerId) return;
+    const wasFollowing = following;
+    setFollowing(!wasFollowing);
+    try {
+      if (wasFollowing) {
+        await unfollowUser(token, designerId);
+      } else {
+        await followUser(token, designerId);
+      }
+    } catch (err) {
+      setFollowing(wasFollowing);
+      showToast(err instanceof ApiError ? err.message : 'Failed to update follow status');
+    }
+  };
 
   return (
     <SafeAreaView style={s.screen} edges={['top']}>
@@ -35,7 +77,14 @@ export default function DesignerProfileScreen() {
           <ArrowLeft size={20} color={colors.foreground} />
         </Pressable>
         <Text style={s.topBarTitle}>Profile</Text>
-        <View style={s.topSpacer} />
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Report this user"
+          onPress={() => setShowReportModal(true)}
+          style={({ pressed }) => [s.backButton, pressed && s.pressed]}
+        >
+          <Flag size={18} color={colors.mutedFg} />
+        </Pressable>
       </View>
 
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
@@ -72,7 +121,7 @@ export default function DesignerProfileScreen() {
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ selected: following }}
-          onPress={() => setFollowing(v => !v)}
+          onPress={toggleFollow}
           style={({ pressed }) => [
             s.followButton,
             following && s.followButtonFollowing,
@@ -95,6 +144,14 @@ export default function DesignerProfileScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        targetType="USER"
+        targetId={designerId}
+        colors={colors}
+      />
     </SafeAreaView>
   );
 }

@@ -3,10 +3,51 @@ package com.printforge.marketplace.marketplaceservice.model;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 @Entity
 @Table(name = "design_listings")
 public class DesignListing {
+
+    // Thumbnail upload is optional at creation time (see create.tsx on the
+    // frontend), but a permanently-null thumbnailUrl renders as a blank
+    // card (ImageWithFallback only swaps in its fallback icon on a load
+    // *error*, not on an empty uri). Rather than patch that at the display
+    // layer, MarketplaceController.createListing() calls
+    // placeholderThumbnailFor() below whenever no thumbnail file was
+    // uploaded, so thumbnailUrl is never left null for a *new* listing.
+    //
+    // One URL per category already used by MarketplaceSeeder (GEARS,
+    // DRONES, ENCLOSURES, MINIATURES, ARTICULATED, OTHER — the same set
+    // MarketplaceController.VALID_CATEGORIES enforces). Reuses seeder
+    // photo IDs that are already confirmed loading in production, with one
+    // exception: the seeder's own ARTICULATED photo
+    // (unsplash photo-1490655796793-0f1ff390f7a7) 404s — that's a
+    // pre-existing bug in MarketplaceSeeder.java, flagged in Handoff.md,
+    // not fixed here (seeder is out of scope for this change). A
+    // different, verified-working photo is used for ARTICULATED below
+    // instead of reusing the seeder's broken one.
+    private static final Map<String, String> CATEGORY_PLACEHOLDER_THUMBNAILS = Map.of(
+            "ENCLOSURES", "https://images.unsplash.com/photo-1545239351-1141bd82e8a6?auto=format&fit=crop&w=800&q=80",
+            "ARTICULATED", "https://images.pexels.com/photos/1670977/pexels-photo-1670977.jpeg?auto=compress&cs=tinysrgb&w=800",
+            "DRONES", "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&w=800&q=80",
+            "GEARS", "https://images.unsplash.com/photo-1512436991641-6745cdb1723f?auto=format&fit=crop&w=800&q=80",
+            "MINIATURES", "https://images.pexels.com/photos/3825572/pexels-photo-3825572.jpeg?auto=compress&cs=tinysrgb&w=800",
+            "OTHER", "https://images.unsplash.com/photo-1503602642458-232111445657?auto=format&fit=crop&w=800&q=80"
+    );
+
+    // Same image as the OTHER category — a listing with no category at all
+    // is treated the same as one explicitly marked OTHER for placeholder
+    // purposes. Category is validated/uppercased by
+    // MarketplaceController.validateCategory() before it ever reaches
+    // here, so no case-normalization is needed on the lookup key.
+    private static final String GENERIC_PLACEHOLDER_THUMBNAIL =
+            CATEGORY_PLACEHOLDER_THUMBNAILS.get("OTHER");
+
+    public static String placeholderThumbnailFor(String category) {
+        if (category == null) return GENERIC_PLACEHOLDER_THUMBNAIL;
+        return CATEGORY_PLACEHOLDER_THUMBNAILS.getOrDefault(category, GENERIC_PLACEHOLDER_THUMBNAIL);
+    }
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

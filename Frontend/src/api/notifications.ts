@@ -94,3 +94,18 @@ export function markAllAsRead(token: string): Promise<{ status: string }> {
   });
 }
 
+/**
+ * Maps to POST /api/notifications/push-token. Backend silently no-ops on a
+ * blank/missing pushToken rather than erroring (NotificationController's
+ * registerPushToken()) — this wrapper doesn't add its own validation on
+ * top, matching that same leniency rather than treating "no token yet" as
+ * an error case.
+ */
+export function registerPushToken(token: string, pushToken: string): Promise<{ status: string }> {
+  return apiFetch<{ status: string }>('/api/notifications/push-token', {
+    method: 'POST',
+    token,
+    body: { pushToken },
+  });
+}
+

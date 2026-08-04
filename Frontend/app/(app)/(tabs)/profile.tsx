@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -11,7 +11,6 @@ import {
   Easing,
   KeyboardAvoidingView,
   Modal,
-  Linking,
   TextInput,
   Alert,
 } from "react-native";
@@ -31,30 +30,34 @@ import {
   UploadCloud,
   DollarSign,
   Users,
-  Grid3x3,
   Briefcase,
+  Pencil,
+  UserRound,
+  FileText,
+  Trash2,
 } from "lucide-react-native";
 import * as DocumentPicker from "expo-document-picker";
 import { useRouter } from "expo-router";
 import { useSession } from "../../../src/SessionContext";
 import { useTheme } from "../../../src/ThemeContext";
-import { Colors } from "../../../src/theme";
+import { Colors, designTokens } from "../../../src/theme";
 import { useToast } from "../../../src/ToastContext";
 import { fetchMyPayments, Payment, initiatePayment, fetchPayment, fetchWallet, withdrawFunds, WalletInfo } from "../../../src/api/payments";
-import { fetchMyListings } from "../../../src/api/marketplace";
-import { fetchAcceptedRequests, deliverDesignRequest, DesignRequest } from "../../../src/api/design-requests";
+import { fetchMyListings, fetchFavorites, MarketplaceListing } from "../../../src/api/marketplace";
+import { fetchAcceptedRequests, fetchMyRequests, deliverDesignRequest, DesignRequest } from "../../../src/api/design-requests";
 import { uploadFile } from "../../../src/api/files";
-import { upgradeToPremium, deleteAccount } from "../../../src/api/auth";
+import { upgradeToDesigner, deleteAccount } from "../../../src/api/auth";
+import { ApiError } from "../../../src/api/client";
 import { fetchUserStats, UserStats } from "../../../src/api/users";
+import { fetchJobs } from "../../../src/api/jobs";
+import type { Job } from "../../../src/data/mockData";
+import StatusBadge from "../../../src/components/StatusBadge";
+import ImageWithFallback from "../../../src/components/ImageWithFallback";
+import MonoText from "../../../src/components/MonoText";
 
 // Following count has no backend model yet — always 0 until a follow API
 // exists.
 const FOLLOWING_COUNT = 0;
-
-type DesignThumb = {
-  id: string;
-  imageUrl: string;
-};
 
 function formatFollowerCount(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
@@ -71,37 +74,6 @@ function formatShortDate(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function orderDisplayName(payment: Payment): string {
-  if (payment.isPremiumUpgrade) {
-    return "Premium payment";
-  }
-  // Payment has no dedicated name field (src/api/payments.ts) — the
-  // closest identifier is the estimate it was paid against. Decoded in
-  // case it's ever a URI-encoded string; falls back to a friendly label.
-  const raw = payment.estimateId
-    ? `Estimate #${payment.estimateId}`
-    : "Print order";
-  try {
-    return decodeURIComponent(raw);
-  } catch {
-    return raw;
-  }
-}
-
-type BadgeVisual = { bg: string; text: string; label: string };
-
-function paymentStatusVisual(status: Payment["status"], colors: Colors): BadgeVisual {
-  switch (status) {
-    case "COMPLETED":
-      return { bg: colors.statusCompleted.bg, text: colors.statusCompleted.text, label: "Paid" };
-    case "FAILED":
-      return { bg: colors.statusFailed.bg, text: colors.statusFailed.text, label: "Payment Failed" };
-    case "PENDING":
-    default:
-      return { bg: colors.statusPrinting.bg, text: colors.statusPrinting.text, label: "Payment Pending" };
-  }
 }
 
 const BENEFITS = [
@@ -149,6 +121,9 @@ function DarkModeToggle({
     <TouchableOpacity
       activeOpacity={1}
       onPress={toggle}
+      accessibilityRole="switch"
+      accessibilityLabel="Dark mode"
+      accessibilityState={{ checked: isDark }}
       style={[
         styles.toggleTrack,
         { backgroundColor: isDark ? colors.primary : colors.border },
@@ -245,12 +220,20 @@ export default function ProfileScreen() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deletePassword, setDeletePassword] = useState("");
   const [deletingAccount, setDeletingAccount] = useState(false);
+
+  // Kept purely to check for an existing pending premium-upgrade payment
+  // (see the Upgrade to Premium button below) — no longer used to render
+  // "My Orders", which now comes from real job data instead (jobs.ts).
   const [payments, setPayments] = useState<Payment[]>([]);
-  const [paymentsLoading, setPaymentsLoading] = useState(true);
-  const [paymentsError, setPaymentsError] = useState<string | null>(null);
+
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [favorites, setFavorites] = useState<MarketplaceListing[]>([]);
+  const [myRequests, setMyRequests] = useState<DesignRequest[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [designerStats, setDesignerStats] = useState<UserStats | null>(null);
-  const [designs, setDesigns] = useState<DesignThumb[]>([]);
+  const [myListings, setMyListings] = useState<MarketplaceListing[]>([]);
   const [acceptedRequests, setAcceptedRequests] = useState<DesignRequest[]>([]);
   const [uploadingRequestId, setUploadingRequestId] = useState<string | null>(null);
 
@@ -272,51 +255,58 @@ export default function ProfileScreen() {
 
   const loadData = useCallback(async () => {
     if (!token) {
-      setPayments([]);
-      setPaymentsLoading(false);
+      setJobs([]);
+      setLoading(false);
       return;
     }
-    setPaymentsLoading(true);
-    setPaymentsError(null);
+    setLoading(true);
+    setLoadError(null);
     try {
-      const [paymentsData, listingsData, requestsData, walletData, statsData] = await Promise.all([
+      const [paymentsData, jobsData, favoritesData, myRequestsData, listingsData, requestsData, walletData, statsData] = await Promise.all([
         fetchMyPayments(token),
+        fetchJobs(token),
+        fetchFavorites(token),
+        !isDesigner ? fetchMyRequests(token) : Promise.resolve([]),
         isDesigner ? fetchMyListings(token) : Promise.resolve([]),
         isDesigner ? fetchAcceptedRequests(token) : Promise.resolve([]),
         isDesigner ? fetchWallet(token).catch(() => null) : Promise.resolve(null),
         isDesigner && appUser?.user_id ? fetchUserStats(token, appUser.user_id).catch(() => null) : Promise.resolve(null),
       ]);
-      
+
       setPayments(paymentsData);
+      setJobs(jobsData);
+      setFavorites(favoritesData);
+      setMyRequests(myRequestsData);
       setAcceptedRequests(requestsData);
       setWalletInfo(walletData);
-      
+
       if (isDesigner) {
         if (statsData) setDesignerStats(statsData);
-        setDesigns(
-          listingsData
-            .filter((l) => !!l.thumbnailUrl)
-            .map((l) => ({ id: l.id, imageUrl: l.thumbnailUrl }))
-        );
+        setMyListings(listingsData);
       }
     } catch (err) {
-      setPaymentsError(
+      setLoadError(
         err instanceof Error ? err.message : "Failed to load data",
       );
     } finally {
-      setPaymentsLoading(false);
+      setLoading(false);
     }
-  }, [token, isDesigner]);
+  }, [token, isDesigner, appUser?.user_id]);
 
   useEffect(() => {
     if (authLoading) return;
     if (!token) {
-      setPayments([]);
-      setPaymentsLoading(false);
+      setJobs([]);
+      setLoading(false);
       return;
     }
     loadData();
   }, [authLoading, token, loadData]);
+
+  const publishedDesigns = useMemo(
+    () => myListings.filter((l) => l.status === "PUBLISHED"),
+    [myListings]
+  );
 
   const name = appUser?.full_name ?? "PrintForge user";
 
@@ -332,6 +322,37 @@ export default function ProfileScreen() {
           onPress: async () => {
             await signOut();
             router.replace("/(auth)/login");
+          },
+        },
+      ]
+    );
+  };
+
+  // A role change is a one-way action a user might not expect to be
+  // instant/permanent — same lightweight Alert.alert confirm pattern as
+  // handleSignOut above, rather than the heavier password-confirmation
+  // Modal the delete-account flow uses (that one's justified by deleting
+  // data; this one isn't destructive enough to need re-entering a
+  // password).
+  const handleBecomeDesigner = () => {
+    Alert.alert(
+      "Become a Designer",
+      "This upgrades your account to a Designer, unlocking design uploads and the marketplace studio.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Upgrade",
+          onPress: async () => {
+            if (!token) return;
+            try {
+              const updated = await upgradeToDesigner(token);
+              updateUser(updated);
+              showToast("You're now a Designer! Welcome to the studio.");
+            } catch (err) {
+              showToast(
+                err instanceof ApiError ? err.message : "Failed to upgrade to designer",
+              );
+            }
           },
         },
       ]
@@ -383,7 +404,7 @@ export default function ProfileScreen() {
 
       const asset = result.assets[0];
       setUploadingRequestId(req.id);
-      
+
       showToast("Uploading file...");
       const fileRes = await uploadFile(token, {
         uri: asset.uri,
@@ -393,7 +414,7 @@ export default function ProfileScreen() {
 
       showToast("File uploaded, marking as delivered...");
       await deliverDesignRequest(token, req.id, fileRes.id);
-      
+
       showToast("Design successfully delivered!");
       loadData();
     } catch (error) {
@@ -415,171 +436,254 @@ export default function ProfileScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.profileHeader}>
-          <View style={styles.avatarRow}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarInitials}>{getInitial(name)}</Text>
-            </View>
-
-            {isDesigner ? (
-              <View style={styles.statsRow}>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>
-                    {designerStats?.designCount ?? 0}
-                  </Text>
-                  <Text style={styles.statLabel}>Designs</Text>
-                </View>
-                <View style={styles.statItem}>
-                  <Text style={styles.statValue}>
-                    {formatFollowerCount(designerStats?.followerCount ?? 0)}
-                  </Text>
-                  <Text style={styles.statLabel}>Followers</Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => router.push("/(app)/following")}
-                  style={styles.statItem}
-                >
-                  <Text style={styles.statValue}>{FOLLOWING_COUNT}</Text>
-                  <Text style={styles.statLabel}>Following</Text>
-                </TouchableOpacity>
-                <View style={styles.statItem}>
-                  <Text style={[styles.statValue, styles.statValueOrange]}>
-                    GH₵ {designerStats?.totalEarnings?.toFixed(2) ?? "0.00"}
-                  </Text>
-                  <Text style={styles.statLabel}>Earnings</Text>
-                </View>
-              </View>
-            ) : (
-              <TouchableOpacity
-                onPress={() => router.push("/(app)/following")}
-                style={styles.followingStat}
-              >
-                <Text style={styles.followingNumber}>{FOLLOWING_COUNT}</Text>
-                <Text style={styles.followingLabel}>Following</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center', alignSelf: 'center', marginTop: 16, marginBottom: 2 }}>
-            <Text style={[styles.displayName, { marginTop: 0, marginBottom: 0 }]}>{name}</Text>
-            {appUser?.is_premium && (
-              <View style={[styles.badge, { backgroundColor: 'rgba(34,197,94,0.15)', marginLeft: 8 }]}>
-                <Text style={[styles.badgeText, { color: '#22C55E' }]}>Verified</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.subtitle}>
-            {isDesigner ? "PrintForge designer" : "University print account"}
-          </Text>
-
-          {!appUser?.is_premium && isDesigner && (
-            <TouchableOpacity
-              style={[styles.editProfileBtn, { marginBottom: 12, backgroundColor: colors.primary, borderColor: colors.primary }]}
-              activeOpacity={0.7}
-              onPress={async () => {
-                if (token) {
-                  const openPaymentUrl = async (url: string, id: string) => {
-                    await WebBrowser.openBrowserAsync(url);
-                    try {
-                      // Fetching the payment auto-verifies it if pending
-                      await fetchPayment(token, id);
-                    } catch (e) {
-                      // ignore
-                    }
-                    // Refresh data after payment attempt
-                    loadData();
-                  };
-
-                  const existing = payments.find(p => p.isPremiumUpgrade && p.status === 'PENDING');
-                  if (existing && existing.checkoutUrl) {
-                    await openPaymentUrl(existing.checkoutUrl, existing.id);
-                    return;
-                  }
-                  try {
-                    showToast("Initiating secure payment...");
-                    const payment = await initiatePayment(token, { isPremiumUpgrade: true });
-                    if (payment.checkoutUrl) {
-                      await openPaymentUrl(payment.checkoutUrl, payment.id);
-                    }
-                  } catch (e: any) {
-                    showToast(e.message || "Failed to initiate payment");
-                  }
-                }
-              }}
-            >
-              <Text style={[styles.editProfileText, { color: colors.onPrimary }]}>Upgrade to Premium</Text>
-            </TouchableOpacity>
-          )}
-
+        {/* ── Identity ─────────────────────────────────────────────────── */}
+        <View style={styles.identity}>
           <TouchableOpacity
-            style={styles.editProfileBtn}
-            activeOpacity={0.7}
+            activeOpacity={0.8}
+            accessibilityRole="button"
+            accessibilityLabel="Edit profile picture"
             onPress={() => router.push("/(app)/edit-profile")}
+            style={styles.avatarWrap}
           >
-            <Text style={styles.editProfileText}>Edit Profile</Text>
+            {appUser?.profile_picture_url ? (
+              <Image source={{ uri: appUser.profile_picture_url }} style={styles.avatar} />
+            ) : (
+              <View style={styles.avatar}>
+                <Text style={styles.avatarInitials}>{getInitial(name)}</Text>
+              </View>
+            )}
+            <View style={styles.avatarEditBadge}>
+              <Pencil size={12} color={colors.onPrimary} strokeWidth={2.5} />
+            </View>
           </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.editProfileBtn, { marginTop: 12, backgroundColor: 'transparent', borderColor: colors.border }]}
-            activeOpacity={0.7}
-            onPress={() => router.push("/(app)/design-requests")}
-          >
-            <Text style={[styles.editProfileText, { color: colors.foreground }]}>My Design Requests</Text>
-          </TouchableOpacity>
+
+          <View style={styles.identityCopy}>
+            <View style={styles.nameLine}>
+              <Text style={styles.name}>{name}</Text>
+              {appUser?.is_premium && (
+                <View style={styles.verifiedPill}>
+                  <Text style={styles.verifiedDot}>✓</Text>
+                  <Text style={styles.verifiedText}>Verified</Text>
+                </View>
+              )}
+            </View>
+            {/* No bio/location field exists on User/UpdateProfileRequest —
+                flagged in Handoff.md rather than inventing one. This role
+                line is static descriptive copy, not user data. */}
+            <Text style={styles.role}>
+              {isDesigner ? "Designer" : "Student · Print account"}
+            </Text>
+          </View>
         </View>
 
-        <View style={styles.ordersSection}>
-          <View style={styles.ordersHeading}>
-            <ShoppingBag size={16} color={colors.primary} />
-            <Text style={styles.ordersHeadingText}>My Orders</Text>
-          </View>
-
-          {paymentsLoading ? (
-            <Text style={styles.orderMeta}>Loading orders...</Text>
-          ) : paymentsError ? (
-            <Text style={styles.orderMeta}>{paymentsError}</Text>
-          ) : payments.length === 0 ? (
-            <Text style={styles.orderMeta}>No orders yet</Text>
+        {/* ── Stats ────────────────────────────────────────────────────── */}
+        <View style={styles.statsRow}>
+          {isDesigner ? (
+            <>
+              <View style={styles.statItem}>
+                <MonoText style={styles.statValue}>{designerStats?.designCount ?? 0}</MonoText>
+                <Text style={styles.statLabel}>Designs</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="View followers"
+                onPress={() => router.push("/(app)/following")}
+                style={styles.statItem}
+              >
+                <MonoText style={styles.statValue}>{formatFollowerCount(designerStats?.followerCount ?? 0)}</MonoText>
+                <Text style={styles.statLabel}>Followers</Text>
+              </TouchableOpacity>
+              <View style={styles.statItem}>
+                <MonoText style={styles.statValue}>{formatFollowerCount(designerStats?.totalLikes ?? 0)}</MonoText>
+                <Text style={styles.statLabel}>Likes</Text>
+              </View>
+            </>
           ) : (
-            <View>
-              {payments.map((payment, idx) => {
-                const badge = paymentStatusVisual(payment.status, colors);
-                const isLast = idx === payments.length - 1;
-                return (
-                  <TouchableOpacity
-                    key={payment.id}
-                    style={[styles.orderRow, !isLast && styles.orderRowBorder]}
+            <>
+              <View style={styles.statItem}>
+                <MonoText style={styles.statValue}>{jobs.length}</MonoText>
+                <Text style={styles.statLabel}>Orders</Text>
+              </View>
+              <View style={styles.statItem}>
+                <MonoText style={styles.statValue}>{favorites.length}</MonoText>
+                <Text style={styles.statLabel}>Saved</Text>
+              </View>
+              <View style={styles.statItem}>
+                <MonoText style={styles.statValue}>{myRequests.length}</MonoText>
+                <Text style={styles.statLabel}>Requests</Text>
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* ── Primary actions ──────────────────────────────────────────── */}
+        <View style={styles.primaryActions}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Edit profile"
+            onPress={() => router.push("/(app)/edit-profile")}
+            style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
+          >
+            {isDesigner ? (
+              <Pencil color={colors.primary} size={16} />
+            ) : (
+              <UserRound color={colors.primary} size={16} />
+            )}
+            <Text style={styles.outlineText}>Edit Profile</Text>
+          </Pressable>
+
+          {!isDesigner && (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="My design requests"
+              onPress={() => router.push("/(app)/design-requests")}
+              style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
+            >
+              <FileText color={colors.primary} size={16} />
+              <Text style={styles.outlineText}>My Design Requests</Text>
+            </Pressable>
+          )}
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="My favorites"
+            // No dedicated favorites screen exists yet — flagged in
+            // Handoff.md as a gap, same treatment as Help & Support below
+            // rather than navigating somewhere that would 404.
+            onPress={() => showToast("Favorites view coming soon.")}
+            style={({ pressed }) => [styles.outlineButton, pressed && styles.pressed]}
+          >
+            <Star color={colors.primary} size={16} fill={colors.primary} />
+            <Text style={styles.outlineText}>My Favorites</Text>
+            <View style={styles.countBadge}>
+              <MonoText style={styles.countText}>{favorites.length}</MonoText>
+            </View>
+          </Pressable>
+        </View>
+
+        {isDesigner ? (
+          <>
+            {/* ── Studio ───────────────────────────────────────────────── */}
+            <View style={styles.studioHeading}>
+              <View>
+                <Text style={styles.kicker}>CREATOR SPACE</Text>
+                <Text style={styles.sectionTitleLg}>Studio</Text>
+              </View>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Manage designs"
+                // No design-management screen exists yet — flagged in
+                // Handoff.md as a gap rather than linking somewhere that
+                // would 404.
+                onPress={() => showToast("Design management coming soon.")}
+                style={({ pressed }) => [styles.manageButton, pressed && styles.pressed]}
+              >
+                <Text style={styles.manageText}>Manage</Text>
+                <ChevronRight color={colors.primary} size={15} />
+              </Pressable>
+            </View>
+
+            <View style={styles.earnings}>
+              <View style={styles.moneyIcon}>
+                <DollarSign color={colors.primary} size={20} />
+              </View>
+              <View style={styles.earningsCopy}>
+                <Text style={styles.earningsLabel}>Total earnings</Text>
+                <MonoText style={styles.earningsValue}>
+                  GH₵ {designerStats?.totalEarnings?.toFixed(2) ?? "0.00"}
+                </MonoText>
+              </View>
+              {/* Decorative only — there's no websocket/real-time push for
+                  earnings, this doesn't imply one. Kept as static UI per
+                  Handoff.md. */}
+              <Text style={styles.liveTag}>LIVE</Text>
+            </View>
+
+            <View style={styles.listingHeader}>
+              <Text style={styles.listingTitle}>Published designs</Text>
+              <MonoText style={styles.listingCount}>{publishedDesigns.length} live</MonoText>
+            </View>
+            {publishedDesigns.length === 0 ? (
+              <Text style={styles.emptyStudioText}>
+                {loading ? "Loading your designs…" : "No published designs yet."}
+              </Text>
+            ) : (
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.listings}
+              >
+                {publishedDesigns.map((listing) => (
+                  <Pressable
+                    key={listing.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${listing.title}`}
+                    onPress={() => router.push(`/(app)/marketplace/${listing.id}`)}
+                    style={({ pressed }) => [styles.card, pressed && styles.pressed]}
+                  >
+                    <ImageWithFallback source={{ uri: listing.thumbnailUrl }} style={styles.cardImage} />
+                    <View style={styles.cardCopy}>
+                      <Text style={styles.cardTitle} numberOfLines={1}>{listing.title}</Text>
+                      <MonoText style={styles.cardPrice}>
+                        {listing.price > 0 ? `GH₵ ${listing.price.toFixed(2)}` : "Free"}
+                      </MonoText>
+                    </View>
+                  </Pressable>
+                ))}
+              </ScrollView>
+            )}
+          </>
+        ) : (
+          <>
+            {/* ── My Orders (student) ──────────────────────────────────── */}
+            <View style={styles.sectionLabel}>
+              <FileText color={colors.primary} size={17} />
+              <Text style={styles.sectionTitle}>My Orders</Text>
+            </View>
+
+            {loading ? (
+              <Text style={styles.orderMeta}>Loading orders...</Text>
+            ) : loadError ? (
+              <Text style={styles.orderMeta}>{loadError}</Text>
+            ) : jobs.length === 0 ? (
+              <Text style={styles.orderMeta}>No orders yet</Text>
+            ) : (
+              <View style={styles.orderList}>
+                {jobs.map((job, idx) => (
+                  <Pressable
+                    key={job.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open order ${job.title}`}
+                    onPress={() => router.push(`/jobs/${job.id}`)}
+                    style={({ pressed }) => [
+                      styles.orderRow,
+                      idx !== jobs.length - 1 && styles.orderRowBorder,
+                      pressed && styles.pressed,
+                    ]}
                   >
                     <View style={styles.orderLeft}>
-                      <Text style={styles.orderName}>
-                        {orderDisplayName(payment)}
-                      </Text>
+                      <MonoText style={styles.orderTitle}>{job.title}</MonoText>
                       <Text style={styles.orderMeta}>
-                        {formatShortDate(payment.initiatedAt)} · GH₵{" "}
-                        {payment.amount.toFixed(2)}
+                        {formatShortDate(job.submittedAt)} · GH₵ {job.cost.toFixed(2)}
                       </Text>
                     </View>
-                    <View style={[styles.badge, { backgroundColor: badge.bg }]}>
-                      <Text style={[styles.badgeText, { color: badge.text }]}>
-                        {badge.label}
-                      </Text>
+                    <View style={styles.orderRight}>
+                      <StatusBadge status={job.status} />
+                      <ChevronRight color={colors.mutedFg} size={17} />
                     </View>
-                    <ChevronRight
-                      size={16}
-                      color={colors.mutedFg}
-                      style={styles.orderChevron}
-                    />
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
-        </View>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </>
+        )}
+
+        {/* ── Preserved existing sections (not covered by the mockups) ──── */}
 
         {isDesigner && (
           <>
             <View style={styles.divider} />
-            
+
             <View style={styles.ordersSection}>
               <View style={styles.ordersHeading}>
                 <Briefcase size={16} color={colors.primary} />
@@ -595,7 +699,7 @@ export default function ProfileScreen() {
                     return (
                       <View
                         key={req.id}
-                        style={[styles.orderRow, !isLast && styles.orderRowBorder]}
+                        style={[styles.legacyOrderRow, !isLast && styles.orderRowBorder]}
                       >
                         <View style={styles.orderLeft}>
                           <Text style={styles.orderName}>{req.title}</Text>
@@ -638,7 +742,7 @@ export default function ProfileScreen() {
               </View>
 
               {walletInfo ? (
-                <View style={styles.orderRow}>
+                <View style={styles.legacyOrderRow}>
                   <View style={styles.orderLeft}>
                     <Text style={styles.orderName}>Available Balance</Text>
                     <Text style={[styles.orderMeta, { fontSize: 16, color: colors.primary, fontWeight: '600', marginTop: 4 }]}>
@@ -646,33 +750,59 @@ export default function ProfileScreen() {
                     </Text>
                   </View>
                   <TouchableOpacity
-                    style={[styles.editProfileBtn, { backgroundColor: colors.primary, borderColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8 }]}
+                    style={[styles.legacyButton, { backgroundColor: colors.primary, borderColor: colors.primary, paddingHorizontal: 16, paddingVertical: 8 }]}
                     activeOpacity={0.7}
                     onPress={() => setShowWithdrawModal(true)}
                   >
-                    <Text style={[styles.editProfileText, { color: colors.onPrimary }]}>Withdraw</Text>
+                    <Text style={[styles.legacyButtonText, { color: colors.onPrimary }]}>Withdraw</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
                 <Text style={styles.orderMeta}>Loading wallet...</Text>
               )}
             </View>
-
-            <View style={styles.divider} />
-            <View style={styles.gridHeaderRow}>
-              <Grid3x3 size={16} color={colors.foreground} />
-              <Text style={styles.gridHeaderText}>My Designs</Text>
-            </View>
-            <View style={styles.grid}>
-              {designs.map((d) => (
-                <Image
-                  key={d.id}
-                  source={{ uri: d.imageUrl }}
-                  style={styles.gridImage}
-                />
-              ))}
-            </View>
           </>
+        )}
+
+        {isDesigner && !appUser?.is_premium && (
+          <View style={styles.premiumSection}>
+            <TouchableOpacity
+              style={[styles.legacyButton, { backgroundColor: colors.primary, borderColor: colors.primary }]}
+              activeOpacity={0.7}
+              onPress={async () => {
+                if (token) {
+                  const openPaymentUrl = async (url: string, id: string) => {
+                    await WebBrowser.openBrowserAsync(url);
+                    try {
+                      // Fetching the payment auto-verifies it if pending
+                      await fetchPayment(token, id);
+                    } catch (e) {
+                      // ignore
+                    }
+                    // Refresh data after payment attempt
+                    loadData();
+                  };
+
+                  const existing = payments.find(p => p.isPremiumUpgrade && p.status === 'PENDING');
+                  if (existing && existing.checkoutUrl) {
+                    await openPaymentUrl(existing.checkoutUrl, existing.id);
+                    return;
+                  }
+                  try {
+                    showToast("Initiating secure payment...");
+                    const payment = await initiatePayment(token, { isPremiumUpgrade: true });
+                    if (payment.checkoutUrl) {
+                      await openPaymentUrl(payment.checkoutUrl, payment.id);
+                    }
+                  } catch (e: any) {
+                    showToast(e.message || "Failed to initiate payment");
+                  }
+                }
+              }}
+            >
+              <Text style={[styles.legacyButtonText, { color: colors.onPrimary }]}>Upgrade to Premium</Text>
+            </TouchableOpacity>
+          </View>
         )}
 
         {role === "student" && (
@@ -687,9 +817,10 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        <View style={styles.settingsSection}>
-          <View style={styles.settingsDivider} />
+        {/* ── Settings ─────────────────────────────────────────────────── */}
+        <View style={styles.divider} />
 
+        <View style={styles.settingsSection}>
           <View style={styles.settingsRow}>
             <View style={styles.settingsRowLeft}>
               <Moon size={18} color={colors.mutedFg} />
@@ -734,7 +865,7 @@ export default function ProfileScreen() {
             onPress={() => setShowDeleteModal(true)}
           >
             <View style={styles.settingsRowLeft}>
-              <X size={18} color={colors.destructive} />
+              <Trash2 size={18} color={colors.destructive} />
               <Text style={[styles.settingsRowText, { color: colors.destructive }]}>Delete Account</Text>
             </View>
           </TouchableOpacity>
@@ -829,7 +960,7 @@ export default function ProfileScreen() {
             <Text style={[styles.modalSubtitle, { marginBottom: 16 }]}>
               Available to withdraw: GH₵ {(walletInfo?.walletBalance ?? 0).toFixed(2)}
             </Text>
-            
+
             <TextInput
               style={[styles.input, { marginBottom: 12 }]}
               placeholder="Amount (e.g. 50)"
@@ -838,7 +969,7 @@ export default function ProfileScreen() {
               value={withdrawAmount}
               onChangeText={setWithdrawAmount}
             />
-            
+
             <Pressable
               style={[styles.input, { marginBottom: 12, justifyContent: 'center' }]}
               onPress={() => setShowBankPicker(!showBankPicker)}
@@ -894,7 +1025,7 @@ export default function ProfileScreen() {
       <BecomeDesignerModal
         visible={showModal}
         onClose={() => setShowModal(false)}
-        onStartUploading={() => showToast("Designer upgrade coming soon")}
+        onStartUploading={handleBecomeDesigner}
         colors={colors}
         styles={styles}
       />
@@ -916,20 +1047,28 @@ const getStyles = (colors: Colors) => StyleSheet.create({
   },
   topBarTitle: {
     textAlign: "center",
-    fontSize: 16,
-    fontWeight: "800",
+    fontSize: 18,
+    fontFamily: designTokens.type.heading,
     color: colors.foreground,
   },
   scrollContent: {
+    paddingHorizontal: 20,
     paddingBottom: 96,
   },
-  profileHeader: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
+  pressed: {
+    opacity: 0.85,
   },
-  avatarRow: {
+
+  // ── Identity ──────────────────────────────────────────────────────────
+  identity: {
     flexDirection: "row",
     alignItems: "center",
+    gap: 16,
+    paddingTop: 16,
+  },
+  avatarWrap: {
+    width: 72,
+    height: 72,
   },
   avatar: {
     width: 72,
@@ -940,78 +1079,284 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     borderColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 16,
   },
   avatarInitials: {
     fontSize: 20,
-    fontWeight: "800",
+    fontFamily: designTokens.type.heading,
     color: colors.primary,
   },
-  followingStat: {},
-  followingNumber: {
-    fontSize: 24,
-    fontWeight: "800",
-    color: colors.foreground,
-    lineHeight: 28,
+  avatarEditBadge: {
+    position: "absolute",
+    right: -2,
+    bottom: -2,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: colors.primary,
+    borderWidth: 2,
+    borderColor: colors.background,
+    alignItems: "center",
+    justifyContent: "center",
   },
-  followingLabel: {
-    fontSize: 11,
-    color: colors.mutedFg,
-    marginTop: 4,
-  },
-  statsRow: {
+  identityCopy: {
     flex: 1,
+  },
+  nameLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
+  name: {
+    fontSize: 22,
+    fontFamily: designTokens.type.heading,
+    color: colors.foreground,
+  },
+  role: {
+    fontSize: 13,
+    color: colors.mutedFg,
+    marginTop: 5,
+  },
+  verifiedPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    backgroundColor: colors.verified.bg,
+    borderRadius: designTokens.radius.sm,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
+  },
+  verifiedDot: {
+    color: colors.verified.text,
+    fontSize: 11,
+    fontFamily: designTokens.type.heading,
+  },
+  verifiedText: {
+    color: colors.verified.text,
+    fontSize: 10,
+    fontFamily: designTokens.type.medium,
+  },
+
+  // ── Stats ─────────────────────────────────────────────────────────────
+  statsRow: {
     flexDirection: "row",
     justifyContent: "space-around",
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    marginTop: 18,
+    paddingVertical: 15,
   },
   statItem: {
     alignItems: "center",
   },
   statValue: {
-    fontSize: 16,
-    fontWeight: "800",
+    fontSize: 18,
     color: colors.foreground,
-  },
-  statValueOrange: {
-    color: colors.primary,
+    textAlign: "center",
   },
   statLabel: {
-    fontSize: 10,
-    fontWeight: "500",
+    fontSize: 11,
     color: colors.mutedFg,
-    marginTop: 2,
+    marginTop: 4,
+    textAlign: "center",
   },
-  displayName: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.foreground,
-    marginTop: 16,
-    marginBottom: 2,
+
+  // ── Primary actions ───────────────────────────────────────────────────
+  primaryActions: {
+    gap: 8,
+    marginTop: 20,
   },
-  subtitle: {
-    fontSize: 14,
-    color: colors.mutedFg,
-    marginBottom: 16,
-  },
-  editProfileBtn: {
-    alignSelf: "center",
-    width: "100%",
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "transparent",
+  outlineButton: {
+    minHeight: 45,
     borderWidth: 1,
     borderColor: colors.border,
+    borderRadius: designTokens.radius.sm,
+    paddingHorizontal: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  outlineText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: designTokens.type.medium,
+    color: colors.foreground,
+  },
+  countBadge: {
+    backgroundColor: colors.muted,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: designTokens.radius.sm,
+  },
+  countText: {
+    color: colors.primary,
+    fontSize: 11,
+  },
+
+  // ── Studio (designer) ─────────────────────────────────────────────────
+  studioHeading: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    marginTop: 30,
+    marginBottom: 12,
+  },
+  kicker: {
+    color: colors.primary,
+    fontSize: 10,
+    fontFamily: designTokens.type.heading,
+    letterSpacing: 1.5,
+  },
+  sectionTitleLg: {
+    fontSize: 20,
+    fontFamily: designTokens.type.heading,
+    color: colors.foreground,
+    marginTop: 3,
+  },
+  manageButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 3,
+  },
+  manageText: {
+    color: colors.primary,
+    fontSize: 12,
+    fontFamily: designTokens.type.medium,
+  },
+  earnings: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: designTokens.radius.sm,
+    padding: 15,
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  moneyIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: designTokens.radius.sm,
+    backgroundColor: colors.primarySoft,
     alignItems: "center",
     justifyContent: "center",
   },
-  editProfileText: {
-    fontSize: 14,
-    fontWeight: "700",
-    color: colors.foreground,
+  earningsCopy: {
+    marginLeft: 12,
+    flex: 1,
   },
+  earningsLabel: {
+    color: colors.mutedFg,
+    fontSize: 11,
+  },
+  earningsValue: {
+    color: colors.foreground,
+    fontSize: 19,
+    marginTop: 3,
+  },
+  liveTag: {
+    color: colors.verified.text,
+    fontSize: 10,
+    fontFamily: designTokens.type.heading,
+  },
+  listingHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    marginTop: 24,
+    marginBottom: 10,
+  },
+  listingTitle: {
+    color: colors.foreground,
+    fontSize: 14,
+    fontFamily: designTokens.type.medium,
+  },
+  listingCount: {
+    color: colors.mutedFg,
+    fontSize: 11,
+  },
+  emptyStudioText: {
+    color: colors.mutedFg,
+    fontSize: 13,
+  },
+  listings: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  card: {
+    width: 142,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: designTokens.radius.sm,
+    overflow: "hidden",
+    backgroundColor: colors.card,
+  },
+  cardImage: {
+    width: 142,
+    height: 104,
+    backgroundColor: colors.cardElevated,
+  },
+  cardCopy: {
+    padding: 10,
+  },
+  cardTitle: {
+    color: colors.foreground,
+    fontSize: 12,
+    fontFamily: designTokens.type.medium,
+  },
+  cardPrice: {
+    color: colors.primary,
+    fontSize: 11,
+    marginTop: 6,
+  },
+
+  // ── My Orders (student) ───────────────────────────────────────────────
+  sectionLabel: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    marginTop: 30,
+    marginBottom: 8,
+  },
+  sectionTitle: {
+    color: colors.foreground,
+    fontSize: 15,
+    fontFamily: designTokens.type.medium,
+  },
+  orderList: {
+    borderTopWidth: 1,
+    borderColor: colors.border,
+  },
+  orderRow: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  orderRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  orderLeft: {
+    flex: 1,
+  },
+  orderTitle: {
+    color: colors.foreground,
+    fontSize: 14,
+  },
+  orderMeta: {
+    fontSize: 11,
+    color: colors.mutedFg,
+    marginTop: 5,
+  },
+  orderRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+
+  // ── Preserved legacy sections (Accepted Requests / Wallet) ────────────
   ordersSection: {
     marginTop: 24,
-    paddingHorizontal: 20,
   },
   ordersHeading: {
     flexDirection: "row",
@@ -1024,27 +1369,15 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     color: colors.foreground,
     marginLeft: 8,
   },
-  orderRow: {
+  legacyOrderRow: {
     flexDirection: "row",
     alignItems: "center",
     paddingVertical: 14,
-  },
-  orderRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  orderLeft: {
-    flex: 1,
   },
   orderName: {
     fontSize: 14,
     fontWeight: "700",
     color: colors.foreground,
-  },
-  orderMeta: {
-    fontSize: 11,
-    color: colors.mutedFg,
-    marginTop: 2,
   },
   badge: {
     borderRadius: 9999,
@@ -1055,43 +1388,33 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
   },
-  orderChevron: {
-    marginLeft: 8,
+  legacyButton: {
+    alignSelf: "center",
+    width: "100%",
+    height: 40,
+    borderRadius: 12,
+    backgroundColor: "transparent",
+    borderWidth: 1,
+    borderColor: colors.border,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  legacyButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.foreground,
+  },
+  premiumSection: {
+    marginTop: 20,
   },
   divider: {
     borderTopWidth: 1,
     borderTopColor: colors.border,
     marginTop: 20,
     marginBottom: 12,
-    marginHorizontal: 20,
-  },
-  gridHeaderRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    marginBottom: 12,
-  },
-  gridHeaderText: {
-    fontSize: 12,
-    fontWeight: "700",
-    color: colors.foreground,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  grid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    paddingHorizontal: 4,
-  },
-  gridImage: {
-    width: "33.333%",
-    aspectRatio: 1,
-    marginBottom: 2,
   },
   designerSection: {
-    marginTop: 32,
-    paddingHorizontal: 20,
+    marginTop: 12,
   },
   designerBtn: {
     alignSelf: "center",
@@ -1114,14 +1437,10 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     fontWeight: "700",
     color: colors.onPrimary,
   },
+
+  // ── Settings ──────────────────────────────────────────────────────────
   settingsSection: {
-    marginTop: 24,
-    paddingHorizontal: 20,
-  },
-  settingsDivider: {
-    height: 1,
-    backgroundColor: colors.border,
-    marginBottom: 16,
+    marginTop: 4,
   },
   settingsRow: {
     flexDirection: "row",
@@ -1159,9 +1478,8 @@ const getStyles = (colors: Colors) => StyleSheet.create({
     marginTop: 24,
     marginBottom: 8,
   },
-  pressedScale: {
-    transform: [{ scale: 0.98 }],
-  },
+
+  // ── Modals (unchanged from the previous version) ──────────────────────
   modalKeyboardView: {
     flex: 1,
   },

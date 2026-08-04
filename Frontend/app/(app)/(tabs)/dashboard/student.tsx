@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useState, useEffect } from 'react';
+import { ActivityIndicator, FlatList, Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
-import { BadgeCheck, Bell, Download, Heart } from 'lucide-react-native';
+import { BadgeCheck, Bell, Heart, Star } from 'lucide-react-native';
 import { useTheme } from '@/ThemeContext';
+import { useToast } from '@/ToastContext';
 import { Colors, designTokens } from '@/theme';
 import NotificationsPanel from '@/components/NotificationsPanel';
+import { ApiError } from '@/api/client';
 
 /**
  * Home feed — Bolt redesign Pass 1 (replaces the old quick-actions/stats
@@ -21,14 +23,18 @@ import NotificationsPanel from '@/components/NotificationsPanel';
  * missing theme token.
  */
 
-import { fetchListings, MarketplaceListing } from '@/api/marketplace';
+import { fetchListings, addFavorite, removeFavorite, MarketplaceListing } from '@/api/marketplace';
+import { followUser, unfollowUser, getFollowStatus } from '@/api/users';
 import { useSession } from '@/SessionContext';
 
-// NOTE: FeedItem still has mock-like fields (designerName, avatar, likes, downloads) 
-// because those backend features don't exist yet, but we will populate the core 
-// data (image, designName) from real listings.
+// NOTE: FeedItem still has mock-like fields (avatar, likes) because those
+// backend features don't exist yet, but we will populate the core data
+// (image, designName) from real listings. isFavorited/followed are real —
+// backed by MarketplaceController's favorite endpoints and FollowController,
+// not mocked.
 type FeedItem = {
   id: string;
+  designerId: number;
   designerName: string;
   verified: boolean;
   followed: boolean;
@@ -36,9 +42,9 @@ type FeedItem = {
   avatar: string;
   designName: string;
   likes: number;
-  downloads: number;
   trending: boolean;
   liked: boolean;
+  isFavorited: boolean;
 };
 
 // The Bolt reference renders feed cards white-on-navy in both themes, so
@@ -54,43 +60,110 @@ export default function StudentDashboard() {
   const router = useRouter();
   const { colors } = useTheme();
   const { token, authLoading } = useSession();
+  const { showToast } = useToast();
   const s = makeStyles(colors);
 
   const [tab, setTab] = useState<FeedTab>('trending');
   const [notifOpen, setNotifOpen] = useState(false);
   const [feed, setFeed] = useState<FeedItem[]>([]);
+  const [pageNumber, setPageNumber] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
 
-  // Fetch live listings
-  useEffect(() => {
-    if (authLoading) return;
+  const toFeedItems = (listings: MarketplaceListing[], startIdx: number): FeedItem[] =>
+    listings.map((l, i) => ({
+      id: l.id,
+      designerId: l.designerId,
+      designerName: l.designerName || 'Unknown Designer',
+      verified: l.isPremiumDesigner || false,
+      // Placeholder — corrected below once real follow status resolves.
+      // Unlike isFavorited, the listing response doesn't embed per-designer
+      // follow status (favorites are per-listing, follows are per-user), so
+      // it needs its own lookup rather than riding along for free.
+      followed: false,
+      image: l.thumbnailUrl || 'https://via.placeholder.com/600',
+      avatar: l.designerAvatar || 'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
+      designName: l.title,
+      likes: l.totalOrders * 3 + 12, // Fake likes based on orders
+      trending: startIdx + i < 3,
+      liked: false,
+      isFavorited: l.isFavorited ?? false,
+    }));
+
+  // One lookup per distinct designer on the page (typically far fewer than
+  // one per listing, since a designer usually has multiple listings), not
+  // one per card — keeps this bounded rather than N+1.
+  const loadFollowStatuses = async (items: FeedItem[]) => {
+    if (!token) return;
+    const uniqueDesignerIds = [...new Set(items.map(i => i.designerId))];
+    const results = await Promise.all(
+      uniqueDesignerIds.map(id =>
+        getFollowStatus(token, id).catch(() => null)
+      )
+    );
+    const followingMap = new Map<number, boolean>();
+    uniqueDesignerIds.forEach((id, i) => {
+      const result = results[i];
+      if (result) followingMap.set(id, result.isFollowing);
+    });
+    setFeed(prev =>
+      prev.map(item =>
+        followingMap.has(item.designerId)
+          ? { ...item, followed: followingMap.get(item.designerId)! }
+          : item
+      )
+    );
+  };
+
+  // `tab` now drives a real ?sort= param (previously fetchListings() was
+  // called with no sort at all, so the Trending/Newest toggle only ever
+  // changed which of the first 3 already-fetched items got the "Popular"
+  // badge, not what was actually fetched). A tab change is a different
+  // result set from page 0, same as DesignsTab.tsx's category filter —
+  // not something to paginate onto what's already loaded.
+  const loadFirstPage = useCallback(() => {
     if (!token) {
+      setFeed([]);
       setLoading(false);
       return;
     }
     setLoading(true);
-    fetchListings(token)
-      .then((listings) => {
-        // Map live listings to FeedItem shape.
-        // We use placeholder designer info since no user endpoint exists yet.
-        const mappedFeed: FeedItem[] = listings.map((l, idx) => ({
-          id: l.id,
-          designerName: l.designerName || 'Unknown Designer',
-          verified: l.isPremiumDesigner || false,
-          followed: false,
-          image: l.thumbnailUrl || 'https://via.placeholder.com/600',
-          avatar: l.designerAvatar || 'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
-          designName: l.title,
-          likes: l.totalOrders * 3 + 12, // Fake likes based on orders
-          downloads: l.totalOrders,
-          trending: idx < 3,
-          liked: false,
-        }));
-        setFeed(mappedFeed);
+    fetchListings(token, { page: 0, sort: tab })
+      .then(page => {
+        const items = toFeedItems(page.listings, 0);
+        setFeed(items);
+        setPageNumber(page.pageNumber);
+        setTotalPages(page.totalPages);
+        loadFollowStatuses(items);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [authLoading, token]);
+  }, [token, tab]);
+
+  useEffect(() => {
+    if (authLoading) return;
+    loadFirstPage();
+  }, [authLoading, loadFirstPage]);
+
+  const loadMore = useCallback(() => {
+    if (!token || loading || loadingMore) return;
+    if (pageNumber + 1 >= totalPages) return;
+    setLoadingMore(true);
+    fetchListings(token, { page: pageNumber + 1, sort: tab })
+      .then(page => {
+        let newItems: FeedItem[] = [];
+        setFeed(prev => {
+          newItems = toFeedItems(page.listings, prev.length);
+          return [...prev, ...newItems];
+        });
+        setPageNumber(page.pageNumber);
+        setTotalPages(page.totalPages);
+        loadFollowStatuses(newItems);
+      })
+      .catch(console.error)
+      .finally(() => setLoadingMore(false));
+  }, [token, tab, loading, loadingMore, pageNumber, totalPages]);
 
   const toggleLike = (id: string) =>
     setFeed(prev =>
@@ -101,17 +174,70 @@ export default function StudentDashboard() {
       )
     );
 
-  const toggleFollow = (id: string) =>
+  // Keyed by designerId, not the card's listing id — a designer can have
+  // multiple listings in the feed, and following/unfollowing them should
+  // update every card from that designer at once, not just the one tapped.
+  // Same optimistic-update-with-rollback shape as toggleFavorite below.
+  const toggleFollow = async (designerId: number) => {
+    if (!token) return;
+    const wasFollowing = feed.find(item => item.designerId === designerId)?.followed ?? false;
+
     setFeed(prev =>
-      prev.map(item => (item.id === id ? { ...item, followed: !item.followed } : item))
+      prev.map(item =>
+        item.designerId === designerId ? { ...item, followed: !wasFollowing } : item
+      )
     );
+
+    try {
+      if (wasFollowing) {
+        await unfollowUser(token, designerId);
+      } else {
+        await followUser(token, designerId);
+      }
+    } catch (err) {
+      setFeed(prev =>
+        prev.map(item =>
+          item.designerId === designerId ? { ...item, followed: wasFollowing } : item
+        )
+      );
+      showToast(err instanceof ApiError ? err.message : 'Failed to update follow status');
+    }
+  };
+
+  // Optimistic update with rollback on failure — same shape as
+  // toggleLike/toggleFollow above, but backed by the real favorite
+  // endpoints instead of local-only mock state.
+  const toggleFavorite = async (id: string) => {
+    if (!token) return;
+    const wasFavorited = feed.find(item => item.id === id)?.isFavorited ?? false;
+
+    setFeed(prev =>
+      prev.map(item => (item.id === id ? { ...item, isFavorited: !wasFavorited } : item))
+    );
+
+    try {
+      if (wasFavorited) {
+        await removeFavorite(token, id);
+      } else {
+        await addFavorite(token, id);
+      }
+    } catch (err) {
+      setFeed(prev =>
+        prev.map(item => (item.id === id ? { ...item, isFavorited: wasFavorited } : item))
+      );
+      showToast(err instanceof ApiError ? err.message : 'Failed to update favorite');
+    }
+  };
 
   const renderCard = ({ item }: { item: FeedItem }) => (
     <View style={s.card}>
       <View style={s.cardHeader}>
         {/* Avatar + name open the designer's public profile (Pass 2) —
             display fields ride along as params since there's no designer
-            endpoint to fetch them from yet. */}
+            endpoint to fetch them from yet. Fixed to pass the real
+            designerId here — this previously passed the listing's own
+            id, which happened to work as a route param but pointed the
+            profile screen at the wrong id entirely. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`View ${item.designerName}'s profile`}
@@ -119,7 +245,7 @@ export default function StudentDashboard() {
             router.push({
               pathname: '/(app)/marketplace/designer/[id]',
               params: {
-                id: item.id,
+                id: String(item.designerId),
                 name: item.designerName,
                 avatar: item.avatar,
                 verified: String(item.verified),
@@ -141,7 +267,7 @@ export default function StudentDashboard() {
           accessibilityLabel={
             item.followed ? `Unfollow ${item.designerName}` : `Follow ${item.designerName}`
           }
-          onPress={() => toggleFollow(item.id)}
+          onPress={() => toggleFollow(item.designerId)}
           style={({ pressed }) => [
             s.followButton,
             item.followed && s.followButtonFollowing,
@@ -180,10 +306,18 @@ export default function StudentDashboard() {
           />
           <Text style={s.actionCount}>{item.likes.toLocaleString()}</Text>
         </Pressable>
-        <View style={s.actionGroup}>
-          <Download size={20} color={CARD_MUTED} />
-          <Text style={s.actionCount}>{item.downloads.toLocaleString()}</Text>
-        </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={item.isFavorited ? 'Unfavorite design' : 'Favorite design'}
+          onPress={() => toggleFavorite(item.id)}
+          style={({ pressed }) => [s.actionGroup, pressed && s.pressed]}
+        >
+          <Star
+            size={20}
+            color={item.isFavorited ? colors.primary : CARD_MUTED}
+            fill={item.isFavorited ? colors.primary : 'transparent'}
+          />
+        </Pressable>
       </View>
 
       <Text style={s.designName}>{item.designName}</Text>
@@ -242,6 +376,15 @@ export default function StudentDashboard() {
           renderItem={renderCard}
           contentContainerStyle={s.feedContent}
           showsVerticalScrollIndicator={false}
+          onEndReached={loadMore}
+          onEndReachedThreshold={0.5}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={s.footerLoading}>
+                <ActivityIndicator color={colors.primary} />
+              </View>
+            ) : null
+          }
         />
       )}
 
@@ -320,6 +463,9 @@ function makeStyles(colors: Colors) {
       paddingTop: 2,
       // Clears the floating Upload circle that overlaps the pager bottom.
       paddingBottom: 48,
+    },
+    footerLoading: {
+      paddingVertical: 20,
     },
     pressed: {
       opacity: 0.7,
