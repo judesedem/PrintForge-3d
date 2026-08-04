@@ -103,6 +103,56 @@ export async function uploadFile(
   return toModelFile(data as ModelFileApiResponse);
 }
 
+// Mirrors fileservice/dto/ImageUploadResponse.java's JSON output — a
+// deliberately narrower shape than ModelFileApiResponse above (no
+// fileName/fileType/fileSizeBytes/userId/storedFilename), returned only by
+// POST /api/files/upload/image.
+export type ImageUploadApiResponse = {
+  id: number;
+  url: string;
+  publicId: string;
+  createdAt: string | null;
+};
+
+/**
+ * Maps to POST /api/files/upload/image. Same multipart "file" part and XHR
+ * approach as uploadFile() above (React Native fetch doesn't handle the
+ * { uri, name, type } FormData part reliably here) — do NOT reuse
+ * uploadFile() for images, it hits the wrong endpoint (/api/files/upload,
+ * which accepts any file type and returns the full ModelFile shape, not
+ * the narrower image-only response this endpoint gives back).
+ */
+export async function uploadImage(
+  token: string,
+  asset: { uri: string; name: string; mimeType?: string | null }
+): Promise<{ id: string; url: string }> {
+  const form = new FormData();
+  form.append('file', {
+    uri: asset.uri,
+    name: asset.name || 'upload.jpg',
+    type: asset.mimeType ?? 'image/jpeg',
+  } as any);
+
+  const url = `${process.env.EXPO_PUBLIC_API_URL}/api/files/upload/image`;
+
+  let response: Response;
+  try {
+    response = await uploadFileXHR(url, token, form);
+  } catch {
+    throw new ApiError(0, 'Could not reach the server. Check your connection and API URL.');
+  }
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : undefined;
+  if (!response.ok) {
+    const message =
+      (data as { message?: string } | undefined)?.message ?? `Request failed (${response.status})`;
+    throw new ApiError(response.status, message);
+  }
+  const res = data as ImageUploadApiResponse;
+  return { id: String(res.id), url: res.url };
+}
+
 /** Maps to GET /api/files/{id}. Caller must be the uploader or staff (403 otherwise). */
 export async function fetchFile(token: string, id: string): Promise<ModelFile> {
   const data = await apiFetch<ModelFileApiResponse>(`/api/files/${id}`, { token });

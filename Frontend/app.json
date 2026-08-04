@@ -34,8 +34,16 @@
       "expo-router",
       "expo-font",
       "expo-web-browser",
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-splash-screen"
     ],
-    "userInterfaceStyle": "automatic"
+    "userInterfaceStyle": "automatic",
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "fc6eb6cd-4974-4293-9b44-889bc2459f0c"
+      }
+    },
+    "owner": "judesedem"
   }
 }

@@ -113,6 +113,12 @@ const dark = {
     { bg: 'rgba(255,106,0,0.15)', text: '#FF6A00' },
     { bg: 'rgba(239,68,68,0.15)', text: '#EF4444' },
   ),
+
+  // Same green as statusApproved/statusCompleted above — not a new color
+  // choice, just a semantic alias so profile.tsx's "Verified" badge and
+  // "LIVE" earnings tag don't need to reference a payment-status-named
+  // token to get the same green.
+  verified: { bg: 'rgba(34,197,94,0.15)', text: '#22C55E' },
 };
 
 const light = {
@@ -138,6 +144,8 @@ const light = {
     { bg: 'rgba(255,106,0,0.12)', text: '#E85D00' },
     { bg: 'rgba(239,68,68,0.12)', text: '#DC2626' },
   ),
+
+  verified: { bg: 'rgba(34,197,94,0.12)', text: '#16A34A' },
 };
 
 export const themes = { dark, light };

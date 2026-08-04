@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -9,14 +10,21 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
-import { ArrowLeft, User, Mail, TriangleAlert } from "lucide-react-native";
+import * as DocumentPicker from "expo-document-picker";
+import { ArrowLeft, Camera, User, Mail, TriangleAlert } from "lucide-react-native";
 import { useTheme } from "../../src/ThemeContext";
 import { useToast } from "../../src/ToastContext";
 import { useSession } from "../../src/SessionContext";
 import { ApiError } from "../../src/api/client";
 import { updateProfile } from "../../src/api/auth";
+import { uploadImage } from "../../src/api/files";
 import { Colors, designTokens } from "../../src/theme";
 import KeyboardAwareScreen from "../../src/components/KeyboardAwareScreen";
+
+function getInitial(fullName: string): string {
+  const trimmed = fullName.trim();
+  return trimmed.length > 0 ? trimmed[0].toUpperCase() : "?";
+}
 
 export default function EditProfileScreen() {
   const router = useRouter();
@@ -29,6 +37,7 @@ export default function EditProfileScreen() {
   const [email, setEmail] = useState(appUser?.email || "");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
 
   useEffect(() => {
     if (appUser) {
@@ -36,6 +45,39 @@ export default function EditProfileScreen() {
       setEmail(appUser.email);
     }
   }, [appUser]);
+
+  // Its own immediate action, separate from handleSubmit's Save button —
+  // picking a new photo shouldn't require also touching name/email to
+  // persist.
+  const handlePickAvatar = async () => {
+    if (!token || avatarUploading) return;
+
+    const result = await DocumentPicker.getDocumentAsync({
+      type: "image/*",
+      copyToCacheDirectory: true,
+      multiple: false,
+    });
+    if (result.canceled || !result.assets[0]) return;
+
+    const asset = result.assets[0];
+    setAvatarUploading(true);
+    try {
+      const uploaded = await uploadImage(token, {
+        uri: asset.uri,
+        name: asset.name,
+        mimeType: asset.mimeType,
+      });
+      const response = await updateProfile(token, { profilePictureUrl: uploaded.url });
+      updateUser(response.user);
+      showToast("Profile picture updated");
+    } catch (err) {
+      showToast(
+        err instanceof ApiError ? err.message : "Failed to update profile picture",
+      );
+    } finally {
+      setAvatarUploading(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!fullName.trim()) {
@@ -94,6 +136,31 @@ export default function EditProfileScreen() {
                 <Text style={s.errorText}>{error}</Text>
               </View>
             ) : null}
+
+            <View style={s.avatarSection}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Change profile picture"
+                onPress={handlePickAvatar}
+                disabled={avatarUploading}
+                style={({ pressed }) => [s.avatarWrap, pressed && s.pressed]}
+              >
+                {appUser?.profile_picture_url ? (
+                  <Image source={{ uri: appUser.profile_picture_url }} style={s.avatarImage} />
+                ) : (
+                  <View style={s.avatarFallback}>
+                    <Text style={s.avatarFallbackText}>{getInitial(fullName)}</Text>
+                  </View>
+                )}
+                <View style={s.avatarBadge}>
+                  {avatarUploading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Camera size={14} color="#FFFFFF" strokeWidth={2.2} />
+                  )}
+                </View>
+              </Pressable>
+            </View>
 
             <Text style={s.fieldLabel}>FULL NAME</Text>
             <View style={s.inputShell}>
@@ -182,6 +249,49 @@ function makeStyles(colors: Colors) {
       borderRadius: designTokens.radius.lg,
       backgroundColor: colors.card,
       padding: designTokens.spacing.lg,
+    },
+    avatarSection: {
+      alignItems: "center",
+      marginBottom: designTokens.spacing.lg,
+    },
+    avatarWrap: {
+      width: 88,
+      height: 88,
+    },
+    avatarImage: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      borderWidth: 2,
+      borderColor: colors.primary,
+    },
+    avatarFallback: {
+      width: 88,
+      height: 88,
+      borderRadius: 44,
+      backgroundColor: colors.card,
+      borderWidth: 2,
+      borderColor: colors.primary,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    avatarFallbackText: {
+      fontFamily: designTokens.type.heading,
+      fontSize: 26,
+      color: colors.primary,
+    },
+    avatarBadge: {
+      position: "absolute",
+      right: -2,
+      bottom: -2,
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      backgroundColor: colors.primary,
+      borderWidth: 2,
+      borderColor: colors.background,
+      alignItems: "center",
+      justifyContent: "center",
     },
     errorBanner: {
       flexDirection: "row",

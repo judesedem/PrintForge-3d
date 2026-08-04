@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, ApiError } from './client';
 
 // Mirrors marketplaceservice/model/DesignListing.java's JSON output exactly.
 // Same situation as notifications.ts: no DTO layer — MarketplaceController
@@ -21,6 +21,7 @@ export type DesignListingApiResponse = {
   totalOrders: number;
   totalEarnings: number;
   category?: string;
+  isFavorited?: boolean;
 };
 
 /**
@@ -48,6 +49,7 @@ export type MarketplaceListing = {
   designerAvatar?: string;
   isPremiumDesigner?: boolean;
   category?: string;
+  isFavorited?: boolean;
 };
 
 export function toListing(res: DesignListingApiResponse): MarketplaceListing {
@@ -66,13 +68,60 @@ export function toListing(res: DesignListingApiResponse): MarketplaceListing {
     designerAvatar: res.designerAvatar,
     isPremiumDesigner: res.isPremiumDesigner,
     category: res.category,
+    isFavorited: res.isFavorited,
   };
 }
 
-/** Maps to GET /api/marketplace — public storefront, PUBLISHED listings only. */
-export async function fetchListings(token: string): Promise<MarketplaceListing[]> {
-  const data = await apiFetch<{ content: DesignListingApiResponse[] }>('/api/marketplace', { token });
-  return data.content.map(toListing);
+// Spring's Pageable binding — plain "page"/"size" query params, no custom
+// resolver configured (see MarketplaceController.clampPageSize()'s own
+// comment). MAX_PAGE_SIZE server-side is 50; requesting that directly
+// instead of relying on the 20-item default halves the number of pages a
+// caller has to page through for a storefront this size.
+const LISTINGS_PAGE_SIZE = 50;
+
+// Mirrors Spring Data's Page<DesignListing> JSON shape — only the fields
+// callers actually need to drive "load more" UI (pageable/sort/first/
+// numberOfElements/empty from the raw response are dropped).
+export type ListingsPage = {
+  listings: MarketplaceListing[];
+  pageNumber: number;
+  totalPages: number;
+  totalElements: number;
+};
+
+/**
+ * Maps to GET /api/marketplace — public storefront, PUBLISHED listings
+ * only. The endpoint is genuinely paginated (confirmed via a direct curl:
+ * an unparameterized call returns exactly 20 items even when 103 are
+ * published — see the 2026-08-04 Handoff.md entry on the blank-thumbnail
+ * bug this surfaced). Returns the full page envelope, not a flattened
+ * array, so callers can implement real incremental loading (fetch page 0,
+ * then more pages as the user scrolls) instead of guessing when to stop —
+ * `pageNumber + 1 >= totalPages` is the stop condition every caller below
+ * uses.
+ */
+export async function fetchListings(
+  token: string,
+  options: { page?: number; category?: string; sort?: 'newest' | 'trending' } = {}
+): Promise<ListingsPage> {
+  const { page = 0, category, sort } = options;
+  const params = new URLSearchParams({ page: String(page), size: String(LISTINGS_PAGE_SIZE) });
+  if (category) params.set('category', category);
+  if (sort) params.set('sort', sort);
+
+  const data = await apiFetch<{
+    content: DesignListingApiResponse[];
+    number: number;
+    totalPages: number;
+    totalElements: number;
+  }>(`/api/marketplace?${params.toString()}`, { token });
+
+  return {
+    listings: data.content.map(toListing),
+    pageNumber: data.number,
+    totalPages: data.totalPages,
+    totalElements: data.totalElements,
+  };
 }
 
 // Mirrors estimateservice/model/Estimate.java's JSON output — same no-DTO
@@ -154,6 +203,18 @@ export async function fetchMyListings(token: string): Promise<MarketplaceListing
   return data.map(toListing);
 }
 
+/**
+ * Maps to GET /api/marketplace/favorites — the caller's own favorited
+ * listings. Same shape as fetchMyListings(): a flat, unpaginated
+ * List<DesignListing> on the backend (a user's favorite count is
+ * naturally bounded, unlike the full storefront), so no page/size params
+ * here either.
+ */
+export async function fetchFavorites(token: string): Promise<MarketplaceListing[]> {
+  const data = await apiFetch<DesignListingApiResponse[]>('/api/marketplace/favorites', { token });
+  return data.map(toListing);
+}
+
 // NOTE: there is no GET /api/marketplace/my-earnings endpoint on the
 // backend (checked MarketplaceController.java directly) — Handoff.md's
 // Phase 2 table listed one, but it doesn't exist. DesignListing already
@@ -218,4 +279,35 @@ export async function unpublishListing(token: string, id: string): Promise<Marke
     token,
   });
   return toListing(data);
+}
+
+/**
+ * Maps to POST /api/marketplace/{id}/favorite. A 409 means the backend's
+ * own AlreadyFavoritedException fired — on mobile a double-tap can race two
+ * of these in flight, so that specific case is swallowed as a no-op rather
+ * than surfacing an error toast for something that isn't actually wrong
+ * (the listing ends up favorited either way).
+ */
+export async function addFavorite(token: string, id: string): Promise<void> {
+  try {
+    await apiFetch<void>(`/api/marketplace/${id}/favorite`, { method: 'POST', token });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409) return;
+    throw err;
+  }
+}
+
+/**
+ * Maps to DELETE /api/marketplace/{id}/favorite. Mirrors addFavorite's
+ * race handling — a 404 here means the backend's FavoriteNotFoundException
+ * fired (already unfavorited by a raced request), which is a no-op, not a
+ * real error.
+ */
+export async function removeFavorite(token: string, id: string): Promise<void> {
+  try {
+    await apiFetch<void>(`/api/marketplace/${id}/favorite`, { method: 'DELETE', token });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return;
+    throw err;
+  }
 }

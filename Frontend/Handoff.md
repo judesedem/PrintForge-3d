@@ -5269,4 +5269,628 @@ threads `listingId` through),
 `lockedBasePrice`, unused `DesignListing` import removed),
 `paymentservice/service/PaymentServiceTest.java` (2 new tests).
 
+## 2026-08-04 — Four small features: thumbnail placeholders, unique avatars, profile picture upload, favorite button
+
+**Important discovery, unrelated to the four fixes below but found while
+verifying them**: `backend/*/src/test/` is now **empty across all eight
+services** (`find ... -iname "*.java"` returns zero files everywhere,
+checked directly). `git status` shows no deletions for any test file —
+meaning `src/test/` was never git-tracked in the first place. Every test
+class this file's own history describes across many prior sessions
+(`AuthServiceTest`, `MarketplaceControllerTest`, `PaymentServiceTest`,
+`EstimateServiceTest`, the 159-tests-run count from the 2026-07-20 entry
+above, etc.) existed only as uncommitted local files and is now gone,
+unrecoverable through git since it was never committed. Root cause not
+established (not this session's doing — no test files were touched or
+removed by the work below, and `node_modules/` on the frontend side was
+separately found fully empty at the start of this session too, so
+something is clearing untracked/generated-looking directories between
+sessions on this machine — worth investigating, but out of scope to chase
+down here). **Flagging for a decision**: either start committing test
+files (breaking from the established "don't commit" pattern for at least
+`src/test/`), or accept that test coverage doesn't persist across
+sessions on this machine and budget time to rewrite it each time
+significant verification is needed. Backend changes below were verified
+by clean `mvn compile`/`mvn test` (no test sources found, so `test` phase
+is a no-op) rather than an actual test run — no equivalent safety net
+existed to catch regressions here.
+
+### 1 — Category-based placeholder thumbnails
+
+`DesignListing.placeholderThumbnailFor(category)` (static helper, new)
+returns a deterministic thumbnail URL per category, matching
+`MarketplaceController.VALID_CATEGORIES` (GEARS, DRONES, ENCLOSURES,
+MINIATURES, ARTICULATED, OTHER) — null/unrecognized category falls back
+to the same image as OTHER. `MarketplaceController.createListing()` now
+calls it in an `else` branch alongside the existing `if (thumbnail !=
+null && !thumbnail.isEmpty())` upload branch, so a new listing's
+`thumbnailUrl` is never left null.
+
+Chose to reuse `MarketplaceSeeder.java`'s own already-proven-working
+photo URLs per category rather than picking new unverified ones — all
+candidates spot-checked with `curl -o /dev/null -w "%{http_code}"` before
+use. One exception: the seeder's own ARTICULATED photo
+(`unsplash photo-1490655796793-0f1ff390f7a7`) 404s — **a pre-existing bug
+in `MarketplaceSeeder.java`, confirmed but not fixed** (seeder was
+explicitly out of scope for this task). A different, verified-working
+photo (`pexels-photo-1670977`) is used for the ARTICULATED placeholder
+instead of reusing the seeder's broken one.
+
+**Not addressed, flagging per instructions**: existing rows in the DB
+with a null `thumbnailUrl` (any listing created before this fix, without
+a thumbnail) are **not** retroactively backfilled — this only fixes
+`thumbnailUrl` for listings created from now on. No migration was written
+since one wasn't confirmed wanted.
+
+### 2 — Unique profile picture per user
+
+New `com.printforge.auth.util.AvatarUrls` — builds
+`https://api.dicebear.com/7.x/initials/png?seed=<url-encoded>&backgroundColor=<hex>`
+URLs. Two overloads: an explicit-color one (`DataSeeder`'s three known
+accounts each get a hand-picked distinct color) and a
+hash-picks-from-a-small-palette one (real registrations — see below).
+URL pattern spot-checked with `curl` before use (returns real
+`image/png`).
+
+`DataSeeder.java`: all three seeded accounts (admin, staff, designer) now
+get `AvatarUrls.dicebearInitials(fullName, color)` with three distinct
+hex colors, seeded by full name (there are only three of them, hand-
+assigned, no collision risk).
+
+`AuthService.java`: both `register()` and `createUserAsAdmin()` now set
+`profilePictureUrl` on the `User.builder()` chain via
+`AvatarUrls.dicebearInitials(request.getEmail())` (the seed-only overload)
+whenever the request doesn't otherwise carry one (it never does today —
+`RegisterRequest` deliberately has no client-suppliable
+`profilePictureUrl` field, left untouched per instructions). Keyed by
+email, not fullName, since email is unique/immutable at signup and
+fullName can collide.
+
+**Assumption worth flagging**: for real registrations, since the task's
+instructions didn't specify a color-selection rule (only the three
+seeded accounts got one specified explicitly), `AvatarUrls`'s
+seed-only overload derives `backgroundColor` deterministically from
+`Math.floorMod(seed.hashCode(), palette.length)` against a fixed
+8-color palette, so distinct emails don't all render on the same flat
+background. This is a judgment call, not something explicitly asked for
+— reasonable given the task's own stated goal ("guarantees every user...
+has a distinct picture from the start"), but flagging in case a single
+fixed color (relying on dicebear's own seed-derived illustration for all
+the distinctiveness) was actually intended instead.
+
+### 3 — Let users set their own profile picture
+
+`files.ts`: new `uploadImage(token, asset)` — multipart POST to
+`/api/files/upload/image`, mirrors `uploadFile()`'s existing XHR
+approach exactly (same reason: RN fetch doesn't reliably handle the
+`{ uri, name, type }` FormData part). Returns the narrower
+`{ id, url }` shape matching `ImageUploadResponse`, not the full
+`ModelFile` shape `uploadFile()` returns — confirmed exact field names
+(`id`/`url`/`publicId`/`createdAt`) by reading
+`ImageUploadResponse.java` directly rather than assuming.
+
+`edit-profile.tsx`: new avatar section above the full-name field —
+current picture (or an initials-circle fallback, new local `getInitial`
+helper, same one-letter-uppercase logic as `profile.tsx`'s) with a small
+camera badge. Tapping it runs `DocumentPicker.getDocumentAsync({ type:
+'image/*' })` (same pattern as `create.tsx`'s `pickThumbnail`) →
+`uploadImage()` → `updateProfile(token, { profilePictureUrl })` →
+`updateUser()`, as its own handler (`handlePickAvatar`) entirely separate
+from the existing name/email `handleSubmit`/Save button, per
+instructions. Errors and success both go through `showToast` rather than
+the existing name/email error banner, since this is a fire-and-forget
+action, not a form submission.
+
+`profile.tsx`: avatar circle now renders `appUser.profile_picture_url`
+as a real `Image` when present, falling back to the existing initials
+circle when not (unchanged visual/style, just conditional). Added a
+small pencil-badge affordance (bottom-right corner of the avatar,
+matches `edit-profile.tsx`'s camera-badge sizing/positioning) that
+navigates to `edit-profile.tsx` — this file doesn't use
+`accessibilityRole`/`accessibilityLabel` anywhere else, so those were
+still added here since the addition is nearly free and doesn't fight the
+file's existing (StyleSheet-only, non-designTokens) style otherwise.
+
+### 4 — Replace download button with favorite button
+
+`marketplace.ts`: `isFavorited?: boolean` added to both
+`DesignListingApiResponse` and `MarketplaceListing` (confirmed
+`GET /api/marketplace`'s list endpoint — not just the single-listing
+one — already calls `enrichWithFavoriteStatus()` on every page result,
+by reading `MarketplaceController.java` directly, before wiring the
+frontend to expect it). New `addFavorite`/`removeFavorite`, each
+swallowing exactly the one race-condition status code the brief
+described for that direction (409 `AlreadyFavoritedException` for add,
+404 `FavoriteNotFoundException` for remove) as a no-op — not a blanket
+409-or-404 swallow on both, to avoid also masking a genuine 404 (deleted
+listing) on `addFavorite`.
+
+`student.tsx`: `FeedItem.downloads` and the `Download` icon import are
+gone; `FeedItem.isFavorited` added (mapped from `l.isFavorited ?? false`
+in the listings→feed mapping). New `toggleFavorite(id)` mirrors
+`toggleLike`/`toggleFollow`'s shape — optimistic local flip, real
+`addFavorite`/`removeFavorite` call, rollback + `showToast` (new import,
+wasn't in this file before) on failure. The non-interactive Download
+`<View>` in the action row is now a `<Pressable>` with a `Star` icon
+(filled + `colors.primary` when favorited, outline + `CARD_MUTED`
+otherwise — same color-logic shape as the adjacent `Heart`/like button),
+`accessibilityLabel` `"Favorite design"`/`"Unfavorite design"` matching
+the Like button's own label pattern. No count next to it, per
+instructions (`favoriteCount` isn't surfaced anywhere else in this
+file).
+
+### Verification
+
+Backend: `./mvnw -pl auth-service,marketplace-service -am compile` —
+clean, no errors. `./mvnw -pl auth-service,marketplace-service -am test`
+— `BUILD SUCCESS`, but this is **not a real signal**: see the test-suite-
+loss note at the top of this entry, `testCompile` reports "No sources to
+compile" for both modules.
+
+Frontend: `npx tsc --noEmit` — zero errors in every file touched by this
+session's four tasks (`src/api/files.ts`, `src/api/marketplace.ts`,
+`app/(app)/edit-profile.tsx`, `app/(app)/(tabs)/profile.tsx`,
+`app/(app)/(tabs)/dashboard/student.tsx`). One unrelated pre-existing
+error remains in `src/firebase.ts` (`getReactNativePersistence` not
+found by plain `tsc` — a type-resolution gap between Metro's RN-specific
+module resolution and vanilla `tsc`, not a real runtime issue; from an
+earlier fix this same session, not from the four tasks above).
+
+**Not tested**: no device/emulator/Expo Go session was available to
+actually exercise the new UI (avatar upload end-to-end, favorite
+button tap, thumbnail rendering on a freshly created listing) — compile-
+clean and type-clean only. Whoever picks this up next should actually
+run through all four flows on a real device before considering this
+done.
+
+Not deployed, not committed.
+
+**Files created:**
+`auth-service/util/AvatarUrls.java`.
+
+**Files modified:**
+`marketplace-service/marketplaceservice/model/DesignListing.java`
+(`placeholderThumbnailFor()`, category→URL map),
+`marketplace-service/marketplaceservice/controller/MarketplaceController.java`
+(`createListing()` else-branch placeholder call),
+`auth-service/config/DataSeeder.java` (3 seeded accounts get distinct
+avatars),
+`auth-service/service/AuthService.java` (`register()`/
+`createUserAsAdmin()` set `profilePictureUrl`),
+`Frontend/src/api/files.ts` (`uploadImage()`, `ImageUploadApiResponse`),
+`Frontend/src/api/marketplace.ts` (`isFavorited` field, `addFavorite()`,
+`removeFavorite()`),
+`Frontend/app/(app)/edit-profile.tsx` (avatar section, `handlePickAvatar`),
+`Frontend/app/(app)/(tabs)/profile.tsx` (avatar image + edit-pencil
+badge),
+`Frontend/app/(app)/(tabs)/dashboard/student.tsx` (favorite button
+replaces download display, `toggleFavorite`).
+
+**Files deleted:** none.
+
+## 2026-08-04 (2) — Bug: marketplace thumbnails only showing for 2 of 19 listings that actually have one
+
+**Symptom as reported**: 103 PUBLISHED listings, 19 with real (browser-
+confirmed-loadable) `res.cloudinary.com` thumbnail URLs (IDs 508–529),
+but only 2 of those 19 ever showed an image in the Discover/Marketplace
+tab.
+
+**Investigation, in the order actually done — each step's real evidence,
+not assumed:**
+
+1. `curl GET /api/marketplace` through the gateway, authenticated,
+   **no query params**: `content.length === 20`, `totalElements: 103`,
+   `totalPages: 6`. So the endpoint genuinely does cap at a page (matches
+   the code's `DEFAULT_PAGE_SIZE = 20`) — confirmed, not assumed.
+
+2. Printed that page's actual `id`/`createdAt`/thumbnail-presence for
+   all 20 entries: only IDs **520** and **510** (of the 508–529 batch)
+   appear — sorted `createdAt DESC`, and their `createdAt` values
+   (2026-07-28, 2026-07-25) are *the two most recent* timestamps across
+   the whole dataset. The other 17 real-thumbnail listings have `createdAt`
+   values that lose to a long run of much older-looking rows (IDs
+   367–384, `createdAt` around 2026-07-22) — consistent with a prior
+   session's deliberate `backdateTimestamps()` step (see the 2026-08-03
+   seeding entries above) spreading `createdAt` across ~5 months for
+   realism, rather than leaving the 508–529 batch clustered together by
+   creation order. This is why "sequential IDs from the same test session"
+   did **not** mean "adjacent in newest-first order" — backdating broke
+   that assumption.
+
+3. Read `DesignsTab.tsx` and `fetchListings()` directly (not run first,
+   read first): `fetchListings()` makes exactly one unparameterized
+   request and returns `data.content` directly; `DesignsTab.tsx` calls it
+   once per focus event via `setListings(data)` (a replace, never an
+   append) and renders via a plain `.map()` inside a `ScrollView` — no
+   `FlatList`, so no virtualization/recycling exists to investigate at
+   all. `gridData`'s mapping is a straight 1:1 field copy
+   (`img: listing.thumbnailUrl`), no bug there either. Both of these rule
+   out two of the alternate hypotheses outright, from the code alone.
+
+4. This left a real contradiction with the bug report's claim that "all
+   103 cards render." Rather than trust either side, got live runtime
+   evidence: temporarily added `"web"` to `app.json`'s `platforms` array
+   (it wasn't there — `expo start --web` refuses to run at all without
+   it, which is *why* `preview_start` kept silently failing/dying before
+   this) and added a temporary `console.log` of `fetchListings()`'s
+   resolved length. Web mode hit an unrelated pre-existing
+   `<ContextNavigator>` error (a separate web-compatibility gap, not
+   chased down here — not this bug), so it didn't produce a clean console
+   log. Given how unambiguous the code in step 3 is (a one-shot fetch
+   with a hard replace and no accumulation logic cannot mathematically
+   render more than one page's worth), and that both `app.json` and the
+   debug log were reverted immediately after, **the "103 cards render"
+   part of the bug report is concluded to be an inaccurate observation**
+   (most likely conflating "103 published in the DB" with "103 rendered
+   on screen" without an actual recount) — not a real, separate
+   contradiction to chase further.
+
+**Confirmed root cause**: `fetchListings()` only ever fetched page 0 (20
+items). Combined with backdated `createdAt` values scattering most of the
+19 real-thumbnail listings onto pages 1–5 (which nothing ever fetched),
+only the 2 whose backdated timestamp happened to be recent enough to
+survive into the top 20 ever displayed an image. This is a single root
+cause explaining the observed symptom — not a display-layer bug, not a
+mapping bug, not a recycling bug (all three ruled out with direct
+evidence above, not skipped).
+
+**Fix**: `fetchListings()` in `marketplace.ts` now loops
+`?page=0&size=50`, `?page=1&size=50`, ... (50 — the server's own
+`MAX_PAGE_SIZE`, not the default 20, to halve the round trips) until the
+backend reports `last: true`, concatenating every page's `content` before
+mapping to `MarketplaceListing[]`. Both existing callers
+(`DesignsTab.tsx`, `student.tsx`'s dashboard feed) get the complete
+listing set automatically — no signature change, no caller-side changes
+needed. Re-ran the exact same paging loop directly against the live
+backend (curl/Python, not just reading the new code) before considering
+this done: 3 requests (50 + 50 + 3), `last: true` on the third, 103 total
+items, **all 19** real-thumbnail listings present in the concatenated
+result (previously only 2 of 19).
+
+**Not done, flagging**: this fetches all pages up front rather than
+incrementally (infinite scroll / "load more"). Reasonable for 103 items
+across 3 requests today, but doesn't scale indefinitely — if the
+marketplace grows to thousands of listings this will need real
+incremental loading (`FlatList` + `onEndReached`) instead. Also didn't
+touch the pre-existing, already-understood 84-null-thumbnail issue, or
+the seeder's own broken ARTICULATED placeholder photo noted in the
+previous entry — both explicitly out of scope here.
+
+Not deployed, not committed.
+
+**Files created:** none.
+
+**Files modified:**
+`Frontend/src/api/marketplace.ts` (`fetchListings()` now loops all
+pages instead of fetching page 0 only).
+
+**Files deleted:** none.
+
+## 2026-08-04 (3) — Real pagination for the marketplace grid + home feed
+
+Follow-up to the entry directly above. **Relationship to that bug,
+recorded as asked**: related but not the same issue. The blank-thumbnail
+bug's confirmed root cause was that `fetchListings()` only ever fetched
+page 0, so most of the 19 real-thumbnail listings (scattered onto pages
+1–5 by backdated `createdAt` values) never loaded at all. The fix in that
+entry patched this by looping every page internally and returning one
+flattened array — correct, but a stopgap explicitly flagged there as
+"doesn't scale indefinitely... will need real incremental loading
+(`FlatList` + `onEndReached`) instead." This entry replaces that stopgap
+with the real thing: `fetchListings()` now returns one page at a time
+plus the envelope (`pageNumber`/`totalPages`/`totalElements`) instead of
+silently fetching everything, and both callers do real incremental
+loading. So: same endpoint, same underlying pagination gap, but this is
+the "do it properly" follow-through, not a rediscovery of a separate bug.
+
+**`marketplace.ts`**: `fetchListings(token, { page?, category?, sort? })`
+— accepts the same `page`/`size` (`size` fixed at the server's own
+`MAX_PAGE_SIZE = 50`, not user-configurable) plus the backend's existing
+`?category=`/`?sort=newest|trending` params, returns `ListingsPage`
+(`{ listings, pageNumber, totalPages, totalElements }`) instead of a bare
+array. This is a breaking signature change to an exported function with
+two call sites — both updated in the same pass (see below), no dangling
+caller left calling the old shape.
+
+**`DesignsTab.tsx`**: switched from a manually 2-column-chunked array
+inside a plain `ScrollView` to `FlatList` with `numColumns={2}` +
+`columnWrapperStyle` (row gap) — confirmed first that `ScrollView` with
+no virtualization was really what was there (per the earlier
+investigation), and that `student.tsx`'s feed already uses `FlatList`
+elsewhere in this app, so this matches an existing convention rather than
+introducing a new one. `onEndReached`/`onEndReachedThreshold={0.5}` loads
+the next page and appends; stops once `pageNumber + 1 >= totalPages`.
+`ListFooterComponent` shows a small spinner while a next page is in
+flight; `ListEmptyComponent` replaces the old inline empty-state check.
+
+Category is now a **real server-side filter** — previously the component
+fetched everything once and filtered client-side by category (wasteful,
+and part of why "fetch everything up front" felt necessary before);
+now picking a category pill triggers a fresh page-0 fetch with
+`?category=` set, same as the backend already supported but the frontend
+never used. Search stays client-side-only and unchanged in behavior — the
+backend endpoint has no text-search param at all, so it can only ever
+filter whatever pages have been loaded so far, not the whole storefront;
+flagging this as a real, pre-existing limitation, not something this
+pass fixed.
+
+One non-obvious wiring point: `useFocusEffect` only re-fires on focus
+*transitions*, not on every dependency change while a screen stays
+focused — so a category pill tap (a same-screen state change, not a
+navigation event) needed its own plain `useEffect` keyed on
+`[authLoading, loadFirstPage]` to actually trigger a refetch;
+`useFocusEffect` was kept alongside it purely for the "refresh when
+returning to this tab" behavior the original code had. Mount fires both
+once (one harmless extra request), not worth the complexity of avoiding.
+
+**`student.tsx`** (dashboard feed): same treatment — `pageNumber`/
+`totalPages`/`loadingMore` state, `onEndReached` on the existing
+`FlatList` (already using one, no conversion needed here), footer
+spinner. **Found and fixed a real, related gap while doing this**: the
+Trending/Newest segmented control (`tab` state) was purely cosmetic
+before — `fetchListings(token)` was called with no `sort` param at all,
+so the toggle only ever changed which of the first 3 *already-fetched*
+items got the "Popular" badge, never what was actually fetched or in
+what order. `tab` now passes through as the real `?sort=` param, and
+changing it resets to page 0 (same reasoning as `DesignsTab.tsx`'s
+category — a different sort is a different result set, not something to
+append onto).
+
+**`/api/marketplace/my-listings`** (designer's own listings, used by
+`profile.tsx`'s design-request/stats section via `fetchMyListings()`):
+checked and deliberately left untouched. Confirmed by reading
+`MarketplaceController.getMyListings()` directly — it returns a flat
+`List<DesignListing>` with no `Pageable` parameter at all, i.e. it isn't
+paginated on the backend and was never part of this gap. A designer's
+own listing count is naturally small and bounded, unlike the full public
+storefront; forcing it through `fetchListings()` (which hits the public
+`/api/marketplace` storefront endpoint, a different data set — other
+designers' listings, not just this one's) would have been architecturally
+wrong, not a fix.
+
+**Verification**: `npx tsc --noEmit` — zero errors in every file touched
+(`marketplace.ts`, `DesignsTab.tsx`, `student.tsx`); same one unrelated
+pre-existing `firebase.ts` error as the prior entries. Re-verified the
+new query params directly against the live backend (not just by reading
+the new code): `?page=1&size=50` returns page 1 correctly
+(`number: 1, totalPages: 3, last: false`), and
+`?category=ENCLOSURES&sort=trending` returns only ENCLOSURES-category
+results. Not tested on an actual device/emulator — no session available,
+same caveat as every entry today.
+
+Not deployed, not committed.
+
+**Files created:** none.
+
+**Files modified:**
+`Frontend/src/api/marketplace.ts` (`fetchListings()` signature change —
+paginated envelope instead of a flat array),
+`Frontend/src/components/marketplace/DesignsTab.tsx` (`FlatList` +
+`onEndReached`, server-side category filter, footer/empty states),
+`Frontend/app/(app)/(tabs)/dashboard/student.tsx` (`onEndReached` on the
+existing `FlatList`, `tab` now drives a real `?sort=` param).
+
+**Files deleted:** none.
+
+## 2026-08-04 (4) — profile.tsx redesign to match bolt.new mockups (student + designer)
+
+Rebuilt `profile.tsx`'s structure/visual layout to match two static
+bolt.new mockups (`StudentProfileMockup.tsx`/`DesignerProfileMockup.tsx`,
+provided as a zip — hardcoded fake data/colors, no real navigation, used
+as a visual reference only, not copied in). Kept the existing
+`isDesigner` branching pattern; restyled both branches.
+
+**Scope decision, asked and confirmed rather than guessed**: the
+mockups don't show the wallet/withdraw section, "Accepted Requests"
+(designer), the Become-a-Designer modal (student), or the premium-
+upgrade CTA that already exist in this screen. Asked whether to drop
+them or keep them — user chose **keep all of them**, appended below the
+new mockup-matched layout, restyled only where the mockup actually
+covers that content. This is reflected in the file: new identity/stats/
+primary-actions/Studio-or-My-Orders section first, then the preserved
+legacy sections, then Become-a-Designer (student only) / Dark Mode et al.
+
+**Font — JetBrains Mono**: checked `app/_layout.tsx`'s `useFonts()` call
+first, per instructions — only Barlow Condensed variants are loaded, no
+JetBrains Mono. Didn't need to make a fresh decision here: `theme.ts`
+already documents (see its `designTokens.type.mono` comment) that
+JetBrains Mono was deliberately removed from this project in an earlier
+pass, with `MonoText.tsx` established as the existing fallback component
+for exactly this "numeric value that used to be mono" case (job IDs,
+tracking numbers). Reused `MonoText` for every numeric value the mockups
+render in JetBrains Mono (stat values, prices, order amounts, earnings,
+listing counts) rather than reloading a font this project already
+decided against.
+
+**Colors — "Verified" green / "LIVE" tag**: checked first whether an
+existing token already covered this rather than assuming one needed to
+be added. `colors.statusCompleted.bg`/`.text` turned out to be pixel-
+identical to the mockups' green in both themes (dark:
+`rgba(34,197,94,0.15)`/`#22C55E`; light: `rgba(34,197,94,0.12)`/
+`#16A34A`). Rather than reuse a payment-status-named token for an
+unrelated "verified"/"live" meaning, added a small semantic alias —
+`colors.verified = { bg, text }` — to both theme objects in
+`theme.ts`, reusing the exact same values (not a new color choice, just
+a clearer name), and used it for both the Verified pill and the LIVE tag.
+
+**Bio and location — omitted, not invented**: checked `User.java` and
+`UpdateProfileRequest.java` directly. Neither has a bio or location
+field. Both are omitted entirely from the new layout rather than
+displaying invented data or silently adding a new backend field. The
+designer role line shows plain "Designer" (no "· <location>" suffix);
+the student role line ("Student · Print account") is static descriptive
+copy, not a data field, so it needed no data source and isn't a gap.
+
+**Likes — real, not a gap**: the task flagged this as something to
+verify existed before wiring it. It does: `UserStatsResponse.totalLikes`
+(backend, sums `favoriteCount` across a designer's listings) is already
+exposed on the frontend's `UserStats` type and already fetched via the
+existing `fetchUserStats()` call this screen makes for `designerStats`.
+Wired directly — `designerStats?.totalLikes`, no new fetch needed.
+
+**"Manage" and "My Favorites" buttons — real gaps, flagged and toasted**:
+searched the whole `app/` tree for a design-management or dedicated
+favorites screen — neither exists. Rather than link somewhere that would
+404, both buttons call `showToast(...)` ("Design management coming
+soon." / "Favorites view coming soon."), matching the exact pattern the
+existing "Help & Support" row already used for the same kind of
+not-built-yet destination.
+
+**"My Orders" re-wired from payments to jobs**: the task explicitly asked
+for this — previously this section rendered `Payment[]` (`fetchMyPayments`)
+under a "My Orders" label, which is really payment records, not job/print
+records. Now renders `Job[]` (new `fetchJobs()` call), showing the job's
+file name, submitted date + estimated cost, and its real status via the
+already-existing `StatusBadge` component (reused rather than building a
+new status-color mapping — it already covers every `JobStatus` value via
+`theme.ts`'s `statusApproved`/`statusPrinting`/etc. buckets). Tapping a
+row navigates to `/jobs/${job.id}`, matching the exact navigation pattern
+already used by `jobs/index.tsx`, `staff/dashboard.tsx`, and
+`staff/queue.tsx`. `fetchMyPayments` is still called and kept in state —
+the existing "Upgrade to Premium" flow depends on it (checking for a
+pending premium-upgrade payment), which this task's scope didn't touch.
+
+**New API function**: `fetchFavorites()` added to `marketplace.ts` —
+`GET /api/marketplace/favorites` returns a flat, unpaginated
+`List<DesignListing>` (checked the controller directly — same pattern as
+`fetchMyListings()`, and for the same reason: a user's favorite count is
+naturally bounded, unlike the full storefront this session's earlier
+pagination work was about). Used for the Saved stat (student) and the
+My Favorites button badge (both roles).
+
+**"Published designs" (Studio, designer)**: switched the filter from
+"has a thumbnailUrl" (the old "My Designs" grid's condition, which
+included DRAFT listings that happened to have a thumbnail) to
+`status === 'PUBLISHED'` — matching the task's explicit instruction and
+what "Published designs" / "N live" actually means. Cards use
+`ImageWithFallback` (this session's established thumbnail-safety
+component from an earlier pass), not a plain `Image`, so a listing
+without a thumbnail (the pre-existing, separately-tracked 84-null-
+thumbnail issue) shows the fallback icon instead of a broken image. The
+live count is `publishedDesigns.length`, not a hardcoded number.
+
+**Old "My Designs" 3-column image grid — removed**, not kept alongside
+the new "Published designs" horizontal list. Same underlying data
+(`fetchMyListings()`), just a different, more informative presentation
+(title + price per card) — keeping both would have been a duplicate,
+differently-filtered view of the same listings.
+
+**Not tested on an actual device/emulator or in the browser** — same
+caveat as every entry today. Web mode (`expo start --web`) is separately
+broken by a pre-existing `<ContextNavigator>` error unrelated to this
+change (hit and noted in the thumbnail-bug investigation entry above);
+didn't chase it down again here. Verified via `npx tsc --noEmit` only:
+zero errors in every file touched (`profile.tsx`, `marketplace.ts`,
+`theme.ts`); the same one unrelated pre-existing `firebase.ts` error as
+every other entry today.
+
+Also fixed a small stray duplicate "**Files deleted:** none." line
+immediately above this entry while editing — leftover from an earlier
+edit in this file, not a new problem being introduced.
+
+Not deployed, not committed.
+
+**Files created:** none.
+
+**Files modified:**
+`Frontend/app/(app)/(tabs)/profile.tsx` (full restructure — see above),
+`Frontend/src/api/marketplace.ts` (`fetchFavorites()`),
+`Frontend/src/theme.ts` (`colors.verified` alias, both themes).
+
+**Files deleted:** none.
+
+## 2026-08-04 (5) — Fix: "Become a Designer" now actually upgrades the role
+
+The button existed but was fully unwired (`onStartUploading` just fired
+a toast), and even if wired as originally imported would have hit the
+wrong endpoint — `upgradeToPremium()`/`/api/users/upgrade-premium` only
+flips a `premium` flag, unrelated to the DESIGNER role. This was
+confirmed against the code before touching anything, not assumed.
+
+**Response shape — checked, not assumed**: `AuthController.upgradeToDesigner()`
+returns `ResponseEntity<UserDto>` directly, **not** `AuthResponse` (the
+task's own sketch guessed `AuthResponse` — checked the controller first
+and it's `UserDto`, matching `useSession()`'s `updateUser(user: UserDto)`
+signature exactly, so no extra unwrapping needed). Confirmed via the code
+comment right above the endpoint *why* no fresh token is needed either:
+`JwtAuthFilter` re-resolves the caller's role from the DB on every
+request rather than trusting a role claim baked into the JWT, so the very
+next request after upgrading is already authorized as DESIGNER.
+
+**Premium vs. designer — checked usage before deciding, not assumed
+either was a mistake**: `is_premium` is a real, separate, intentionally-
+built feature — gates a "Verified" badge (`profile.tsx`,
+`DesignsTab.tsx`'s `isPremiumDesigner`, `student.tsx`'s feed) and a real
+Paystack-based purchase flow (`initiatePayment(token, { isPremiumUpgrade:
+true })`, checkout URL, pending-payment polling — already present in
+`profile.tsx`'s preserved "Upgrade to Premium" section from the previous
+entry's redesign). Left `upgradeToPremium()` and everything premium-
+related completely alone. The only actual bug was that `profile.tsx`
+imported `upgradeToPremium` but never called it anywhere (confirmed by
+grepping the whole file) — dead import, now replaced by the real
+`upgradeToDesigner` import; nothing else in the codebase calls
+`upgradeToPremium()` either (it's currently unused, but that's fine —
+it's a legitimate direct-flip wrapper that the premium purchase flow
+just doesn't happen to route through right now, not something this task
+was asked to fix).
+
+**New function**: `upgradeToDesigner(token): Promise<UserDto>` in
+`auth.ts`, mapping to `POST /api/auth/upgrade-to-designer`, placed right
+next to `upgradeToPremium()` with a comment cross-referencing both so the
+distinction is clear to the next reader.
+
+**Wiring**: `BecomeDesignerModal`'s `onStartUploading` now calls a new
+`handleBecomeDesigner`, which shows an `Alert.alert` confirm ("Become a
+Designer" / "This upgrades your account..." / Cancel-Upgrade) before
+calling the API — matching `handleSignOut`'s existing lightweight
+`Alert.alert` confirm pattern in this same file, not the heavier
+password-confirmation `Modal` the delete-account flow uses (deletion
+destroys data; this doesn't, so the lighter pattern fits). On success,
+`updateUser(updated)` — since `SessionContext`'s `role` is derived
+reactively as `session.appUser?.role`, this alone makes `isDesigner`
+(and every designer-gated section of the just-redesigned `profile.tsx`)
+update on the very next render, no extra plumbing, no navigation/refresh
+needed. On failure, `err instanceof ApiError ? err.message : ...` —
+same pattern used elsewhere in this file — surfaces the backend's real
+message (e.g. the LAB_STAFF rejection reason) instead of a generic one.
+
+**Verification — actually run against the live backend, not just typechecked**:
+registered a fresh throwaway account (`upgrade-test-verify@example.com`)
+rather than mutating one of the existing seeded STUDENT test accounts,
+since this role change has no reverse path on the backend (`AuthService`'s
+own comment: "Only STUDENT is a safe starting point for a real
+replacement" — implies no supported downgrade). Confirmed via direct
+`curl`:
+- First call: `200`, role `student` → `designer` in the response.
+- Checked the actual Neon `users` row directly (`SELECT role FROM
+  users WHERE user_id = 463`) — persisted as `DESIGNER`, not just
+  reflected in the response.
+- Second call (idempotency): `200`, identical response, no error.
+- Third call using the real seeded `staff@printforge.com` (LAB_STAFF)
+  account: `400`, `"Only student accounts can be upgraded to designer.
+  Current role: lab_staff"` — confirmed this exact message is what
+  `err.message` will carry into the toast on a real rejection, and
+  confirmed the staff account's role was untouched (rejected before any
+  write).
+- Deleted the throwaway test account afterward via
+  `DELETE /api/auth/account` to leave the database clean.
+
+**Not verified**: the actual on-device/in-app behavior (tapping the real
+button, seeing the studio section appear without restarting the app) —
+no device/emulator session available, same caveat as every entry today.
+The `updateUser`/`role`-derivation reasoning above is verified by reading
+`SessionContext.tsx`'s code directly (role is a plain derived value,
+recomputed every render from `session.appUser`), not by watching it
+happen on screen.
+
+Not deployed, not committed.
+
+**Files created:** none.
+
+**Files modified:**
+`Frontend/src/api/auth.ts` (`upgradeToDesigner()`, comment clarifying
+`upgradeToPremium()`'s distinct purpose),
+`Frontend/app/(app)/(tabs)/profile.tsx` (`handleBecomeDesigner`, real
+`ApiError`-aware wiring, dead `upgradeToPremium` import removed).
+
 **Files deleted:** none.
