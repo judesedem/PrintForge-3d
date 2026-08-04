@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { GoogleAuthProvider, onAuthStateChanged, signInWithCredential, signOut as firebaseSignOut, User } from 'firebase/auth';
 import { auth } from './firebase';
 import {
@@ -10,10 +12,46 @@ import {
   login as apiLogin,
   register as apiRegister,
 } from './api/auth';
+import { registerPushToken } from './api/notifications';
 import { getStoredToken, setStoredToken, clearStoredToken } from './authStorage';
 import type { LoginPayload, RegisterPayload, UserDto } from './api/types';
 
 WebBrowser.maybeCompleteAuthSession();
+
+/**
+ * Gets the device's Expo push token (prompting for permission if not
+ * already granted/denied) and registers it against the current session
+ * via POST /api/notifications/push-token. This is registration only —
+ * actually sending a push when e.g. a job status changes is a separate,
+ * materially bigger piece of work (server-side Expo push API integration)
+ * not attempted here; see Handoff.md.
+ *
+ * Deliberately swallows every failure rather than surfacing them: a push
+ * token is a nice-to-have, not something that should ever block or
+ * disrupt sign-in. In particular, Expo Go on Android can't obtain a real
+ * token for remote (non-local) push at all — this will no-op there by
+ * design, not by accident, same as the existing Google Sign-In "needs a
+ * dev build" limitation already documented in this project's history.
+ */
+async function registerForPushNotifications(authToken: string) {
+  try {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return;
+
+    const projectId = Constants.expoConfig?.extra?.eas?.projectId as string | undefined;
+    const pushToken = await Notifications.getExpoPushTokenAsync(
+      projectId ? { projectId } : undefined
+    );
+    await registerPushToken(authToken, pushToken.data);
+  } catch (err) {
+    console.warn('Push notification registration skipped:', err);
+  }
+}
 
 type SessionContextType = {
   /** The PrintForge user record, once the Firebase→JWT exchange has completed. Null until then. */
@@ -108,6 +146,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     });
     return unsubscribe;
   }, []);
+
+  // Fire-and-forget, once per session/token change — not on every render.
+  // Registration-only (see registerForPushNotifications' own doc comment
+  // for why sending is explicitly out of scope here).
+  useEffect(() => {
+    if (!session.token) return;
+    registerForPushNotifications(session.token);
+  }, [session.token]);
 
   const signInWithGoogle = async () => {
     try {

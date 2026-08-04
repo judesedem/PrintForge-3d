@@ -45,6 +45,7 @@ export type MarketplaceListing = {
   totalEarnings: number;
   createdAt: string;
   publishedAt: string | null;
+  designerId: number;
   designerName?: string;
   designerAvatar?: string;
   isPremiumDesigner?: boolean;
@@ -64,6 +65,7 @@ export function toListing(res: DesignListingApiResponse): MarketplaceListing {
     totalEarnings: res.totalEarnings,
     createdAt: res.createdAt,
     publishedAt: res.publishedAt,
+    designerId: res.designerId,
     designerName: res.designerName,
     designerAvatar: res.designerAvatar,
     isPremiumDesigner: res.isPremiumDesigner,

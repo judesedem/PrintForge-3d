@@ -112,7 +112,7 @@ function makeStyles(colors: Colors) {
     },
     ideas: {
       color: colors.offWhite,
-      fontFamily: 'BarlowCondensed_700Bold_Italic',
+      fontFamily: 'Roboto_700Bold_Italic',
       fontSize: 46,
       lineHeight: 50,
       letterSpacing: 1,

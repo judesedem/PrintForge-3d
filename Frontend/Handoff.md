@@ -5894,3 +5894,392 @@ Not deployed, not committed.
 `ApiError`-aware wiring, dead `upgradeToPremium` import removed).
 
 **Files deleted:** none.
+
+## 2026-08-04 (6) — Architectural fix: stale role in JWT causing 403s until re-login
+
+This is the backend counterpart to the previous entry — upgrade-to-designer
+surfaced it, but the gap is general: any role change (upgrade,
+demotion, whatever gets added later) left every `@PreAuthorize("hasRole(...)")`
+endpoint on all 8 downstream services checking a role claim frozen at
+login time, since `api-gateway`'s `JwtAuthenticationFilter` read role
+straight off the token and forwarded it as `X-Auth-Role`, and every
+downstream service (confirmed in `marketplace-service`'s
+`HeaderAuthFilter`) trusts that header with no DB check of its own.
+
+**Approach was pre-decided, not re-litigated**: extend the same
+"live re-check on every request" pattern `auth-service`'s own
+`JwtAuthFilter` already applies to `suspended` — do it once at the
+gateway instead of duplicating a DB check in all 8 services, accept the
+added per-request DB hit rather than reaching for Redis/a cache layer
+right now.
+
+**Gateway had zero DB access before this** — confirmed directly (empty
+`pom.xml` grep for jpa/postgresql/jdbc, no datasource config, no
+Entity/Repository classes, 3 Java files total) before adding anything,
+per the task's own "check first" instruction.
+
+**What got added**:
+- `spring-boot-starter-jdbc` + `postgresql` driver in `pom.xml` —
+  deliberately **not** `spring-boot-starter-data-jpa`. The gateway needs
+  exactly one query against a table it doesn't own (`users`, owned by
+  auth-service); a full ORM/entity-mapping layer for a single-column
+  read would be more dependency than the job needs.
+- `application.yml`: `spring.datasource.*` using the exact same
+  `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` env var names every other
+  service already uses, for consistency. Deliberately **no**
+  `ddl-auto` setting (every other service sets
+  `spring.jpa.hibernate.ddl-auto=update` because they own their schema
+  — the gateway doesn't own `users`, so it shouldn't have any DDL
+  authority over it at all, not even an implicit default it happens not
+  to trigger).
+- `UserRoleRepository` (new, plain `JdbcTemplate` wrapper, not a
+  `JpaRepository`) — one method, `findRoleByEmail(email):
+  Optional<String>`, `SELECT role FROM users WHERE email = ?`.
+- `JwtAuthenticationFilter` rewritten: role is no longer read from
+  `jwtUtil.extractRole(token)` (that method still exists in `JwtUtil`
+  for any other caller — just unused here now). Email still comes from
+  the token unchanged — only role needed the live check, since email/
+  subject is cryptographically bound to a validly-signed token and
+  doesn't go stale the way a role assignment does. The blocking JDBC
+  call is wrapped in `Mono.fromCallable(...).subscribeOn(Schedulers.boundedElastic())`
+  — the standard, documented pattern for a blocking call inside a
+  WebFlux/Spring Cloud Gateway reactive filter chain, not an improvised
+  workaround.
+- `docker-compose.yml`: `api-gateway` now gets `DB_URL`/`DB_USERNAME`/
+  `DB_PASSWORD` from the same `DATASOURCE_URL`/`DATASOURCE_USERNAME`/
+  `DATASOURCE_PASSWORD` root `.env` vars every other service reads
+  (resolves to the real Neon DB, confirmed by checking `.env` directly
+  — the gateway now reads from the exact same database every other
+  service writes role changes to, not a different/stale copy), plus
+  `depends_on: postgres: condition: service_healthy`. Had to switch
+  the whole `depends_on` block from list-style to map-style, since
+  compose doesn't allow mixing the two — the other 7 services keep
+  their previous "just wait for container start" behavior via explicit
+  `condition: service_started`.
+
+**Fail-closed design**: both failure modes return `401`, matching
+`auth-service`'s own `JwtAuthFilter` status-code convention for
+malformed/expired tokens (not a new status code introduced just for
+this):
+- No matching user row (token parses fine, but the account was deleted
+  since the token was issued) — logged as a `WARN`, distinct message.
+- DB lookup throws (connection failure, timeout, etc.) — logged as an
+  `ERROR` with the exception. Explicitly does **not** fall back to the
+  token's stale role claim on this path — that would silently defeat
+  the entire point of the fix on exactly the failure mode most likely
+  to matter (DB under load/flaky).
+
+**Verification — actually run against the live stack, not just
+compiled**: `mvn compile` clean, then rebuilt and recreated the actual
+`api-gateway` Docker container (`docker compose build api-gateway` +
+`docker compose up -d api-gateway`) and tested through the real gateway
+on `localhost:8080`, using a fresh throwaway account
+(`gateway-role-test@example.com`) rather than an existing seeded one:
+
+1. `GET /api/marketplace/my-listings` as STUDENT → `403` (correctly
+   blocked, confirms the gate is real before touching anything).
+2. `POST /api/auth/upgrade-to-designer` with that same token → `200`,
+   role now `designer`.
+3. `GET /api/marketplace/my-listings` again, **the exact same original
+   JWT, never refreshed/re-logged-in** → `200`, `[]`. This is the whole
+   point of the fix working end-to-end: the same token that was rejected
+   two requests ago now succeeds, because the gateway re-read the live
+   role instead of trusting the token's frozen claim.
+4. Suspension path: flipped `suspended=true` directly via SQL (see the
+   gap noted below — there's no reachable endpoint to do this through
+   the API), then `GET /api/auth/me` with that user's still-valid token
+   through the gateway → `403 "Account suspended. Contact support."`,
+   unchanged from before this fix. This code path lives entirely inside
+   `auth-service`'s own `JwtAuthFilter`, which this task never touched,
+   and the gateway doesn't even apply `JwtAuthenticationFilter` to the
+   `/api/auth/**` route at all — so this result was expected, not
+   surprising, but confirms no regression rather than just asserting one
+   by code-reading alone.
+5. Normal, unrelated traffic (an ordinary admin `GET /api/marketplace`
+   call) → `200`, unaffected.
+6. Checked `docker logs printforge-3d-api-gateway-1` after all of the
+   above — zero errors/warnings/exceptions.
+7. Un-suspended and deleted the throwaway test account afterward via the
+   real `DELETE /api/auth/account` flow (had to un-suspend first — a
+   suspended account's own token can't even authenticate to self-delete,
+   which is itself expected/correct behavior, not a bug).
+
+**Unrelated gap found while trying to test suspension, flagging
+separately, not fixed here**: `AdminService.suspendUser()` — the method
+that's supposed to back `PATCH /api/admin/users/{id}/suspend` per its
+own doc comment — is never actually called from any controller.
+Confirmed by grepping every backend module for `suspendUser`: only the
+one definition, zero call sites. There is currently **no reachable HTTP
+endpoint that can suspend a user at all**, despite the moderation
+notification/logging code around it existing and being fully wired.
+Out of scope for this task (which is about role, not suspension), and
+not touched — flagging for a follow-up.
+
+**Cost accepted, and the next optimization if it's ever needed**: every
+authenticated request through every gated route now does one extra
+synchronous DB round-trip (previously the gateway made zero DB calls at
+all). Explicitly accepted per the task's own framing — small team,
+pre-launch, deadline — rather than building a caching layer now. If
+gateway request volume ever makes this a real bottleneck, the natural
+next step is a short-TTL cache (Redis, or even an in-process
+Caffeine/`ConcurrentHashMap`-with-expiry cache keyed by email) in front
+of `UserRoleRepository`, invalidated or left to expire quickly enough
+that a role change still takes effect within a few seconds rather than
+instantly — a deliberate, explicit trade of "instant" for "cheap,"
+should this ever need it. Not built now.
+
+Not deployed, not committed.
+
+**Files created:**
+`backend/api-gateway/src/main/java/com/printforge/gateway/repository/UserRoleRepository.java`.
+
+**Files modified:**
+`backend/api-gateway/pom.xml` (`spring-boot-starter-jdbc` + `postgresql`),
+`backend/api-gateway/src/main/resources/application.yml` (datasource
+config, no `ddl-auto`),
+`backend/api-gateway/src/main/java/com/printforge/gateway/filter/JwtAuthenticationFilter.java`
+(live DB role lookup replaces token-claim forwarding, fail-closed on
+lookup failure),
+`docker-compose.yml` (`api-gateway` service: `DB_URL`/`DB_USERNAME`/
+`DB_PASSWORD` env vars, `depends_on` switched to map-style with
+`postgres: condition: service_healthy`).
+
+**Files deleted:** none.
+
+## 2026-08-04 (7) — App-wide font swap: Barlow Condensed → Roboto
+
+Requested directly: change the frontend's font to Roboto. Every screen
+already renders text through `designTokens.type.*` (display/heading/
+body/medium/mono) rather than hardcoded font strings, per this file's
+own earlier documented brand-brief work — so this was a small, central
+change with one deliberate exception, not a per-screen edit.
+
+- Installed `@expo-google-fonts/roboto`, removed
+  `@expo-google-fonts/barlow-condensed` (confirmed nothing referenced it
+  anymore before removing — grepped the whole `app/`/`src/` tree).
+- `app/_layout.tsx`: `useFonts()` now loads
+  `Roboto_400Regular`/`Roboto_500Medium`/`Roboto_700Bold`/
+  `Roboto_700Bold_Italic` instead of the Barlow Condensed equivalents.
+- `src/theme.ts`: `designTokens.type` — display/heading →
+  `Roboto_700Bold`, body → `Roboto_400Regular`, medium →
+  `Roboto_500Medium`. `mono` (MonoText.tsx's job-ID/tracking-number
+  substitute, since neither Barlow Condensed nor Roboto has a true
+  monospace variant) stays the same substitution logic, just
+  `Roboto_500Medium` instead of `BarlowCondensed_500Medium` — not a new
+  regression, the same one from before under a different family.
+- `app/index.tsx`: the one hardcoded exception — the splash screen's
+  italicized "IDEAS" word sets `fontFamily: 'Roboto_700Bold_Italic'`
+  directly rather than through a token (same reason the Barlow Condensed
+  version did: `fontStyle: 'italic'` on a non-italic loaded font
+  frequently fails to render as italic on Android, so the actual italic
+  font file has to be loaded and referenced by name).
+
+**Verification**: `npx tsc --noEmit` — zero new errors (same one
+pre-existing unrelated `firebase.ts` error as every other entry).
+Started the Metro dev server and fetched the real compiled app bundle
+(not just read the source) — `HTTP 200`, 14.5 MB, valid bundle; grepped
+the compiled output directly: 41 occurrences of the new `Roboto_*` names
+embedded, zero remaining `BarlowCondensed` references anywhere in the
+compiled bundle. Not tested on an actual device/emulator — same caveat
+as every entry today; a bundle that compiles and embeds the right font
+names isn't the same as confirming it visually renders as expected.
+
+Not deployed, not committed.
+
+**Files created:** none.
+
+**Files modified:**
+`Frontend/package.json` (`@expo-google-fonts/roboto` added,
+`@expo-google-fonts/barlow-condensed` removed),
+`Frontend/app/_layout.tsx` (`useFonts()` call),
+`Frontend/app/index.tsx` (splash-screen italic font string),
+`Frontend/src/theme.ts` (`designTokens.type`).
+
+**Files deleted:** none.
+
+## 2026-08-04 (8) — Three independent backend wiring jobs: follow system, content reporting, push notification tokens
+
+Requested as three separate, independently-verifiable pieces of work
+("each is independent — implement and verify them separately, don't
+let one block the others"): real backend systems that already existed
+but the frontend never called at all. All three are now wired. Two
+genuine pre-existing backend bugs were found and fixed along the way
+(both flagged via `AskUserQuestion` and fixed only after explicit user
+confirmation, since both brushed up against this task's own scoping
+boundaries).
+
+### 1. Follow system
+
+`student.tsx`'s `toggleFollow()` was local-only mock state (same
+pattern as the fake like/download counters fixed earlier this
+session) — this is also the actual explanation for the "0 Following"
+seen previously; the backend was never missing anything, the frontend
+just never called it. `following.tsx` was a static stub rendering
+nothing real.
+
+- `src/api/users.ts`: added `getFollowStatus`, `followUser` (catches a
+  409 `AlreadyFollowingException` from a double-tap race as a
+  non-fatal no-op, same convention as `addFavorite`), `unfollowUser`
+  (no special-casing needed — the backend's `DELETE` is always 204,
+  deliberately idempotent), and `fetchFollowing` (new — see gap below).
+- `student.tsx`: `toggleFollow()` now does a real optimistic
+  update + rollback-on-failure, keyed by **`designerId`** rather than
+  listing id (one designer can have multiple listings on the feed;
+  toggling one card now correctly updates every card from that
+  designer). Follow status for a page's feed is fetched in one batched
+  `Promise.all` over the page's distinct designer ids, not one call per
+  card.
+- **Incidental bug fix**: `MarketplaceListing`/`toListing()` in
+  `marketplace.ts` never carried `designerId` through from the API
+  response even though the backend sent it — needed it for the follow
+  button to target the right user. Added the field.
+  **Incidental bug fix**: the designer-profile navigation call in
+  `student.tsx` was passing the **listing's** id as the designer's id
+  (`id: item.id`) — a real pre-existing bug, found while wiring the
+  follow button into the same card. Fixed to `id: String(item.designerId)`.
+- `marketplace/designer/[id].tsx`: wired the follow button only (real
+  status fetch on mount + optimistic toggle), per this task's explicit
+  scope — the rest of that screen (stats, bio, designs grid) is still
+  static/mock, a separately-tracked "zero API calls" gap not rebuilt
+  here.
+- **Gap found and flagged, not invented**: there was no
+  "list who I follow" endpoint on `FollowController` — only
+  follow/unfollow/status existed, even though `FollowRepository`
+  already had `findByFollowerId()` sitting unused with a comment
+  literally saying "Backs following.tsx." Per this task's explicit
+  "stop and flag that back rather than inventing one" instruction, I
+  used `AskUserQuestion` instead of deciding unilaterally. User chose
+  to add the thin endpoint. Added `GET /api/users/following` to
+  `FollowController.java` (marketplace-service) — resolves the caller
+  from the JWT, batches a `findAllById` lookup for names/avatars,
+  returns `[{id, fullName, profilePictureUrl, followerCount}]`.
+  Compiled, rebuilt/restarted the `marketplace-service` container, and
+  verified live: `GET /api/users/following` with a seeded student's
+  token returned real data.
+- `following.tsx`: rewritten from the static stub to real data —
+  `useFocusEffect`-driven load via the new `fetchFollowing`, loading/
+  empty states, a list of followed designers with an unfollow-on-tap
+  pill (optimistic removal + rollback), each row navigating to the real
+  designer profile screen.
+
+### 2. Content reporting
+
+No "report this listing/user" flow existed anywhere in the app; the
+admin review queue (`admin.ts`) was already fully wired but had
+nothing feeding into it from real users. Admin side was not touched.
+
+- Confirmed `CreateReportRequest`'s actual fields by reading the DTO
+  directly rather than guessing: `{targetType: String, targetId: Long,
+  reason: String}` — **no separate `details` field**, unlike the
+  task's own guessed shape (`targetType/targetId/reason/details`).
+  Built the form around the confirmed shape.
+- `src/api/reports.ts` (new): `createReport(token, {targetType:
+  'LISTING' | 'USER', targetId, reason})` → `POST /api/reports`.
+- `src/components/ReportModal.tsx` (new): shared modal — single reason
+  textarea (max 1000 chars, mirroring `ReportService.MAX_REASON_LENGTH`
+  on the backend), submits via `createReport`, success/failure toast
+  via the existing `useToast` pattern. Takes `colors` as a prop rather
+  than calling `useTheme()` internally, matching this codebase's
+  existing convention (`BecomeDesignerModal`, `DarkModeToggle`).
+- Wired a Flag-icon report action into `marketplace/[id].tsx` (listing
+  detail header) with `targetType="LISTING"`, and into
+  `marketplace/designer/[id].tsx` (designer public profile header)
+  with `targetType="USER"`.
+- **Incidental bug fix, discovered while testing this system live**:
+  `GET/PATCH/DELETE /api/admin/reports/**` were 404ing through the
+  gateway. Root cause: `admin-service-route`'s broad `/api/admin/**`
+  predicate was catching `/api/admin/reports/**` before
+  `notification-service-route` — where `ReportController`'s admin
+  endpoints actually live — could match it. Confirmed live via `curl`
+  before assuming anything. Given the earlier explicit "don't touch the
+  admin side" instruction, flagged this via `AskUserQuestion` rather
+  than fixing it unilaterally; user chose to fix the routing predicate.
+  Added `/api/admin/reports, /api/admin/reports/**` to
+  `notification-service-route`'s predicate list in
+  `api-gateway/application.yml` (that route is defined earlier in the
+  file, so it now wins under Spring Cloud Gateway's list-order
+  matching). Rebuilt/restarted `api-gateway`, verified 404 → 200/204
+  live, deleted the test report afterward.
+
+### 3. Push notification tokens
+
+No `expo-notifications` import existed anywhere in the app — there was
+no way `POST /api/notifications/push-token` (which already existed and
+silently no-ops on a blank/missing token) could ever be called, and no
+way the app could receive a push even if it were.
+
+- Installed `expo-notifications@~56.0.22` via `expo install` — the
+  SDK-56-compatible version for this project's `expo@~56.0.18`, not
+  assumed latest.
+- Added `"expo-notifications"` to `app.json`'s `plugins` array for
+  correct native config generation on the next build. Confirmed
+  `extra.eas.projectId` already existed and is reused for
+  `getExpoPushTokenAsync({projectId})`.
+- `src/api/notifications.ts`: added `registerPushToken(token,
+  pushToken)` → `POST /api/notifications/push-token`, no extra
+  client-side validation layered on top — matches the backend's own
+  leniency on blank tokens.
+- `SessionContext.tsx`: added `registerForPushNotifications(authToken)`
+  — requests permission if not already granted/denied, gets the Expo
+  push token, registers it. Swallows every failure (a push token is a
+  nice-to-have that must never block or disrupt sign-in). Wired into a
+  new `useEffect` keyed on `session.token`, so it fires once per
+  session/token-change, not on every render — the same one-time-
+  per-session side-effect pattern this file already uses for its
+  on-mount stored-token validation.
+- **Not attempted, by design**: actual push-notification *sending*
+  (backend dispatching a push via Expo's push API when e.g. a job
+  status changes) is a materially bigger, separate piece of work
+  (server-side Expo push API integration, matching it to existing
+  in-app notification trigger points) — explicitly out of scope for
+  this task. This task only gets a real token registered so that
+  capability exists later.
+- **Verification limitation, not a bug**: push notifications generally
+  don't work reliably in Expo Go on Android for remote (non-local)
+  notifications. If this app is still being tested via Expo Go rather
+  than a dev build/APK, this whole feature can't be meaningfully
+  end-to-end verified yet — the same caveat already on record for
+  Google Sign-In needing a dev build. `getExpoPushTokenAsync` failing
+  or returning nothing under Expo Go is expected, not a regression.
+
+### Verification
+
+`npx tsc --noEmit --ignoreDeprecations 6.0` — zero new errors; only the
+same one pre-existing, unrelated `firebase.ts(2,35)` error
+(`getReactNativePersistence` not exported) that has been present and
+flagged across every entry in this file. Follow-system and
+content-reporting backend changes were verified live against the
+running Docker stack (real `curl`/UI-equivalent calls through the
+gateway, container rebuilds confirmed via `docker logs`), not just read
+from source. Push-token registration was verified by code path and
+`tsc` only, per the Expo Go limitation above — not end-to-end device
+tested.
+
+Not deployed, not committed.
+
+**Files created:**
+`Frontend/src/api/reports.ts`,
+`Frontend/src/components/ReportModal.tsx`,
+`backend/marketplace-service/.../controller/FollowController.java`
+(method added, file pre-existing).
+
+**Files modified:**
+`Frontend/src/api/users.ts` (follow wrappers),
+`Frontend/src/api/marketplace.ts` (`designerId` mapping fix),
+`Frontend/src/api/notifications.ts` (`registerPushToken`),
+`Frontend/app/(app)/(tabs)/dashboard/student.tsx` (real follow toggle,
+designer-nav id fix),
+`Frontend/app/(app)/following.tsx` (real data, was a static stub),
+`Frontend/app/(app)/marketplace/designer/[id].tsx` (follow button +
+report action wired; rest of screen untouched, separately tracked),
+`Frontend/app/(app)/marketplace/[id].tsx` (report action wired),
+`Frontend/src/SessionContext.tsx` (push token registration),
+`Frontend/app.json` (`expo-notifications` plugin),
+`Frontend/package.json` / `package-lock.json` (`expo-notifications`
+dependency),
+`backend/marketplace-service/.../controller/FollowController.java`
+(`GET /api/users/following`),
+`backend/api-gateway/src/main/resources/application.yml`
+(admin-reports routing predicate fix).
+
+**Files deleted:** none.

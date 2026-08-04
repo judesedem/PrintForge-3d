@@ -4,6 +4,18 @@ server:
 spring:
   application:
     name: api-gateway
+  # Read-only lookup of a caller's live role (see JwtAuthenticationFilter)
+  # against auth-service's users table — the gateway doesn't own this
+  # schema, so ddl-auto is deliberately absent (Spring Data JDBC/JPA
+  # default is "none" when unset, unlike every other service here which
+  # sets spring.jpa.hibernate.ddl-auto=update because they DO own their
+  # tables). Same DB_URL/DB_USERNAME/DB_PASSWORD env var names as every
+  # other service for consistency (see docker-compose.yml).
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/printforge_db}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD:admin}
+    driver-class-name: org.postgresql.Driver
   cloud:
     compatibility-verifier:
       enabled: false
@@ -57,10 +69,22 @@ spring:
             - JwtAuthenticationFilter
 
         # Notification Service (port 8087)
+        #
+        # /api/admin/reports/** deliberately lives here, not on
+        # admin-service-route below — ReportController's admin endpoints
+        # (GET/PATCH/DELETE /api/admin/reports...) are implemented in
+        # notification-service, alongside the rest of the moderation
+        # system, not in admin-service. This route must stay defined
+        # BEFORE admin-service-route: Spring Cloud Gateway matches routes
+        # in list order, and admin-service-route's broader /api/admin/**
+        # predicate would otherwise catch these paths first and send them
+        # to a service that has no matching controller for them (404 on
+        # every admin reports call — confirmed directly against the live
+        # gateway before this fix, not assumed).
         - id: notification-service-route
           uri: ${NOTIFICATION_SERVICE_URL:http://localhost:8087}
           predicates:
-            - Path=/api/notifications, /api/notifications/**, /api/reports, /api/reports/**, /api/moderation, /api/moderation/**
+            - Path=/api/notifications, /api/notifications/**, /api/reports, /api/reports/**, /api/moderation, /api/moderation/**, /api/admin/reports, /api/admin/reports/**
           filters:
             - JwtAuthenticationFilter
 

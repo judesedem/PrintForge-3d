@@ -24,14 +24,17 @@ import { ApiError } from '@/api/client';
  */
 
 import { fetchListings, addFavorite, removeFavorite, MarketplaceListing } from '@/api/marketplace';
+import { followUser, unfollowUser, getFollowStatus } from '@/api/users';
 import { useSession } from '@/SessionContext';
 
-// NOTE: FeedItem still has mock-like fields (designerName, avatar, likes)
-// because those backend features don't exist yet, but we will populate the core
-// data (image, designName) from real listings. isFavorited is real — backed by
-// MarketplaceController's favorite endpoints, not mocked.
+// NOTE: FeedItem still has mock-like fields (avatar, likes) because those
+// backend features don't exist yet, but we will populate the core data
+// (image, designName) from real listings. isFavorited/followed are real —
+// backed by MarketplaceController's favorite endpoints and FollowController,
+// not mocked.
 type FeedItem = {
   id: string;
+  designerId: number;
   designerName: string;
   verified: boolean;
   followed: boolean;
@@ -71,8 +74,13 @@ export default function StudentDashboard() {
   const toFeedItems = (listings: MarketplaceListing[], startIdx: number): FeedItem[] =>
     listings.map((l, i) => ({
       id: l.id,
+      designerId: l.designerId,
       designerName: l.designerName || 'Unknown Designer',
       verified: l.isPremiumDesigner || false,
+      // Placeholder — corrected below once real follow status resolves.
+      // Unlike isFavorited, the listing response doesn't embed per-designer
+      // follow status (favorites are per-listing, follows are per-user), so
+      // it needs its own lookup rather than riding along for free.
       followed: false,
       image: l.thumbnailUrl || 'https://via.placeholder.com/600',
       avatar: l.designerAvatar || 'https://images.pexels.com/photos/220459/pexels-photo-220459.jpeg?auto=compress&cs=tinysrgb&w=100',
@@ -82,6 +90,31 @@ export default function StudentDashboard() {
       liked: false,
       isFavorited: l.isFavorited ?? false,
     }));
+
+  // One lookup per distinct designer on the page (typically far fewer than
+  // one per listing, since a designer usually has multiple listings), not
+  // one per card — keeps this bounded rather than N+1.
+  const loadFollowStatuses = async (items: FeedItem[]) => {
+    if (!token) return;
+    const uniqueDesignerIds = [...new Set(items.map(i => i.designerId))];
+    const results = await Promise.all(
+      uniqueDesignerIds.map(id =>
+        getFollowStatus(token, id).catch(() => null)
+      )
+    );
+    const followingMap = new Map<number, boolean>();
+    uniqueDesignerIds.forEach((id, i) => {
+      const result = results[i];
+      if (result) followingMap.set(id, result.isFollowing);
+    });
+    setFeed(prev =>
+      prev.map(item =>
+        followingMap.has(item.designerId)
+          ? { ...item, followed: followingMap.get(item.designerId)! }
+          : item
+      )
+    );
+  };
 
   // `tab` now drives a real ?sort= param (previously fetchListings() was
   // called with no sort at all, so the Trending/Newest toggle only ever
@@ -98,9 +131,11 @@ export default function StudentDashboard() {
     setLoading(true);
     fetchListings(token, { page: 0, sort: tab })
       .then(page => {
-        setFeed(toFeedItems(page.listings, 0));
+        const items = toFeedItems(page.listings, 0);
+        setFeed(items);
         setPageNumber(page.pageNumber);
         setTotalPages(page.totalPages);
+        loadFollowStatuses(items);
       })
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -117,9 +152,14 @@ export default function StudentDashboard() {
     setLoadingMore(true);
     fetchListings(token, { page: pageNumber + 1, sort: tab })
       .then(page => {
-        setFeed(prev => [...prev, ...toFeedItems(page.listings, prev.length)]);
+        let newItems: FeedItem[] = [];
+        setFeed(prev => {
+          newItems = toFeedItems(page.listings, prev.length);
+          return [...prev, ...newItems];
+        });
         setPageNumber(page.pageNumber);
         setTotalPages(page.totalPages);
+        loadFollowStatuses(newItems);
       })
       .catch(console.error)
       .finally(() => setLoadingMore(false));
@@ -134,10 +174,35 @@ export default function StudentDashboard() {
       )
     );
 
-  const toggleFollow = (id: string) =>
+  // Keyed by designerId, not the card's listing id — a designer can have
+  // multiple listings in the feed, and following/unfollowing them should
+  // update every card from that designer at once, not just the one tapped.
+  // Same optimistic-update-with-rollback shape as toggleFavorite below.
+  const toggleFollow = async (designerId: number) => {
+    if (!token) return;
+    const wasFollowing = feed.find(item => item.designerId === designerId)?.followed ?? false;
+
     setFeed(prev =>
-      prev.map(item => (item.id === id ? { ...item, followed: !item.followed } : item))
+      prev.map(item =>
+        item.designerId === designerId ? { ...item, followed: !wasFollowing } : item
+      )
     );
+
+    try {
+      if (wasFollowing) {
+        await unfollowUser(token, designerId);
+      } else {
+        await followUser(token, designerId);
+      }
+    } catch (err) {
+      setFeed(prev =>
+        prev.map(item =>
+          item.designerId === designerId ? { ...item, followed: wasFollowing } : item
+        )
+      );
+      showToast(err instanceof ApiError ? err.message : 'Failed to update follow status');
+    }
+  };
 
   // Optimistic update with rollback on failure — same shape as
   // toggleLike/toggleFollow above, but backed by the real favorite
@@ -169,7 +234,10 @@ export default function StudentDashboard() {
       <View style={s.cardHeader}>
         {/* Avatar + name open the designer's public profile (Pass 2) —
             display fields ride along as params since there's no designer
-            endpoint to fetch them from yet. */}
+            endpoint to fetch them from yet. Fixed to pass the real
+            designerId here — this previously passed the listing's own
+            id, which happened to work as a route param but pointed the
+            profile screen at the wrong id entirely. */}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`View ${item.designerName}'s profile`}
@@ -177,7 +245,7 @@ export default function StudentDashboard() {
             router.push({
               pathname: '/(app)/marketplace/designer/[id]',
               params: {
-                id: item.id,
+                id: String(item.designerId),
                 name: item.designerName,
                 avatar: item.avatar,
                 verified: String(item.verified),
@@ -199,7 +267,7 @@ export default function StudentDashboard() {
           accessibilityLabel={
             item.followed ? `Unfollow ${item.designerName}` : `Follow ${item.designerName}`
           }
-          onPress={() => toggleFollow(item.id)}
+          onPress={() => toggleFollow(item.designerId)}
           style={({ pressed }) => [
             s.followButton,
             item.followed && s.followButtonFollowing,

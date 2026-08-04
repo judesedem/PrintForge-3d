@@ -8,6 +8,7 @@ import {
   Clock,
   CreditCard,
   File,
+  Flag,
   Gauge,
   Layers,
   Minus,
@@ -20,6 +21,7 @@ import Card from '@/components/Card';
 import GhsAmount from '@/components/GhsAmount';
 import MonoText from '@/components/MonoText';
 import PaystackWebView from '@/components/PaystackWebView';
+import ReportModal from '@/components/ReportModal';
 import { Material, Quality } from '@/data/mockData';
 import { fetchListing, fetchCustomQuote, MarketplaceListing, Quote } from '@/api/marketplace';
 import { initiatePayment, Payment } from '@/api/payments';
@@ -60,6 +62,7 @@ export default function ListingDetail() {
   const [payment, setPayment] = useState<Payment | null>(null);
   const [paymentPhase, setPaymentPhase] = useState<'idle' | 'initiating' | 'checkout'>('idle');
   const [paymentError, setPaymentError] = useState<string | null>(null);
+  const [showReportModal, setShowReportModal] = useState(false);
   const [color, setColor] = useState('');
   const [notes, setNotes] = useState('');
   const [isQuoting, setIsQuoting] = useState(false);
@@ -213,20 +216,30 @@ export default function ListingDetail() {
   return (
     <View style={styles.screen}>
       <KeyboardAwareScreen contentContainerStyle={styles.content}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Go back to marketplace"
-          style={({ pressed }) => [styles.backRow, pressed && styles.pressed]}
-          onPress={() => router.back()}
-        >
-          <View style={styles.backIcon}>
-            <ArrowLeft size={18} color={colors.foreground} />
-          </View>
-          <View>
-            <Text style={styles.backEyebrow}>MARKETPLACE</Text>
-            <Text style={styles.backText}>Model details</Text>
-          </View>
-        </Pressable>
+        <View style={styles.headerRow}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Go back to marketplace"
+            style={({ pressed }) => [styles.backRow, pressed && styles.pressed]}
+            onPress={() => router.back()}
+          >
+            <View style={styles.backIcon}>
+              <ArrowLeft size={18} color={colors.foreground} />
+            </View>
+            <View>
+              <Text style={styles.backEyebrow}>MARKETPLACE</Text>
+              <Text style={styles.backText}>Model details</Text>
+            </View>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Report this listing"
+            onPress={() => setShowReportModal(true)}
+            style={({ pressed }) => [styles.backIcon, pressed && styles.pressed]}
+          >
+            <Flag size={18} color={colors.mutedFg} />
+          </Pressable>
+        </View>
 
         <View style={styles.heroCard}>
           <ImageWithFallback
@@ -564,6 +577,14 @@ export default function ListingDetail() {
           onError={handlePaymentError}
         />
       ) : null}
+
+      <ReportModal
+        visible={showReportModal}
+        onClose={() => setShowReportModal(false)}
+        targetType="LISTING"
+        targetId={Number(id)}
+        colors={colors}
+      />
     </View>
   );
 }
@@ -607,12 +628,17 @@ function makeStyles(colors: Colors) {
       fontFamily: designTokens.type.heading,
       fontSize: 13,
     },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: designTokens.spacing.lg,
+    },
     backRow: {
       flexDirection: 'row',
       alignItems: 'center',
       alignSelf: 'flex-start',
       gap: 10,
-      marginBottom: designTokens.spacing.lg,
     },
     backIcon: {
       width: 40,

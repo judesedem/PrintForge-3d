@@ -12,7 +12,9 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * A user opting to follow a designer — modeled closely on
@@ -85,6 +87,40 @@ public class FollowController {
         User caller = currentUser(authentication);
         boolean isFollowing = followRepository.existsByFollowerIdAndFollowingId(caller.getUserId(), id);
         return ResponseEntity.ok(statusResponse(isFollowing, id));
+    }
+
+    /**
+     * The caller's own list of who they follow — backs following.tsx.
+     * FollowRepository.findByFollowerId() already existed for exactly
+     * this (its own doc comment says so) but nothing called it; this is
+     * that missing controller method, not new repository/service logic.
+     * No service layer here, same as every other method in this
+     * controller — direct repository access, matching this class's own
+     * established style rather than routing through UserService (a
+     * different class's convention).
+     */
+    @GetMapping("/following")
+    public ResponseEntity<List<Map<String, Object>>> getFollowing(Authentication authentication) {
+        User caller = currentUser(authentication);
+        List<Follow> follows = followRepository.findByFollowerId(caller.getUserId());
+
+        List<Long> followingIds = follows.stream().map(Follow::getFollowingId).toList();
+        Map<Long, User> users = userRepository.findAllById(followingIds).stream()
+                .collect(Collectors.toMap(User::getUserId, u -> u));
+
+        List<Map<String, Object>> response = followingIds.stream()
+                .map(id -> {
+                    User u = users.get(id);
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("id", id);
+                    entry.put("fullName", u != null ? u.getFullName() : "Unknown user");
+                    entry.put("profilePictureUrl", u != null ? u.getProfilePictureUrl() : null);
+                    entry.put("followerCount", followRepository.countByFollowingId(id));
+                    return entry;
+                })
+                .toList();
+
+        return ResponseEntity.ok(response);
     }
 
     private Map<String, Object> statusResponse(boolean isFollowing, Long followingId) {
