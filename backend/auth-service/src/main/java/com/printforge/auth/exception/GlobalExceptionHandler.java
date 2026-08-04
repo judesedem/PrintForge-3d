@@ -5,9 +5,11 @@ import com.printforge.auth.emailservice.exception.EmailSendException;
 import com.printforge.auth.emailservice.exception.EmailTemplateNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -82,6 +84,29 @@ public class GlobalExceptionHandler {
         });
 
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errors);
+    }
+
+    // ── Spring MVC's own client errors ───────────────────────────────────────
+    //
+    // These exist to keep handleGenericException below from swallowing them.
+    // Spring raises these for malformed requests, and they carry a correct
+    // status of their own (405, 400) — but Exception.class matched them first
+    // and flattened every one to "500 An unexpected error occurred". Opening
+    // GET /api/auth/login in a browser returned a 500, which reads as an
+    // outage rather than "wrong method". Same class of bug the marketplace
+    // service's handler documents avoiding.
+
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ErrorResponse> handleMethodNotSupported(
+            HttpRequestMethodNotSupportedException ex) {
+        return buildError(HttpStatus.METHOD_NOT_ALLOWED,
+                "HTTP method " + ex.getMethod() + " is not supported by this endpoint");
+    }
+
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ErrorResponse> handleUnreadableMessage(
+            HttpMessageNotReadableException ex) {
+        return buildError(HttpStatus.BAD_REQUEST, "Malformed or missing request body");
     }
 
     @ExceptionHandler(Exception.class)
