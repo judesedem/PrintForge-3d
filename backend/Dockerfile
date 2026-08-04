@@ -48,7 +48,11 @@ ENV MODULE_NAME=${MODULE_NAME}
 # Copy the built jar from the builder stage
 COPY --from=builder /app/${MODULE_NAME}/target/*.jar app.jar
 
-# Expose dynamic port for Railway
 EXPOSE ${PORT:-8080}
 
-CMD ["java", "-Xmx400m", "-Xss512k", "-XX:+UseContainerSupport", "-Dserver.port=${PORT}", "-jar", "app.jar"]
+# No -Dserver.port here on purpose. This is the exec form, so nothing expands
+# ${PORT} — the old "-Dserver.port=${PORT}" only worked because Spring happened
+# to resolve the literal string as a placeholder, and it blew up when PORT was
+# unset. Every service's application.properties now reads server.port=${PORT:<default>}
+# directly, which is the same mechanism with one less layer and a real fallback.
+CMD ["java", "-Xmx400m", "-Xss512k", "-XX:+UseContainerSupport", "-jar", "app.jar"]

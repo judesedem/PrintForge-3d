@@ -23,6 +23,9 @@ import java.util.stream.Collectors;
 
 import com.printforge.admin.config.RabbitMQConfig;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
+
 @Service
 public class AdminService {
 
@@ -32,6 +35,7 @@ public class AdminService {
     private final UserRepository userRepository;
     private final NotificationService notificationService;
     private final ModerationLogService moderationLogService;
+    @Nullable
     private final org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
 
     public AdminService(PrintJobRepository printJobRepository,
@@ -40,7 +44,7 @@ public class AdminService {
                         UserRepository userRepository,
                         NotificationService notificationService,
                         ModerationLogService moderationLogService,
-                        org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate) {
+                        @Autowired(required = false) @Nullable org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate) {
         this.printJobRepository = printJobRepository;
         this.printerRepository = printerRepository;
         this.designListingRepository = designListingRepository;
@@ -235,7 +239,9 @@ public class AdminService {
         }
 
         userRepository.deleteById(id);
-        rabbitTemplate.convertAndSend(RabbitMQConfig.USER_DELETED_EXCHANGE, "", id);
+        if (rabbitTemplate != null) {
+            rabbitTemplate.convertAndSend(RabbitMQConfig.USER_DELETED_EXCHANGE, "", id);
+        }
     }
 
     @org.springframework.transaction.annotation.Transactional
