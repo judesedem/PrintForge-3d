@@ -37,6 +37,8 @@ import com.printforge.auth.util.AvatarUrls;
 import com.printforge.auth.config.RabbitMQConfig;
 
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.lang.Nullable;
 
 @Service
 @RequiredArgsConstructor
@@ -50,7 +52,10 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final PasswordResetTokenRepository passwordResetTokenRepository;
     private final EmailService emailService;
-    private final org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
+
+    @Autowired(required = false)
+    @Nullable
+    private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
 
     @Value("${app.frontend.reset-password-url}")
     private String frontendResetPasswordUrl;
@@ -367,7 +372,9 @@ public class AuthService {
         }
 
         userRepository.deleteById(user.getUserId());
-        rabbitTemplate.convertAndSend(RabbitMQConfig.USER_DELETED_EXCHANGE, "", user.getUserId());
+        if (rabbitTemplate != null) {
+            rabbitTemplate.convertAndSend(RabbitMQConfig.USER_DELETED_EXCHANGE, "", user.getUserId());
+        }
     }
 
     private UserDto toUserDto(User user) {

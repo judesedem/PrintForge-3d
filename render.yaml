@@ -1,0 +1,241 @@
+# Render Blueprint — PrintForge backend
+#
+# Eight Spring Boot services, all built from the single parameterized
+# backend/Dockerfile. Render passes each service's environment variables to
+# `docker build` as build arguments, so MODULE_NAME below is what selects
+# which Maven module gets built and run (see backend/Dockerfile's ARG).
+#
+# FREE PLAN CAVEATS (this blueprint pins `plan: free` everywhere):
+#   * Free web services spin down after 15 minutes without inbound traffic and
+#     take ~1 minute to wake. A request that wakes the gateway AND a cold
+#     downstream service can take two minutes.
+#   * A workspace gets 750 free instance-hours per calendar month, shared
+#     across all eight services. They only burn hours while awake.
+#   * Free web services can SEND private-network requests but cannot RECEIVE
+#     them, so the gateway must reach the other services over their public
+#     https://<name>.onrender.com URLs — not the private network. Render has no
+#     blueprint reference for a public URL, hence the `sync: false` on the
+#     *_SERVICE_URL vars: fill them in from the dashboard after the first sync
+#     (see docs/RENDER_DEPLOYMENT.md).
+#
+# REGION: virginia, to sit next to the Neon database in us-east-1. Frankfurt is
+# physically closer to Ghana, but JPA issues many queries per request, so
+# co-locating with the database wins: it costs one transatlantic hop per request
+# instead of one per query. Region cannot be changed after a service is created,
+# so if you move the database, change every `region:` below BEFORE the first sync.
+
+services:
+  # ---------------------------------------------------------------- gateway
+  # The only service the app should talk to. Publicly routes /api/** to the
+  # services below and enforces JWT via JwtAuthenticationFilter.
+  - type: web
+    name: printforge-api-gateway
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: api-gateway
+      - key: PORT
+        value: 8080
+      - fromGroup: printforge-db
+      - fromGroup: printforge-jwt
+      # Set these to the public URLs of the services below, after they exist.
+      - key: AUTH_SERVICE_URL
+        sync: false
+      - key: PRINTER_SERVICE_URL
+        sync: false
+      - key: ORDER_SERVICE_URL
+        sync: false
+      - key: MARKETPLACE_SERVICE_URL
+        sync: false
+      - key: PAYMENT_SERVICE_URL
+        sync: false
+      - key: NOTIFICATION_SERVICE_URL
+        sync: false
+      - key: ADMIN_SERVICE_URL
+        sync: false
+
+  # ------------------------------------------------------------------- auth
+  - type: web
+    name: printforge-auth
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: auth-service
+      - key: PORT
+        value: 8083
+      - fromGroup: printforge-db
+      - fromGroup: printforge-jwt
+      - fromGroup: printforge-mail
+      # Deep link the password-reset email points at.
+      - key: FRONTEND_RESET_PASSWORD_URL
+        sync: false
+
+  # ---------------------------------------------------------------- printer
+  - type: web
+    name: printforge-printer
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: printer-service
+      - key: PORT
+        value: 8082
+      - fromGroup: printforge-db
+
+  # ------------------------------------------------------------------ order
+  - type: web
+    name: printforge-order
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: order-service
+      - key: PORT
+        value: 8084
+      - fromGroup: printforge-db
+      - fromGroup: printforge-cloudinary
+      # LAB_* seeder values fall back to the KNUST defaults in
+      # application.properties; override here only if the lab moves.
+
+  # ------------------------------------------------------------ marketplace
+  - type: web
+    name: printforge-marketplace
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: marketplace-service
+      - key: PORT
+        value: 8085
+      - fromGroup: printforge-db
+      - fromGroup: printforge-cloudinary
+
+  # ---------------------------------------------------------------- payment
+  - type: web
+    name: printforge-payment
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: payment-service
+      - key: PORT
+        value: 8086
+      - fromGroup: printforge-db
+      - key: PAYSTACK_SECRET_KEY
+        sync: false
+
+  # ----------------------------------------------------------- notification
+  - type: web
+    name: printforge-notification
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: notification-service
+      - key: PORT
+        value: 8087
+      - fromGroup: printforge-db
+      - fromGroup: printforge-mail
+
+  # ------------------------------------------------------------------ admin
+  - type: web
+    name: printforge-admin
+    runtime: docker
+    plan: free
+    region: virginia
+    rootDir: backend
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: MODULE_NAME
+        value: admin-service
+      - key: PORT
+        value: 8088
+      - fromGroup: printforge-db
+      - fromGroup: printforge-jwt
+      - fromGroup: printforge-mail
+
+# RabbitMQ is deliberately absent: Render has no managed broker, and the
+# services already treat it as optional (RabbitMQConfig / UserEventListener are
+# @ConditionalOnProperty on spring.rabbitmq.host, and application.properties
+# excludes RabbitAutoConfiguration unless RABBITMQ_EXCLUDE is overridden). To
+# turn messaging back on, point SPRING_RABBITMQ_HOST at a CloudAMQP instance
+# and set RABBITMQ_EXCLUDE to an empty value on the affected services.
+
+envVarGroups:
+  # Every service shares one Postgres, same as docker-compose.yml.
+  - name: printforge-db
+    envVars:
+      - key: DB_URL
+        sync: false
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+
+  # Must be byte-identical across gateway, auth and admin — they sign and
+  # verify the same tokens.
+  - name: printforge-jwt
+    envVars:
+      - key: JWT_SECRET
+        sync: false
+
+  - name: printforge-cloudinary
+    envVars:
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+
+  - name: printforge-mail
+    envVars:
+      - key: MAIL_HOST
+        value: smtp.gmail.com
+      - key: MAIL_PORT
+        value: 587
+      - key: MAIL_USERNAME
+        sync: false
+      - key: MAIL_PASSWORD
+        sync: false
+      - key: MAIL_FROM
+        sync: false
+      - key: MAIL_FROM_NAME
+        value: PrintForge
+      - key: ADMIN_NAME
+        value: System Admin
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
