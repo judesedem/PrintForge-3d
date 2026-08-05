@@ -1,13 +1,12 @@
 package com.printforge.auth.service;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.UUID;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -57,8 +56,6 @@ public class AuthService {
     @Nullable
     private org.springframework.amqp.rabbit.core.RabbitTemplate rabbitTemplate;
 
-    @Value("${app.frontend.reset-password-url}")
-    private String frontendResetPasswordUrl;
 
     public AuthResponse register(RegisterRequest request) {
 
@@ -297,7 +294,7 @@ public class AuthService {
         previousTokens.forEach(t -> t.setUsed(true));
         passwordResetTokenRepository.saveAll(previousTokens);
 
-        String token = UUID.randomUUID().toString().replace("-", "");
+        String token = generateResetCode();
         PasswordResetToken resetToken = new PasswordResetToken();
         resetToken.setUserId(user.getUserId());
         resetToken.setToken(token);
@@ -307,7 +304,7 @@ public class AuthService {
 
         Map<String, String> templateVars = new LinkedHashMap<>();
         templateVars.put("fullName", user.getFullName());
-        templateVars.put("resetLink", frontendResetPasswordUrl + "?token=" + token);
+        templateVars.put("code", token);
         templateVars.put("expiryMinutes", String.valueOf(RESET_TOKEN_EXPIRY_MINUTES));
 
         // Best-effort — same pattern as FileStorageService.deleteImage():
@@ -325,13 +322,47 @@ public class AuthService {
     }
 
     /**
+     * The alphabet and length here are a security decision, not cosmetics.
+     *
+     * A 6-DIGIT code would be 10^6 combinations, and resetPassword() looks
+     * codes up globally via findByToken() — so a guesser wouldn't need to
+     * target anyone in particular, they'd match whichever user happens to
+     * hold that code right now. At a million combinations that gets cheap.
+     *
+     * 6 characters over these 31 symbols is ~8.9x10^8 — roughly 900x
+     * larger, while still being short enough to read off a phone and type.
+     * That keeps the existing global lookup and the existing 10-attempts-
+     * per-15-minutes rate limit (see RateLimitFilter) sufficient, with no
+     * per-code attempt counter or schema change needed.
+     *
+     * I, L, O, U and 0/1 are omitted: they're the characters people
+     * misread in a one-time code, and U keeps accidental words out.
+     */
+    private static final String RESET_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTVWXYZ23456789";
+    private static final int RESET_CODE_LENGTH = 6;
+    private static final SecureRandom RESET_CODE_RANDOM = new SecureRandom();
+
+    private static String generateResetCode() {
+        StringBuilder code = new StringBuilder(RESET_CODE_LENGTH);
+        for (int i = 0; i < RESET_CODE_LENGTH; i++) {
+            code.append(RESET_CODE_ALPHABET.charAt(
+                    RESET_CODE_RANDOM.nextInt(RESET_CODE_ALPHABET.length())));
+        }
+        return code.toString();
+    }
+
+    /**
      * POST /api/auth/reset-password. Rejects with
      * InvalidPasswordResetTokenException (400) if the token is unknown,
      * already used, or expired — same generic message for all three, so
      * the response never tells a caller which case applied.
      */
     public void resetPassword(String token, String newPassword) {
-        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(token)
+        // Codes are generated uppercase and read off an email by hand, so
+        // accept whatever casing and stray spacing the user types.
+        String normalized = token == null ? "" : token.trim().toUpperCase();
+
+        PasswordResetToken resetToken = passwordResetTokenRepository.findByToken(normalized)
                 .filter(t -> !t.isUsed())
                 .filter(t -> t.getExpiresAt().isAfter(LocalDateTime.now()))
                 .orElseThrow(() -> new InvalidPasswordResetTokenException("Invalid or expired reset link"));

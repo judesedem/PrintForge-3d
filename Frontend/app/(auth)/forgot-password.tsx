@@ -47,8 +47,13 @@ export default function ForgotPasswordScreen() {
     setSubmitting(true);
     try {
       await forgotPassword(email.trim());
-      showToast("Reset link sent if account exists.");
-      setTimeout(() => router.back(), 2000);
+      showToast("Reset code sent if account exists.");
+      // Straight to the code screen rather than back to login — the user
+      // has to type the emailed code somewhere, and this endpoint returns
+      // the same 200 whether or not the account exists (deliberately, to
+      // avoid leaking which emails are registered), so there's nothing to
+      // branch on here.
+      setTimeout(() => router.push("/(auth)/reset-password"), 1200);
     } catch (err) {
       setError(
         err instanceof ApiError
