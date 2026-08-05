@@ -18,6 +18,13 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "Frontend", "run", "start", "--", "-c"],
       "port": 8081
+    },
+    {
+      "name": "frontend-web-clean",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "Frontend", "run", "web", "--", "-c", "--port", "8090"],
+      "port": 8090,
+      "autoPort": false
     }
   ]
 }
