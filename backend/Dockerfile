@@ -48,11 +48,8 @@ ENV MODULE_NAME=${MODULE_NAME}
 # Copy the built jar from the builder stage
 COPY --from=builder /app/${MODULE_NAME}/target/*.jar app.jar
 
-EXPOSE ${PORT:-8080}
+# Expose port (Render assigns PORT dynamically)
+EXPOSE 8080
 
-# No -Dserver.port here on purpose. This is the exec form, so nothing expands
-# ${PORT} — the old "-Dserver.port=${PORT}" only worked because Spring happened
-# to resolve the literal string as a placeholder, and it blew up when PORT was
-# unset. Every service's application.properties now reads server.port=${PORT:<default>}
-# directly, which is the same mechanism with one less layer and a real fallback.
-CMD ["java", "-Xmx400m", "-Xss512k", "-XX:+UseContainerSupport", "-jar", "app.jar"]
+# Use shell form so ${PORT} is expanded at runtime by the shell
+CMD java -Xmx400m -Xss512k -XX:+UseContainerSupport -Dserver.port=${PORT:-8080} -jar app.jar
