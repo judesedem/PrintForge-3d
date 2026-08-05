@@ -32,6 +32,18 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Toast + ApiError(0) for the case where fetch() never produced a
+ * response at all. Status 0 is the app's convention for "no HTTP
+ * exchange happened", distinguishing it from any real 4xx/5xx.
+ */
+function networkFailure(): ApiError {
+  const message =
+    'Could not reach the server. It may be waking up — check your connection and try again.';
+  emitToast(message);
+  return new ApiError(0, message);
+}
+
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   body?: unknown;
@@ -56,23 +68,48 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  let response: Response;
-  try {
-    response = await fetch(`${BASE_URL}${path}`, {
+  const doFetch = () =>
+    fetch(`${BASE_URL}${path}`, {
       method,
       headers,
       body: body ? (isFormData ? (body as FormData) : JSON.stringify(body)) : undefined,
     });
+
+  // Retrying is safe only for GET. The backend is on Render's free tier,
+  // where two things routinely produce a failure that a second attempt
+  // would sail through: a service spun down after 15 minutes idle takes
+  // ~a minute to wake (fetch can time out first), and every push
+  // redeploys all eight services, briefly leaving a route with no live
+  // instance (Render answers 502 + `x-render-routing: no-deploy`).
+  //
+  // Non-GET requests are deliberately NOT retried: when fetch() throws we
+  // cannot know whether the server processed the request, and replaying a
+  // POST /api/auth/register that actually succeeded would surface a
+  // spurious "email already exists" over a completed signup.
+  const retryable = method === 'GET';
+
+  let response: Response;
+  try {
+    response = await doFetch();
+    if (retryable && (response.status === 502 || response.status === 503 || response.status === 504)) {
+      await new Promise((r) => setTimeout(r, 1500));
+      response = await doFetch();
+    }
   } catch (networkError) {
-    // fetch() throws on DNS failure, no connection, etc. — before we
-    // ever get a status code. Surface this distinctly from a 4xx/5xx.
-    // Toasted here (this is the one universal choke point for every API
-    // call in the app) in addition to whatever inline error the calling
-    // screen shows — "no connection" is worth surfacing immediately
-    // rather than relying on the user to spot an inline message.
-    const message = 'Could not reach the server. Check your connection and API URL.';
-    emitToast(message);
-    throw new ApiError(0, message);
+    if (retryable) {
+      try {
+        response = await doFetch();
+      } catch {
+        throw networkFailure();
+      }
+    } else {
+      // fetch() throws on DNS failure, no connection, timeout, etc. —
+      // before we ever get a status code. Surface this distinctly from a
+      // 4xx/5xx. Toasted here (this is the one universal choke point for
+      // every API call in the app) in addition to whatever inline error
+      // the calling screen shows.
+      throw networkFailure();
+    }
   }
 
   // 204 No Content (e.g. DELETE endpoints) — nothing to parse.
@@ -81,7 +118,22 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   }
 
   const text = await response.text();
-  const data = text ? JSON.parse(text) : undefined;
+
+  // Not every response is JSON, even though every *application* response
+  // is. Render's proxy answers with an HTML error page when a service is
+  // down or mid-redeploy, and JSON.parse() on that threw a raw
+  // "JSON Parse error: Unexpected character: <" straight into the UI —
+  // which tells the user nothing and hides the actual status code.
+  let data: unknown;
+  try {
+    data = text ? JSON.parse(text) : undefined;
+  } catch {
+    const message = response.status >= 500
+      ? 'The server is unavailable right now. It may be restarting — try again in a moment.'
+      : `Unexpected response from the server (${response.status}).`;
+    emitToast(message);
+    throw new ApiError(response.status, message);
+  }
 
   if (!response.ok) {
     const errorBody = data as ErrorResponse | undefined;
