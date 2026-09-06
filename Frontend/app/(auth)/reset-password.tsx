@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
 import {
   ActivityIndicator,
   ImageBackground,
@@ -9,7 +9,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { ArrowLeft, Lock, TriangleAlert } from "lucide-react-native";
+import { ArrowLeft, KeyRound, Lock, TriangleAlert } from "lucide-react-native";
 import { useState } from "react";
 import { useToast } from "../../src/ToastContext";
 import { ApiError, apiFetch } from "../../src/api/client";
@@ -27,17 +27,23 @@ const ORANGE = "#FF6A00";
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
-  const { token } = useLocalSearchParams<{ token?: string }>();
   const { showToast } = useToast();
-  
+
+  // The code is typed in by hand from the reset email, not carried in a
+  // deep link. A `printforge://` link can't open the app under Expo Go
+  // (custom schemes need a dev or production build), so a link-based flow
+  // is untestable for anyone running the project the usual way.
+  const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  const trimmedCode = code.trim();
+
   const handleSubmit = async () => {
-    if (!token) {
-      setError("Invalid or missing reset token.");
+    if (trimmedCode.length !== 6) {
+      setError("Enter the 6-character code from your email.");
       return;
     }
     if (password.length < 6) {
@@ -55,7 +61,7 @@ export default function ResetPasswordScreen() {
     try {
       await apiFetch("/api/auth/reset-password", {
         method: "POST",
-        body: { token, newPassword: password },
+        body: { token: trimmedCode.toUpperCase(), newPassword: password },
       });
       showToast("Password reset successfully. You can now log in.");
       setTimeout(() => router.replace("/(auth)/login"), 2000);
@@ -92,7 +98,8 @@ export default function ResetPasswordScreen() {
               <View style={s.card}>
                 <Text style={s.heading}>Set New Password</Text>
                 <Text style={s.subtitle}>
-                  Choose a new password for your account.
+                  Enter the 6-character code we emailed you, then choose a new
+                  password.
                 </Text>
 
                 {error ? (
@@ -101,6 +108,21 @@ export default function ResetPasswordScreen() {
                     <Text style={s.errorText}>{error}</Text>
                   </View>
                 ) : null}
+
+                <View style={s.inputShell}>
+                  <KeyRound size={18} color={CARD_MUTED} strokeWidth={1.9} />
+                  <TextInput
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                    maxLength={6}
+                    placeholder="6-character code"
+                    placeholderTextColor={CARD_MUTED}
+                    style={[s.input, s.codeInput]}
+                    value={code}
+                    onChangeText={setCode}
+                    editable={!submitting}
+                  />
+                </View>
 
                 <View style={s.inputShell}>
                   <Lock size={18} color={CARD_MUTED} strokeWidth={1.9} />
@@ -133,9 +155,12 @@ export default function ResetPasswordScreen() {
 
                 <Pressable
                   accessibilityRole="button"
-                  disabled={submitting || !token}
+                  disabled={submitting || trimmedCode.length !== 6}
                   onPress={handleSubmit}
-                  style={[s.primaryButton, (submitting || !token) && s.disabled]}
+                  style={[
+                    s.primaryButton,
+                    (submitting || trimmedCode.length !== 6) && s.disabled,
+                  ]}
                 >
                   {submitting ? (
                     <ActivityIndicator color="#FFFFFF" />
@@ -239,6 +264,13 @@ const s = StyleSheet.create({
     fontFamily: designTokens.type.body,
     fontSize: 15,
     paddingVertical: 0,
+  },
+  // Wide tracking and a larger size so the six characters are easy to
+  // check against the email while typing.
+  codeInput: {
+    fontSize: 20,
+    letterSpacing: 6,
+    fontWeight: "600",
   },
   primaryButton: {
     minHeight: 52,
