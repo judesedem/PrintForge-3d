@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "PrintForge RN",
-    "slug": "printforge-rn",
+    "slug": "printforge3d",
     "version": "1.0.0",
     "scheme": "printforge",
     "platforms": [
@@ -10,11 +10,7 @@
     ],
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#FF5803"
-    },
+  
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -35,16 +31,23 @@
       "expo-font",
       "expo-web-browser",
       "expo-secure-store",
-      "expo-splash-screen",
+      [
+  "expo-splash-screen",
+  {
+    "image": "./assets/splash.png",
+    "resizeMode": "contain",
+    "backgroundColor": "#FF5803"
+  }
+],
       "expo-notifications"
     ],
     "userInterfaceStyle": "automatic",
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "fc6eb6cd-4974-4293-9b44-889bc2459f0c"
+        "projectId": "84f54efd-ae96-494c-a3bb-156656048f36"
       }
     },
-    "owner": "judesedem"
+    "owner": "printforge-3d-team"
   }
 }
